@@ -90,6 +90,14 @@ export class Client {
     this.csrf = made.csrf
   }
 
+  /**
+   * Logs in for a token, as an app does that is not served by the server
+   * itself. The answer's token goes into a new client.
+   */
+  loginForToken(user: string, password: string, device: string): Promise<{ user: string; token: string; id: number }> {
+    return this.call('POST', '/api/v1/login', { user, password, token: device })
+  }
+
   async logout(): Promise<void> {
     await this.call('POST', '/api/v1/logout', {})
     this.csrf = null

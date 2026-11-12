@@ -41,6 +41,8 @@ export interface Deps {
   config?: Map<string, ConfigAdmin>
   /** Sites reached through their own nuthatch. */
   remotes?: RemoteSite[]
+  /** The origins of apps served elsewhere (the phone app) that may call the API, with a token. */
+  appOrigins?: string[]
   /** Other nuthatches that may ask here for their users. */
   peers?: Peer[]
 }
@@ -165,11 +167,35 @@ export function buildApp(deps: Deps): Hono<Env> {
     return parsed as Record<string, unknown>
   }
 
+  // An app served from elsewhere, such as the phone app, may call the API
+  // when its origin is listed. It gets no cookie: it logs in for a token.
+  app.use('/api/*', async (c, next) => {
+    const origin = c.req.header('origin')
+    const allowed = origin !== undefined && (deps.appOrigins ?? []).includes(origin)
+    if (allowed) {
+      c.header('Access-Control-Allow-Origin', origin)
+      c.header('Vary', 'Origin')
+    }
+    if (c.req.method === 'OPTIONS') {
+      if (!allowed) return c.body(null, 403)
+      c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type')
+      c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE')
+      c.header('Access-Control-Max-Age', '600')
+      return c.body(null, 204)
+    }
+    return next()
+  })
+
   // Before anyone is known.
   app.post('/api/v1/login', async (c) => {
     if (!deps.htpasswd) return c.json({ error: 'nobody logs in here: dev_user is set' }, 400)
-    const { user, password } = await body(c)
-    const address = getConnInfo(c).remote.address ?? 'unknown'
+    const { user, password, token: device } = await body(c)
+    let address = 'unknown'
+    try {
+      address = getConnInfo(c).remote.address ?? 'unknown'
+    } catch {
+      // Not asked over a socket (a test).
+    }
     const keys = [`user:${String(user)}`, `addr:${address}`]
     if (deps.limiter.blocked(keys)) return c.json({ error: 'too many failed logins; wait five minutes' }, 429)
     if (!userName(user) || typeof password !== 'string' || !(await deps.htpasswd.check(user, password))) {
@@ -178,6 +204,14 @@ export function buildApp(deps: Deps): Hono<Env> {
       return c.json({ error: 'wrong user or password' }, 401)
     }
     deps.limiter.succeeded(keys[0] ?? '')
+    if (typeof device === 'string') {
+      // For an app: a token of its own in place of a session's cookie.
+      // eslint-disable-next-line no-control-regex
+      const name = device.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 64) || 'app'
+      const made = deps.store.newToken(user, name)
+      deps.store.audit(user, '', 'login for a token', `${name} from ${address}`)
+      return c.json({ user, token: made.token, id: made.id })
+    }
     const { cookie, session } = deps.store.newSession(user)
     deps.store.audit(user, '', 'login', address)
     c.header('Set-Cookie', `${COOKIE}=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${deps.cookieSecure ? '; Secure' : ''}`)

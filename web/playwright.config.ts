@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 // The browser tests run against a real nuthatch (dev/test-server) and
 // the engines of `dev/up naemon` and `dev/up checkd`, which must be
-// running. Build the interface first: pnpm build.
+// running. Build the interface first: pnpm build && pnpm build:app.
 process.env.NUTHATCH_TEST_PASSWORD ??= randomBytes(9).toString('hex')
 
 export default defineConfig({
@@ -15,10 +15,9 @@ export default defineConfig({
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'phone', use: { ...devices['Desktop Chrome'], viewport: { width: 375, height: 700 } } },
   ],
-  webServer: {
-    command: '../dev/test-server',
-    url: 'http://127.0.0.1:8092/',
-    reuseExistingServer: false,
-    timeout: 120000,
-  },
+  webServer: [
+    { command: '../dev/test-server', url: 'http://127.0.0.1:8092/', reuseExistingServer: false, timeout: 120000 },
+    // The app build, from an origin of its own (pnpm build:app first).
+    { command: 'node e2e/serve-app.ts', url: 'http://127.0.0.1:8097/', reuseExistingServer: false, timeout: 30000 },
+  ],
 })

@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "test": "vitest run --passWithNoTests",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "build:app": "vue-tsc --noEmit && vite build --mode app --outDir dist-app --base ./"
   },
   "dependencies": {
     "@nuthatch/api": "workspace:*",

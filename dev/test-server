@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # A nuthatch for the browser tests: port 8092, a store and users of its
 # own (password from $NUTHATCH_TEST_PASSWORD), the built interface, and
-# the engines of dev/up. Started by web/playwright.config.ts.
+# the engines of dev/up. The app build, served at port 8097, may call it.
+# Started by web/playwright.config.ts.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(dirname "$here")
@@ -11,7 +12,7 @@ mkdir -p "$work"
 for user in admin ops viewer nobody stranger; do
     echo "$user:$(openssl passwd -apr1 "$NUTHATCH_TEST_PASSWORD")" >> "$work/htpasswd"
 done
-sed -e 's/127.0.0.1:8080/127.0.0.1:8092/' -e 's#dev/run/nuthatch.sqlite#dev/run/e2e/store.sqlite#' \
+sed -e 's/^listen = "127.0.0.1:8080"/listen = "127.0.0.1:8092"\napp_origins = ["http:\/\/127.0.0.1:8097"]/' -e 's#dev/run/nuthatch.sqlite#dev/run/e2e/store.sqlite#' \
     -e 's#dev/run/htpasswd#dev/run/e2e/htpasswd#' "$here/nuthatch.toml" > "$work/nuthatch.toml"
 cd "$root"
 exec node --disable-warning=ExperimentalWarning server/src/main.ts dev/run/e2e/nuthatch.toml

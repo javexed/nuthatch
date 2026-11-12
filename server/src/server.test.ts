@@ -474,3 +474,44 @@ describe('one nuthatch over the nuthatch of a site', () => {
     expect((await wrong.site.request('/api/v1/session', { headers: { Authorization: `Peer ${KEY}`, 'X-Nuthatch-User': 'a%0Ab' } })).status).toBe(401)
   })
 })
+
+describe('an app served from elsewhere', () => {
+  it('may call with a token when its origin is listed, and logs in for one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nuthatch-app-'))
+    writeFileSync(join(dir, 'htpasswd'), `ann:${bcrypt.hashSync('s3cret', 4)}\n`)
+    const store = new Store(':memory:')
+    const app = buildApp({
+      backends: [],
+      store,
+      events: new Events([]),
+      roles: new RolesConfig(),
+      limiter: new Limiter(),
+      htpasswd: new Htpasswd(join(dir, 'htpasswd')),
+      cookieSecure: false,
+      appOrigins: ['capacitor://localhost'],
+    })
+    const preflight = (origin: string) => app.request('/api/v1/query', { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' } })
+    expect((await preflight('capacitor://localhost')).headers.get('Access-Control-Allow-Origin')).toBe('capacitor://localhost')
+    expect((await preflight('capacitor://localhost')).headers.get('Access-Control-Allow-Headers')).toContain('Authorization')
+    expect((await preflight('https://elsewhere.example.test')).status).toBe(403)
+
+    const login = await app.request('/api/v1/login', {
+      method: 'POST',
+      headers: { Origin: 'capacitor://localhost', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: 'ann', password: 's3cret', token: 'my phone' }),
+    })
+    expect(login.headers.get('Set-Cookie')).toBeNull()
+    expect(login.headers.get('Access-Control-Allow-Origin')).toBe('capacitor://localhost')
+    const { token, id } = (await login.json()) as { token: string; id: number }
+    expect(store.tokens('ann')).toMatchObject([{ id, name: 'my phone' }])
+    const session = await app.request('/api/v1/session', { headers: { Authorization: `Bearer ${token}`, Origin: 'capacitor://localhost' } })
+    expect(session.status).toBe(200)
+    // Logging out of the app deletes its token.
+    expect((await app.request(`/api/v1/tokens/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })).status).toBe(200)
+    expect((await app.request('/api/v1/session', { headers: { Authorization: `Bearer ${token}` } })).status).toBe(401)
+    // An origin that is not listed gets an answer its browser will not hand to the page.
+    const other = await app.request('/api/v1/session', { headers: { Origin: 'https://elsewhere.example.test' } })
+    expect(other.headers.get('Access-Control-Allow-Origin')).toBeNull()
+    rmSync(dir, { recursive: true })
+  })
+})

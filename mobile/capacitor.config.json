@@ -1,0 +1,5 @@
+{
+  "appId": "org.example.nuthatch",
+  "appName": "nuthatch",
+  "webDir": "../web/dist-app"
+}

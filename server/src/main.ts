@@ -23,7 +23,7 @@ import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'roles', 'backend', 'peer']
+const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'roles', 'backend', 'peer', 'app_origins']
 
 function fail(message: string): never {
   console.error(message)
@@ -146,6 +146,10 @@ function main(): void {
   } catch (err) {
     fail(`${path}: ${err instanceof Error ? err.message : String(err)}`)
   }
+  const appOrigins = config.app_origins ?? []
+  if (!Array.isArray(appOrigins) || appOrigins.some((o) => typeof o !== 'string' || !/^[a-z]+:\/\/[^/]+$/.test(o))) {
+    fail(`${path}: app_origins is a list of origins, such as "capacitor://localhost"`)
+  }
   const storePath = text(config, 'store') ?? fail(`${path}: give store, the file nuthatch keeps sessions and its audit log in`)
   const webRoot = text(config, 'web_root')
 
@@ -162,6 +166,7 @@ function main(): void {
     config: admins,
     remotes,
     peers,
+    appOrigins: appOrigins as string[],
   })
   const server = serve({ fetch: app.fetch, hostname, port }, () => {
     console.error(`nuthatch ${VERSION} listening at http://${listen}`)

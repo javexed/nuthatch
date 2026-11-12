@@ -1,8 +1,9 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import { useSession } from './stores/session'
+import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
+import { APP, useSession } from './stores/session'
 
 export const router = createRouter({
-  history: createWebHistory(),
+  // The app is opened from its files, where only the part after # is its own.
+  history: APP ? createWebHashHistory() : createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('./views/Login.vue'), meta: { open: true } },
     { path: '/', name: 'overview', component: () => import('./views/Overview.vue') },

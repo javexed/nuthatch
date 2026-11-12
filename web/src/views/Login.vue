@@ -2,11 +2,12 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '@nuthatch/api'
-import { useSession } from '../stores/session'
+import { APP, lastServer, useSession } from '../stores/session'
 
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
+const server = ref(lastServer())
 const user = ref('')
 const password = ref('')
 const error = ref('')
@@ -16,11 +17,11 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    await session.login(user.value, password.value)
+    await session.login(user.value, password.value, server.value)
     const to = typeof route.query.to === 'string' && route.query.to.startsWith('/') ? route.query.to : '/'
     await router.push(to)
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    error.value = err instanceof ApiError ? err.message : APP ? 'The server cannot be reached, or does not let this app in.' : 'The server cannot be reached.'
     password.value = ''
   } finally {
     busy.value = false
@@ -31,6 +32,10 @@ async function submit() {
 <template>
   <form class="login card" @submit.prevent="submit">
     <h1>nuthatch</h1>
+    <label v-if="APP">
+      Server
+      <input v-model="server" name="server" inputmode="url" autocapitalize="none" autocomplete="url" placeholder="monitoring.example.org" required />
+    </label>
     <label>
       User
       <input v-model="user" name="username" autocomplete="username" autocapitalize="none" required autofocus />
