@@ -2,6 +2,8 @@
 # `dev/up naemon` and `dev/up checkd`, make the users with `dev/users`,
 # then, from the repo's top: pnpm start dev/nuthatch.toml
 listen = "127.0.0.1:8080"
+# The phone app, on Android and on iOS.
+app_origins = ["https://localhost", "capacitor://localhost"]
 web_root = "web/dist"
 store = "dev/run/nuthatch.sqlite"
 htpasswd = "dev/run/htpasswd"

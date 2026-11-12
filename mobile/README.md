@@ -9,8 +9,10 @@ and keeps the server's address and the token on the device.
 the debug app, starts an Android 15 emulator without a window, installs
 the app, and drives its web view: the app logs in at a nuthatch server
 for a token, shows the overview, acknowledges a problem (the engine is
-asked whether it has it), and logs out, which deletes the token. It has
-not been on a real phone, and there is no release build.
+asked whether it has it), and logs out, which deletes the token. The
+debug app was also installed on one real phone (Android 17) over USB,
+where it logged in and showed the overview. A release build compiles,
+unsigned, and has not been run.
 
 **iOS: no project.** Making and building one needs a Mac.
 
