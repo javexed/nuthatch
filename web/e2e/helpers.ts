@@ -43,3 +43,22 @@ export async function listed(page: Page, table = page.locator('table.rows').firs
     }),
   )
 }
+
+/** Sends an engine an external command directly. */
+export function send(engine: string, command: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ path: join(run, engine, 'live') })
+    socket.on('connect', () => socket.end(`COMMAND [${Math.floor(Date.now() / 1000)}] ${command}\n\n`))
+    socket.on('error', reject)
+    socket.on('close', () => resolve())
+  })
+}
+
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+export const seconds = () => Math.floor(Date.now() / 1000)
+
+/** Waits for the start of a second, so that what follows falls early in one. */
+export async function nextSecond(): Promise<number> {
+  await sleep(1000 - (Date.now() % 1000) + 20)
+  return seconds()
+}

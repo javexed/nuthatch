@@ -11,6 +11,8 @@ export const router = createRouter({
     { path: '/services', name: 'services', component: () => import('./views/Services.vue') },
     { path: '/hostgroups', name: 'hostgroups', component: () => import('./views/Groups.vue'), props: { kind: 'host' } },
     { path: '/servicegroups', name: 'servicegroups', component: () => import('./views/Groups.vue'), props: { kind: 'service' } },
+    { path: '/history', name: 'history', component: () => import('./views/History.vue') },
+    { path: '/availability', name: 'availability', component: () => import('./views/Availability.vue') },
     { path: '/host/:backend/:host', name: 'host', component: () => import('./views/Detail.vue'), props: true },
     { path: '/service/:backend/:host/:service', name: 'service', component: () => import('./views/Detail.vue'), props: true },
     { path: '/:rest(.*)*', redirect: '/' },

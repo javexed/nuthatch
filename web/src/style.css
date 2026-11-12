@@ -175,3 +175,29 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .failed { margin: 0; padding-left: 1.1rem; color: var(--critical); }
 .facts .badge { margin-left: 0.4rem; }
+
+/* History and availability. */
+.range { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; }
+.range .custom { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; }
+.span { color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; align-items: baseline; }
+.events { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 0.6rem; }
+.card .events { border: 0; }
+.events li { display: grid; grid-template-columns: 10.5rem 1fr; gap: 0.1rem 0.8rem; padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--line); }
+.card .events li { padding-left: 0; padding-right: 0; }
+.events li:last-child { border-bottom: 0; }
+.events time { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.events .what { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; }
+.events .what a { font-weight: 600; text-decoration: none; }
+.events .text { grid-column: 2; font-size: 0.9rem; overflow-wrap: anywhere; color: var(--muted); }
+.events .text:empty { display: none; }
+@media (max-width: 40rem) {
+  .events li { grid-template-columns: 1fr; }
+  .events .text { grid-column: 1; }
+}
+.more { margin-bottom: 0; color: var(--muted); }
+.bar-of { display: flex; height: 0.7rem; min-width: 6rem; border-radius: 0.35rem; overflow: hidden; background: var(--line); }
+.bar-of span { display: block; height: 100%; }
+.bar-of .ok { background: var(--ok); }
+.bar-of .warning { background: var(--warning); }
+.bar-of .critical { background: var(--critical); }
+.bar-of .unknown { background: var(--unknown); }

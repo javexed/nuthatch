@@ -160,7 +160,7 @@ def tests():
     check("a command nuthatch does not send is refused", admin.command("naemon", "SHUTDOWN_PROGRAM"), 400)
     check("a secret column needs a role: ops", clients["ops"].rows("naemon", "hosts", ["name", "check_command"]), 400)
     check("a filter on a secret column needs a role: ops", clients["ops"].rows("naemon", "hosts", ["name"], ["Filter: check_command ~ demo"]), 400)
-    check("a secret column: admin", admin.rows("naemon", "hosts", ["name", "check_command"]), 10)
+    check("a secret column: admin", admin.rows("naemon", "hosts", ["name", "check_command"]), 11)
 
     # A token stands for its user, and needs no CSRF header.
     status, made = clients["ops"].call("POST", "/api/v1/tokens", {"name": "matrix"})
@@ -197,7 +197,7 @@ def tests():
 
         # user -> rows of each table. A number is a count of rows, 403 a
         # refusal for want of a role.
-        full = {"hosts": 10, "services": 34, "hostgroups": 6, "hostsbygroup": 10, "comments": "some", "log": "some", "columns": "some"}
+        full = {"hosts": 11, "services": 36, "hostgroups": 7, "hostsbygroup": 11, "comments": "some", "log": "some", "columns": "some"}
         want = {
             "admin": {**full, "contacts": 4, "contactgroups": 1, "commands": 2, "timeperiods": 1, "status": 1},
             "viewer": {**full, "contacts": 403, "contactgroups": 403, "commands": 403, "timeperiods": 403, "status": 403},

@@ -5,6 +5,7 @@ import type { Command } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, ref } from 'vue'
 import CommandDialog, { type Action } from '../components/CommandDialog.vue'
+import EventLog from '../components/EventLog.vue'
 import StateBadge from '../components/StateBadge.vue'
 import StatusList from '../components/StatusList.vue'
 import { type Target, deleteComment, deleteDowntime, recheck, removeAcknowledgement, setChecks, setNotifications } from '../lib/commands'
@@ -67,6 +68,10 @@ const perf = computed(() => parsePerfdata(String(object.value?.perf_data ?? ''))
 const problem = computed(() => object.value !== undefined && Number(object.value.state) !== 0 && object.value.has_been_checked !== 0)
 const list = (value: unknown) => (Array.isArray(value) ? value.join(', ') : '')
 const KINDS: Record<number, string> = { 1: 'Comment', 2: 'Downtime', 3: 'Flapping', 4: 'Acknowledgement' }
+
+// The last day's alerts, and whatever comes while the page is open.
+const dayAgo = Date.now() / 1000 - 86400
+const farAhead = Date.now() / 1000 + 365 * 86400
 
 const dialog = ref<Action | null>(null)
 const notice = ref('')
@@ -200,6 +205,16 @@ async function send(command: Command, done: string) {
           <button v-if="canCommand" type="button" class="plain" @click="send(deleteComment(backend, Number(c.id), kind === 'service'), 'Comment deleted.')">Delete</button>
         </li>
       </ul>
+    </section>
+
+    <section class="card">
+      <h2>History</h2>
+      <EventLog :from="dayAgo" :to="farAhead" lines="alerts" :backend="backend" :host="host" :service="service ?? ''" :page-size="10" />
+      <p class="more">
+        <RouterLink :to="{ name: 'history', query: { backend, host, ...(service === undefined ? {} : { service }), range: '7d' } }">More history</RouterLink>
+        ·
+        <RouterLink :to="{ name: 'availability', query: { backend, host, ...(service === undefined ? {} : { of: 'services' }), range: '7d' } }">Availability</RouterLink>
+      </p>
     </section>
 
     <section v-if="kind === 'host'">

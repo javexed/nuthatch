@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { availabilityRequest, percent, showPercent, toCsv } from './availability.ts'
 import { acknowledge, downtime, recheck } from './commands.ts'
 import { EMPTY, fromQuery, literal, toHeaders, toQuery } from './filters.ts'
 import { ago, duration, fromInput, toInput } from './format.ts'
@@ -92,5 +93,33 @@ describe('commands', () => {
     expect(both.map((c) => c.command)).toEqual(['SCHEDULE_HOST_DOWNTIME', 'SCHEDULE_HOST_SVC_DOWNTIME'])
     expect(both[0]?.args).toEqual(['web1', 10, 20, 1, 0, 0, '-', 'work'])
     expect(downtime(service, { comment: 'w', start: 10, end: 20, fixed: false, duration: 300 })[0]?.args).toEqual(['web1', 'http', 10, 20, 0, 0, 300, '-', 'w'])
+  })
+})
+
+describe('availability', () => {
+  const row = { backend: 'a', host: 'web1', service: 'http', seconds: [900, 60, 40, 0] as [number, number, number, number], unmonitored: 500 }
+
+  it('is a share of the monitored time', () => {
+    expect(percent(row, 0)).toBe(90)
+    expect(percent(row, 2)).toBe(4)
+    expect(percent({ ...row, seconds: [0, 0, 0, 0] }, 0)).toBeNull()
+    expect(showPercent(99.9999)).toBe('99.999%')
+    expect(showPercent(100)).toBe('100.000%')
+    expect(showPercent(null)).toBe('n/a')
+  })
+
+  it('asks the state history, hosts apart from services', () => {
+    const hosts = availabilityRequest('host', { from: 100.7, to: 200 }, { search: 'web.1\nx' })
+    expect(hosts.headers.slice(0, 4)).toEqual(['Filter: time >= 100', 'Filter: time < 200', 'Filter: service_description = ', 'Filter: host_name ~~ web\\.1 x'])
+    expect(hosts.headers.filter((h) => h.startsWith('Stats:'))).toHaveLength(5)
+    expect(availabilityRequest('service', { from: 1, to: 2 }, { host: 'web1' }).headers).toContain('Filter: host_name = web1')
+  })
+
+  it('goes into a CSV file that a spreadsheet reads as text', () => {
+    const csv = toCsv('service', { from: 100, to: 1100 }, [{ ...row, service: '=cmd,"x"' }])
+    const [head, line] = csv.split('\r\n')
+    expect(head).toBe('backend,host,service,from,to,ok_seconds,ok_percent,warning_seconds,warning_percent,critical_seconds,critical_percent,unknown_seconds,unknown_percent,unmonitored_seconds')
+    expect(line).toBe('a,web1,"\'=cmd,""x""",100,1100,900,90.000,60,6.000,40,4.000,0,0.000,500')
+    expect(toCsv('host', { from: 1, to: 2 }, []).trim().split(',')).toContain('unreachable_percent')
   })
 })

@@ -26,6 +26,8 @@ const PAGES = [
   { name: 'hosts', label: 'Hosts' },
   { name: 'services', label: 'Services' },
   { name: 'hostgroups', label: 'Groups' },
+  { name: 'history', label: 'History' },
+  { name: 'availability', label: 'Availability' },
 ]
 </script>
 

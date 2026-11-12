@@ -48,7 +48,7 @@ test("ops' lists are what the engines give ops, and no more", async ({ page }) =
 test('the service list filters, sorts over both engines, and pages', async ({ page }) => {
   await login(page, 'admin')
   await page.getByRole('link', { name: 'Services', exact: true }).click()
-  await expect(page.getByText('1–50 of 68')).toBeVisible()
+  await expect(page.getByText('1–50 of 72')).toBeVisible()
 
   // Sorted by host, then service, then engine: the same on every page.
   const all: string[] = []
@@ -61,7 +61,7 @@ test('the service list filters, sorts over both engines, and pages', async ({ pa
   })
   await expect.poll(() => listed(page)).toEqual(all.slice(0, 50))
   await page.getByRole('button', { name: 'Next' }).click()
-  await expect(page.getByText('51–68 of 68')).toBeVisible()
+  await expect(page.getByText('51–72 of 72')).toBeVisible()
   await expect.poll(() => listed(page)).toEqual(all.slice(50))
   await expect(page).toHaveURL(/offset=50/)
   await fits(page)
@@ -97,7 +97,7 @@ test('problems lists what is wrong, and groups lead to their members', async ({ 
   await fits(page)
 
   await page.getByRole('link', { name: 'Groups' }).click()
-  await expect(page.locator('.groups > li')).toHaveCount(12)
+  await expect(page.locator('.groups > li')).toHaveCount(14)
   await fits(page)
   await page.locator('.groups > li', { hasText: 'naemon' }).getByRole('link', { name: 'Web', exact: true }).click()
   await expect(page).toHaveURL(/\/hosts\?group=web/)

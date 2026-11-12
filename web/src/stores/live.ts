@@ -39,10 +39,11 @@ export interface Loaded<T> {
 }
 
 /**
- * Loads with `load`, and again when `sources` change, when the server
- * says something changed, and every half minute.
+ * Loads with `load`, and again when `sources` change and, unless `live`
+ * is off, when the server says something changed and every half minute.
  */
-export function useLoader<T>(load: () => Promise<T>, sources: WatchSource[] = []): Loaded<T> {
+export function useLoader<T>(load: () => Promise<T>, sources: WatchSource[] = [], options: { live?: boolean } = {}): Loaded<T> {
+  const follow = options.live !== false
   const live = useLive()
   const data = ref<T | null>(null) as Ref<T | null>
   const error = ref('')
@@ -68,17 +69,24 @@ export function useLoader<T>(load: () => Promise<T>, sources: WatchSource[] = []
   }
 
   // Several events in a row load once.
-  watch(
-    () => live.version,
-    () => {
-      clearTimeout(soon)
-      soon = setTimeout(() => void reload(), 250)
-    },
-  )
-  if (sources.length > 0) watch(sources, () => void reload())
+  if (follow) {
+    watch(
+      () => live.version,
+      () => {
+        clearTimeout(soon)
+        soon = setTimeout(() => void reload(), 250)
+      },
+    )
+  }
+  if (sources.length > 0) {
+    watch(sources, () => {
+      loading.value = true
+      void reload()
+    })
+  }
   onMounted(() => {
     void reload()
-    timer = setInterval(() => void reload(), 30_000)
+    if (follow) timer = setInterval(() => void reload(), 30_000)
   })
   onUnmounted(() => {
     latest++

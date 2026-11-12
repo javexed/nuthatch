@@ -60,6 +60,8 @@ checkd)
     echo "\$USER1\$=$here/plugins" > "$run/resource.cfg"
     rm -f "$run/live"
     echo "checkd: Livestatus at $run/live"
+    # For dev/restart.
+    echo $$ > "$run/pid"
     exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" "$run/naemon.cfg"
     ;;
 *)

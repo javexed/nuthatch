@@ -6,13 +6,14 @@ Livestatus, so it works with [Naemon](https://www.naemon.io/) and with
 checkd, the engine it is written beside. It aims to do what Thruk does,
 written anew.
 
-**Status: phase 1 of the plan below is done.** People can log in and see
-what is theirs to see: an overview, problems, hosts and services with
-filters, sorting and pages, host and service groups, and a page for each
-host and service. From there they can check now, acknowledge, schedule
-downtimes, comment, and turn notifications and checks off and on, for one
-object or for several ticked in a list. History, reports, changing the
-config and dashboards are not there yet.
+**Status: phases 0 to 2 of the plan below are done.** People can log in
+and see what is theirs to see: an overview, problems, hosts and services
+with filters, sorting and pages, host and service groups, and a page for
+each host and service. From there they can check now, acknowledge,
+schedule downtimes, comment, and turn notifications and checks off and
+on, for one object or for several ticked in a list. There is the history
+of alerts and notifications, and availability over a span of time, with
+a CSV file. Changing the config and dashboards are not there yet.
 
 ## How it fits together
 
@@ -28,7 +29,8 @@ Everything is TypeScript, in one pnpm workspace:
   the phone app share it.
 - `web/`: the interface, Vue 3.
 - `dev/`: a demo site with invented hosts, run on either engine.
-- `docs/`: [who may see and do what](docs/permissions.md).
+- `docs/`: [who may see and do what](docs/permissions.md),
+  [history and availability](docs/history.md).
 
 ## Try it
 
@@ -90,7 +92,7 @@ The last two need `dev/up naemon` and `dev/up checkd` running.
 
 0. Foundations and permissions (done)
 1. Status views and actions (done)
-2. History and availability
+2. History and availability (done)
 3. Adding and changing hosts and services
 4. Dashboards
 5. One interface over several sites

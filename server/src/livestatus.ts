@@ -4,6 +4,8 @@
 import { connect } from 'node:net'
 
 const LIMIT = 15_000
+/** The state history is worked out from the log, which can take long. */
+const LONG_LIMIT = 120_000
 /** Answers larger than this are refused, so that one query cannot take
  * the server's memory. */
 const MAX_ANSWER = 64 << 20
@@ -15,12 +17,12 @@ export function socketPath(address: string): string {
   throw new Error(`'${address}': give unix:<socket>`)
 }
 
-function exchange(path: string, text: string, wantAnswer: boolean): Promise<Buffer> {
+function exchange(path: string, text: string, wantAnswer: boolean, limit = LIMIT): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
     const socket = connect({ path })
-    const timer = setTimeout(() => socket.destroy(new Error('no answer within 15 seconds')), LIMIT)
+    const timer = setTimeout(() => socket.destroy(new Error(`no answer within ${limit / 1000} seconds`)), limit)
     socket.on('connect', () => {
       // Half-closed: the engine answers and closes.
       socket.end(text)
@@ -48,7 +50,7 @@ function exchange(path: string, text: string, wantAnswer: boolean): Promise<Buff
  */
 export async function query(path: string, request: string): Promise<unknown[][]> {
   const full = `${request.trimEnd()}\nOutputFormat: json\nResponseHeader: fixed16\nKeepAlive: off\n\n`
-  const answer = await exchange(path, full, true)
+  const answer = await exchange(path, full, true, request.startsWith('GET statehist\n') ? LONG_LIMIT : LIMIT)
   const head = answer.subarray(0, 16).toString('latin1')
   const code = Number(head.slice(0, 3))
   const length = Number(head.slice(4, 15).trim())
