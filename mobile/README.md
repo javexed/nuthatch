@@ -38,12 +38,13 @@ iOS, on a Mac with Xcode and CocoaPods:
   (`org.example.nuthatch`). It must be a name under a domain you own, and
   is fixed once the app is published.
 - Icons and a splash screen: none yet.
-- Whether a release build keeps its web view closed to debugging over USB
-  has to be checked on a retail phone. In the emulator it was open for
-  the release build too; the emulator runs a developer build of Android,
-  which is believed to open it for every app. Capacitor turns it on for
-  debug builds only, by its documentation. It matters because the token
-  is kept in the web view.
+- A release build does not turn on debugging of its web view: Capacitor
+  does so only for a debuggable app, and a release build is not one. On
+  the two devices it was tried on, the emulator and one phone, the web
+  view could still be reached over USB, because both run a "userdebug"
+  build of Android, which opens it for every app. On a phone with a
+  retail build of Android this is still to be seen. It matters because
+  the token is kept in the web view.
 - The token is kept in the web view's storage. The device's keystore
   would be the better place; that needs a plugin.
 - Push notifications are not done: they need a sender on the server's
