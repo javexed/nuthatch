@@ -11,8 +11,10 @@ the app, and drives its web view: the app logs in at a nuthatch server
 for a token, shows the overview, acknowledges a problem (the engine is
 asked whether it has it), and logs out, which deletes the token. The
 debug app was also installed on one real phone (Android 17) over USB,
-where it logged in and showed the overview. A release build compiles,
-unsigned, and has not been run.
+where it logged in and showed the overview. A release build compiles;
+signed with a throwaway key it starts in the emulator and shows its
+login page. It was not logged in there: a release build talks HTTPS
+only, and the test server speaks plain HTTP.
 
 **iOS: no project.** Making and building one needs a Mac.
 
