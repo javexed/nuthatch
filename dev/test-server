@@ -12,7 +12,7 @@ mkdir -p "$work"
 for user in admin ops viewer nobody stranger; do
     echo "$user:$(openssl passwd -apr1 "$NUTHATCH_TEST_PASSWORD")" >> "$work/htpasswd"
 done
-sed -e 's/^listen = "127.0.0.1:8080"/listen = "127.0.0.1:8092"\napp_origins = ["http:\/\/127.0.0.1:8097"]/' -e 's#dev/run/nuthatch.sqlite#dev/run/e2e/store.sqlite#' \
+sed -e 's/^listen = "127.0.0.1:8080"/listen = "127.0.0.1:8092"\napp_origins = ["http:\/\/127.0.0.1:8097", "https:\/\/localhost"]/' -e 's#dev/run/nuthatch.sqlite#dev/run/e2e/store.sqlite#' \
     -e 's#dev/run/htpasswd#dev/run/e2e/htpasswd#' "$here/nuthatch.toml" > "$work/nuthatch.toml"
 cd "$root"
 exec node --disable-warning=ExperimentalWarning server/src/main.ts dev/run/e2e/nuthatch.toml

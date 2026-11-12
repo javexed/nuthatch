@@ -6,8 +6,7 @@ Livestatus, so it works with [Naemon](https://www.naemon.io/) and with
 checkd, the engine it is written beside. It aims to do what Thruk does,
 written anew.
 
-**Status: phases 0 to 5 of the plan below are done, and phase 6 as far
-as it goes without a phone toolchain.** People can log in and see what is
+**Status: the six phases of the plan below are done.** People can log in and see what is
 theirs to see: an overview, problems, hosts and services with filters,
 sorting and pages, host and service groups, and a page for each host and
 service. From there they can check now, acknowledge, schedule downtimes,
@@ -19,8 +18,8 @@ which the engine checks before anything is written. There are
 dashboards, one's own or shared. One nuthatch can show the engines of
 several sites, each through the nuthatch at its site. The interface also
 builds as an app that logs in at a server for a token; wrapped for
-Android it has not been compiled or run on a device yet
-([mobile/README.md](mobile/README.md)).
+Android it is built and tried in an emulator, not on a real phone, and
+there is no iOS build ([mobile/README.md](mobile/README.md)).
 
 It has been run on a demo site with invented hosts only, on one machine.
 
@@ -115,7 +114,7 @@ The last two need `dev/up naemon` and `dev/up checkd` running.
 3. Adding and changing hosts and services (done)
 4. Dashboards (done)
 5. One interface over several sites (done)
-6. Phone app (the app build is done and tested in a browser; not built for a phone)
+6. Phone app (done for Android, in an emulator; no iOS build)
 
 Each phase ends with a test that must pass on both engines.
 

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Builds the Android app and tries it in an emulator: it logs in at a
+# nuthatch server for a token and acknowledges a problem.
+#
+#   mobile/test-emulator
+#
+# Needs a JDK (JAVA_HOME) and the Android SDK (ANDROID_HOME) with a
+# platform, build tools, the emulator and the system image named below;
+# `dev/up naemon` and `dev/up checkd` running; and KVM. The emulator has no
+# window. What it left stays in dev/run/android.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(dirname "$here")
+: "${JAVA_HOME:?set JAVA_HOME to a JDK}" "${ANDROID_HOME:?set ANDROID_HOME to the Android SDK}"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+image='system-images;android-35;google_apis;x86_64'
+avd=nuthatch-test
+# avdmanager and the emulator do not agree by themselves on where devices are kept.
+export ANDROID_AVD_HOME=${ANDROID_AVD_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/.android/avd}
+out=$root/dev/run/android
+mkdir -p "$out"
+export NUTHATCH_TEST_PASSWORD=${NUTHATCH_TEST_PASSWORD:-$(head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n')}
+export ANDROID_SERIAL=emulator-5554
+
+cleanup() {
+    # KEEP=1 leaves the emulator and the server running, to look at them.
+    [ -n "${KEEP:-}" ] && return
+    adb emu kill >/dev/null 2>&1 || true
+    [ -n "${server:-}" ] && kill "$server" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "== building the app"
+(cd "$here" && pnpm sync >/dev/null)
+(cd "$here/android" && ./gradlew --quiet assembleDebug)
+apk=$here/android/app/build/outputs/apk/debug/app-debug.apk
+ls -l "$apk" | awk '{ print "      " $5 " bytes  " $9 }'
+
+echo "== starting the emulator"
+avdmanager list avd 2>/dev/null | grep -q "Name: $avd" || echo no | avdmanager create avd -n "$avd" -k "$image" -d pixel_6 >/dev/null
+emulator -avd "$avd" -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$out/emulator.log" 2>&1 &
+for _ in $(seq 60); do adb get-state >/dev/null 2>&1 && break; kill -0 $! 2>/dev/null || { echo "the emulator ended; see $out/emulator.log"; exit 1; }; sleep 2; done
+for _ in $(seq 180); do
+    [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
+    sleep 2
+done
+[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ] || { echo "the emulator did not start"; exit 1; }
+echo "      Android $(adb shell getprop ro.build.version.release | tr -d '\r')"
+
+echo "== a nuthatch server, reached from the emulator as localhost:8092"
+"$root/dev/test-server" > "$out/server.log" 2>&1 &
+server=$!
+for _ in $(seq 50); do curl -fs -o /dev/null http://127.0.0.1:8092/ && break; sleep 0.2; done
+adb reverse tcp:8092 tcp:8092 >/dev/null
+
+echo "== the app"
+adb install -r "$apk" >/dev/null
+adb shell am start -n org.example.nuthatch/.MainActivity >/dev/null
+# A freshly started device starts the app's window over once; the test
+# begins when that is past.
+sleep 15
+socket=
+for _ in $(seq 60); do
+    socket=$(adb shell cat /proc/net/unix | tr -d '\r' | grep -o 'webview_devtools_remote_[0-9]*' | head -1 || true)
+    [ -n "$socket" ] && break
+    sleep 1
+done
+[ -n "$socket" ] || { echo "the app's web view did not come up"; exit 1; }
+adb forward tcp:9223 "localabstract:$socket" >/dev/null
+(cd "$root/web" && SHOT="$out/acknowledged.png" node e2e/android-driver.ts)
+echo
+echo "The app works in the emulator."

@@ -5,10 +5,14 @@ wrapped with [Capacitor](https://capacitorjs.com/) (MIT). The app asks
 which nuthatch server to talk to, logs in there for a token of its own,
 and keeps the server's address and the token on the device.
 
-**Not built yet.** The Android project in `android/` is what `cap add
-android` made, with the interface copied in; it has not been compiled or
-run, for want of a JDK and the Android SDK on the machine it was made
-on. There is no iOS project: making and building one needs a Mac.
+**Android: built and tried in an emulator.** `mobile/test-emulator` builds
+the debug app, starts an Android 15 emulator without a window, installs
+the app, and drives its web view: the app logs in at a nuthatch server
+for a token, shows the overview, acknowledges a problem (the engine is
+asked whether it has it), and logs out, which deletes the token. It has
+not been on a real phone, and there is no release build.
+
+**iOS: no project.** Making and building one needs a Mac.
 
 ## Building it
 
@@ -49,7 +53,11 @@ does not talk plain HTTP.
 
 ## Tested
 
-Not on a phone. The app build is tested in a browser, served from an
-origin of its own against a server elsewhere (`web/e2e/app.spec.ts`):
-it logs in for a token, shows the overview, acknowledges a problem, and
-deletes its token when logging out.
+- `mobile/test-emulator`: the app in an Android emulator, as above. It
+  needs a JDK (`JAVA_HOME`), the Android SDK (`ANDROID_HOME`) with the
+  platform, build tools, emulator and system image the script names, KVM,
+  and `dev/up naemon` and `dev/up checkd` running. A debug build lets
+  plain HTTP through, so that the emulator can reach a server on the
+  machine it runs on; a release build does not.
+- `web/e2e/app.spec.ts`: the same app build in a browser, served from an
+  origin of its own against a server elsewhere.
