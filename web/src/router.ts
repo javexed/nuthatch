@@ -6,8 +6,16 @@ export const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('./views/Login.vue'), meta: { open: true } },
     { path: '/', name: 'overview', component: () => import('./views/Overview.vue') },
+    { path: '/problems', name: 'problems', component: () => import('./views/Problems.vue') },
+    { path: '/hosts', name: 'hosts', component: () => import('./views/Hosts.vue') },
+    { path: '/services', name: 'services', component: () => import('./views/Services.vue') },
+    { path: '/hostgroups', name: 'hostgroups', component: () => import('./views/Groups.vue'), props: { kind: 'host' } },
+    { path: '/servicegroups', name: 'servicegroups', component: () => import('./views/Groups.vue'), props: { kind: 'service' } },
+    { path: '/host/:backend/:host', name: 'host', component: () => import('./views/Detail.vue'), props: true },
+    { path: '/service/:backend/:host/:service', name: 'service', component: () => import('./views/Detail.vue'), props: true },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
+  scrollBehavior: (to, from, saved) => saved ?? (to.path === from.path ? undefined : { top: 0 }),
 })
 
 router.beforeEach(async (to) => {

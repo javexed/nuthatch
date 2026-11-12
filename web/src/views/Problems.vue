@@ -1,0 +1,17 @@
+<script setup lang="ts">
+// What is wrong now, the newest first: hosts that are not up, and
+// services that are not OK on hosts that are up.
+import { ref } from 'vue'
+import StatusList from '../components/StatusList.vue'
+
+const unhandled = ref(true)
+</script>
+
+<template>
+  <h1>Problems</h1>
+  <label class="check"><input v-model="unhandled" type="checkbox" /> Only those nobody has acknowledged or put in a downtime</label>
+  <h2>Hosts</h2>
+  <StatusList kind="host" :base="{ states: [1, 2], unhandled }" sort="-last_state_change" empty="No host has a problem." />
+  <h2>Services</h2>
+  <StatusList kind="service" :base="{ states: [1, 2, 3], unhandled }" sort="-last_state_change" empty="No service has a problem." />
+</template>

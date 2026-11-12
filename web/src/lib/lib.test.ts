@@ -1,0 +1,96 @@
+import { describe, expect, it } from 'vitest'
+import { acknowledge, downtime, recheck } from './commands.ts'
+import { EMPTY, fromQuery, literal, toHeaders, toQuery } from './filters.ts'
+import { ago, duration, fromInput, toInput } from './format.ts'
+import { fraction, parsePerfdata } from './perfdata.ts'
+import { stateOf } from './states.ts'
+
+describe('formatting', () => {
+  it('writes durations with their two largest units', () => {
+    expect(duration(5)).toBe('5s')
+    expect(duration(0)).toBe('0s')
+    expect(duration(312)).toBe('5m 12s')
+    expect(duration(3600)).toBe('1h')
+    expect(duration(273600 + 59)).toBe('3d 4h')
+    expect(ago(0)).toBe('never')
+    expect(ago(100, 160)).toBe('1m ago')
+    expect(ago(200, 100)).toBe('in 1m 40s')
+  })
+
+  it('goes to a datetime input and back', () => {
+    const moment = Math.floor(new Date(2026, 10, 12, 9, 30).getTime() / 1000)
+    expect(toInput(moment)).toBe('2026-11-12T09:30')
+    expect(fromInput('2026-11-12T09:30')).toBe(moment)
+  })
+})
+
+describe('states', () => {
+  it('are pending until checked', () => {
+    expect(stateOf('service', 2).label).toBe('Critical')
+    expect(stateOf('host', 1).tone).toBe('critical')
+    expect(stateOf('host', 0, 0).label).toBe('Pending')
+  })
+})
+
+describe('filters', () => {
+  it('become Livestatus filter lines', () => {
+    expect(toHeaders('host', EMPTY)).toEqual([])
+    expect(toHeaders('service', { ...EMPTY, states: [1, 2] })).toEqual(['Filter: state = 1', 'Filter: state = 2', 'Or: 2'])
+    expect(toHeaders('host', { ...EMPTY, states: [3, 1] })).toEqual(['Filter: state = 1'])
+    expect(toHeaders('service', { ...EMPTY, search: ' a.b ' })).toEqual([
+      'Filter: host_name ~~ a\\.b',
+      'Filter: description ~~ a\\.b',
+      'Filter: plugin_output ~~ a\\.b',
+      'Or: 3',
+    ])
+    expect(toHeaders('service', { ...EMPTY, unhandled: true, host: 'web1', hostgroup: 'web' })).toEqual([
+      'Filter: acknowledged = 0',
+      'Filter: scheduled_downtime_depth = 0',
+      'Filter: host_acknowledged = 0',
+      'Filter: host_scheduled_downtime_depth = 0',
+      'Filter: host_name = web1',
+      'Filter: host_groups >= web',
+    ])
+    // Nothing a user types can start a second line.
+    expect(toHeaders('host', { ...EMPTY, search: 'x\nCOMMAND', group: 'a\nb' }).every((line) => !line.includes('\n'))).toBe(true)
+    expect(literal('a+b(c)')).toBe('a\\+b\\(c\\)')
+  })
+
+  it('go to a page address and back', () => {
+    const filter = { ...EMPTY, states: [2, 1], search: 'disk', unhandled: true, group: 'web' }
+    expect(toQuery(filter)).toEqual({ state: '1,2', q: 'disk', unhandled: '1', group: 'web' })
+    expect(fromQuery(toQuery(filter))).toEqual({ ...filter, states: [1, 2] })
+    expect(fromQuery({ state: 'x,9,22', q: ['a'] })).toEqual({ ...EMPTY, states: [9] })
+    expect(toQuery(EMPTY)).toEqual({})
+  })
+})
+
+describe('performance data', () => {
+  it('is read by the plugin guidelines', () => {
+    const perf = parsePerfdata("time=0.5s;1;2;0;10 'disk use'=91%;80;90 size=3B;;;0 junk=x bad")
+    expect(perf.map((p) => p.label)).toEqual(['time', 'disk use', 'size'])
+    expect(perf[0]).toEqual({ label: 'time', value: 0.5, unit: 's', warn: '1', crit: '2', min: 0, max: 10 })
+    expect(fraction(perf[0]!)).toBe(0.05)
+    expect(fraction(perf[1]!)).toBe(0.91)
+    expect(fraction(perf[2]!)).toBeNull()
+    expect(parsePerfdata('')).toEqual([])
+  })
+})
+
+describe('commands', () => {
+  const host = { backend: 'a', host: 'web1' }
+  const service = { ...host, service: 'http' }
+
+  it('are built for a host or a service', () => {
+    expect(acknowledge(service, { comment: 'on it', sticky: true, notify: true, persistent: false })).toEqual({
+      backend: 'a',
+      command: 'ACKNOWLEDGE_SVC_PROBLEM',
+      args: ['web1', 'http', 2, 1, 0, '-', 'on it'],
+    })
+    expect(recheck(host, 100)).toEqual({ backend: 'a', command: 'SCHEDULE_FORCED_HOST_CHECK', args: ['web1', 100] })
+    const both = downtime(host, { comment: 'work', start: 10, end: 20, fixed: true, duration: 0, withServices: true })
+    expect(both.map((c) => c.command)).toEqual(['SCHEDULE_HOST_DOWNTIME', 'SCHEDULE_HOST_SVC_DOWNTIME'])
+    expect(both[0]?.args).toEqual(['web1', 10, 20, 1, 0, 0, '-', 'work'])
+    expect(downtime(service, { comment: 'w', start: 10, end: 20, fixed: false, duration: 300 })[0]?.args).toEqual(['web1', 'http', 10, 20, 0, 0, 300, '-', 'w'])
+  })
+})

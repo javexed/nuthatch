@@ -147,7 +147,7 @@ def tests():
     session = admin.call("GET", "/api/v1/session")[1]
     limits = {b["name"]: b["limits_users"] for b in session["backends"]}
     print(f"      backends limit users: {limits}")
-    check("naemon limits what a user sees", limits["naemon"], True)
+    check("both engines limit what a user sees", limits, {"naemon": True, "checkd": True})
     roles = {user: sorted(clients[user].call("GET", "/api/v1/session")[1]["roles"]) for user in USERS}
     check("admin's roles", roles["admin"], sorted(["all_hosts", "all_host_commands", "system_commands", "system_information", "configuration_information", "config_edit"]))
     check("viewer's roles", roles["viewer"], ["all_hosts", "read_only"])

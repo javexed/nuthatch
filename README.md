@@ -6,9 +6,13 @@ Livestatus, so it works with [Naemon](https://www.naemon.io/) and with
 checkd, the engine it is written beside. It aims to do what Thruk does,
 written anew.
 
-**Status: phase 0 of the plan below.** There is a server that knows who is
-logged in and what they may see and do, a typed client, and a first page
-with totals. The views people work in come next.
+**Status: phase 1 of the plan below is done.** People can log in and see
+what is theirs to see: an overview, problems, hosts and services with
+filters, sorting and pages, host and service groups, and a page for each
+host and service. From there they can check now, acknowledge, schedule
+downtimes, comment, and turn notifications and checks off and on, for one
+object or for several ticked in a list. History, reports, changing the
+config and dashboards are not there yet.
 
 ## How it fits together
 
@@ -76,14 +80,16 @@ Node runs the TypeScript as it is; nothing is compiled to install it.
 
     pnpm build && pnpm test    # types, and the unit tests of every package
     dev/matrix                 # every kind of user × every table and command, on both engines
-    (cd web && pnpm e2e)       # in a browser, at desktop and phone width
+    (cd web && pnpm e2e)       # in a browser, at desktop and phone width: what a
+                               # user sees is compared with what the engines
+                               # give that user, and every action is done on both
 
 The last two need `dev/up naemon` and `dev/up checkd` running.
 
 ## Plan
 
-0. Foundations and permissions (here now)
-1. Status views and actions
+0. Foundations and permissions (done)
+1. Status views and actions (done)
 2. History and availability
 3. Adding and changing hosts and services
 4. Dashboards
