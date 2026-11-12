@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Makes dev/run/htpasswd for the demo site: admin, ops, viewer and nobody
+# are contacts of dev/objects.cfg; stranger is a login that is no contact.
+# All have the password given, or "nuthatch-dev". For this machine only.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+password=${1:-nuthatch-dev}
+mkdir -p "$here/run"
+: > "$here/run/htpasswd"
+for user in admin ops viewer nobody stranger; do
+    echo "$user:$(openssl passwd -apr1 "$password")" >> "$here/run/htpasswd"
+done
+chmod 600 "$here/run/htpasswd"
+echo "wrote $here/run/htpasswd"

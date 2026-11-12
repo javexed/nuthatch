@@ -1,0 +1,6 @@
+/server/target
+/web/node_modules
+/web/dist
+/dev/run
+/web/test-results
+/web/playwright-report

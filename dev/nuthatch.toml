@@ -1,0 +1,26 @@
+# nuthatch against the demo site on both engines. Start them with
+# `dev/up naemon` and `dev/up checkd`, make the users with `dev/users`,
+# then, from the repo's top: server/target/debug/nuthatch dev/nuthatch.toml
+listen = "127.0.0.1:8080"
+web_root = "web/dist"
+store = "dev/run/nuthatch.sqlite"
+htpasswd = "dev/run/htpasswd"
+
+# admin may do everything. Everyone in the contact group admins sees all
+# hosts and services; viewer, who is in it, may change nothing.
+[roles]
+authorized_contactgroup_for_all_hosts = ["admins"]
+authorized_for_all_host_commands = ["admin"]
+authorized_for_system_commands = ["admin"]
+authorized_for_system_information = ["admin"]
+authorized_for_configuration_information = ["admin"]
+authorized_for_config_edit = ["admin"]
+authorized_for_read_only = ["viewer"]
+
+[[backend]]
+name = "naemon"
+livestatus = "unix:dev/run/naemon/live"
+
+[[backend]]
+name = "checkd"
+livestatus = "unix:dev/run/checkd/live"

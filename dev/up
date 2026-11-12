@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Runs the demo site (dev/objects.cfg) on an engine, for trying nuthatch:
+#
+#   dev/up naemon    Naemon Core 1.5.2 with Livestatus, in a container
+#                    without a network
+#   dev/up checkd    checkd, built from ../checkd (or $CHECKD)
+#
+# Livestatus answers at dev/run/<engine>/live. Stop with Ctrl-C. The state
+# is kept in dev/run/<engine> between runs.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+engine=${1:-}
+run=$here/run/$engine
+mkdir -p "$run"
+
+main() {
+    # $1: the directory the engine sees dev/ as; $2: the one it sees
+    # dev/run/<engine> as.
+    cat <<CFG
+# Written by dev/up.
+cfg_file=$1/objects.cfg
+resource_file=$2/resource.cfg
+interval_length=60
+check_external_commands=1
+command_file=$2/naemon.cmd
+log_file=$2/naemon.log
+log_initial_states=1
+retain_state_information=1
+state_retention_file=$2/retention.dat
+check_result_path=$2/checkresults
+temp_path=$2
+lock_file=$2/naemon.pid
+precached_object_file=$2/objects.precache
+status_file=$2/status.dat
+query_socket=$2/naemon.qh
+broker_module=/usr/lib/naemon/naemon-livestatus/livestatus.so $2/live
+CFG
+}
+
+case $engine in
+naemon)
+    image=nuthatch-dev-naemon:1.5.2
+    docker image inspect "$image" >/dev/null 2>&1 || docker build -q -t "$image" "$here/naemon" >/dev/null
+    mkdir -p "$run/checkresults"
+    main /site /run-site > "$run/naemon.cfg"
+    echo '$USER1$=/site/plugins' > "$run/resource.cfg"
+    rm -f "$run/live" "$run/naemon.cmd"
+    echo "Naemon: Livestatus at $run/live"
+    exec docker run --rm --init --name nuthatch-dev-naemon --network none --user "$(id -u):$(id -g)" \
+        -v "$here:/site:ro" -v "$run:/run-site" "$image" naemon /run-site/naemon.cfg
+    ;;
+checkd)
+    checkd=${CHECKD:-$here/../../checkd/target/debug/checkd}
+    if [ -z "${CHECKD:-}" ]; then
+        (cd "$here/../../checkd" && cargo build --quiet -p checkd)
+    fi
+    mkdir -p "$run/checkresults"
+    main "$here" "$run" > "$run/naemon.cfg"
+    echo "\$USER1\$=$here/plugins" > "$run/resource.cfg"
+    rm -f "$run/live"
+    echo "checkd: Livestatus at $run/live"
+    exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" "$run/naemon.cfg"
+    ;;
+*)
+    echo "usage: dev/up naemon|checkd" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,14 @@
+#!/bin/sh
+# demo <name> <period> <pattern>: a state that follows the clock, for
+# trying the UI. <pattern> is a string of states (0-3), one per <period>
+# seconds, taken in turn.
+name=$1 period=$2 pattern=$3
+n=$(( $(date +%s) / period % ${#pattern} ))
+state=$(printf '%s' "$pattern" | cut -c$((n + 1)))
+case $state in
+0) echo "OK - $name is fine|time=0.$(( $(date +%s) % 9 ))s;1;2;0" ;;
+1) echo "WARNING - $name is slow|time=1.$(( $(date +%s) % 9 ))s;1;2;0" ;;
+2) echo "CRITICAL - $name is down|time=0s;1;2;0" ;;
+*) echo "UNKNOWN - $name cannot be checked" ;;
+esac
+exit "$state"
