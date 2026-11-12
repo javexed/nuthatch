@@ -36,6 +36,7 @@ const PAGES = [
     <RouterLink to="/" class="name">nuthatch</RouterLink>
     <nav class="pages" aria-label="Pages">
       <RouterLink v-for="page in PAGES" :key="page.name" :to="{ name: page.name }">{{ page.label }}</RouterLink>
+      <RouterLink v-if="session.session.config_backends.length > 0" :to="{ name: 'config' }">Config</RouterLink>
     </nav>
     <span class="who">{{ session.session.user }}</span>
     <button type="button" class="plain" @click="logout">Log out</button>

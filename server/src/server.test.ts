@@ -9,7 +9,9 @@ import { buildApp } from './app.ts'
 import { Htpasswd, Limiter, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
+import { checkHost, hostFile, readHostFile } from './configadmin.ts'
 import { Events } from './events.ts'
+import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagioscfg.ts'
 import { RolesConfig, access, checkColumns, checkHeaders } from './policy.ts'
 import { compare, limits, merge, rows, stats } from './query.ts'
 import { Store } from './store.ts'
@@ -278,5 +280,77 @@ describe('the HTTP side', () => {
     expect((await post('/api/v1/query', 'ann', { table: 'contacts', columns: ['name'] })).status).toBe(403)
     expect((await post('/api/v1/query', 'ann', ['not', 'an', 'object'])).status).toBe(400)
     expect((await post('/api/v1/nothing', 'ann', {})).status).toBe(404)
+  })
+})
+
+
+describe('object files', () => {
+  it('are read definition by definition', () => {
+    const definitions = parseObjects('# top\ndefine host {\n  host_name web1 ; the name\n  alias   A  host\n}\ndefine service{\nuse x\n}\n')
+    expect(definitions).toEqual([
+      { type: 'host', attrs: [['host_name', 'web1'], ['alias', 'A  host']] },
+      { type: 'service', attrs: [['use', 'x']] },
+    ])
+    expect(writeObjects(definitions.slice(0, 1), 'by a test')).toBe('# by a test\ndefine host {\n    host_name  web1\n    alias      A  host\n}\n')
+  })
+
+  it('map paths of an engine in a container, and lead a main config to a copy', () => {
+    const paths = new PathMap({ '/site': '/home/x/dev' })
+    expect(paths.toLocal('/site/objects.cfg')).toBe('/home/x/dev/objects.cfg')
+    expect(paths.toEngine('/home/x/dev/run/a')).toBe('/site/run/a')
+    expect(paths.toLocal('/sitemap')).toBe('/sitemap')
+    const main = { lines: ['cfg_file=objects.cfg', 'cfg_dir=/etc/n/managed/', 'log_file=x.log', 'resource_file = r.cfg'], engineDir: '/etc/n', files: [], dirs: [] }
+    expect(mainWith(main, '/etc/n/managed', '/tmp/copy').split('\n')).toEqual(['cfg_file=/etc/n/objects.cfg', 'cfg_dir=/tmp/copy', 'log_file=x.log', 'resource_file = /etc/n/r.cfg'])
+  })
+
+  it('finds templates', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nuthatch-cfg-'))
+    writeFileSync(join(dir, 'a.cfg'), 'define host {\n name generic-host\n register 0\n}\ndefine host {\n host_name real\n}\ndefine service {\n name generic-service\n register 0\n}\n')
+    expect(templates([join(dir, 'a.cfg'), join(dir, 'missing.cfg')], 'host')).toEqual(['generic-host'])
+    expect(templates([join(dir, 'a.cfg')], 'service')).toEqual(['generic-service'])
+    rmSync(dir, { recursive: true })
+  })
+})
+
+describe('a host to write', () => {
+  const choices = { commands: ['check_ping'], contacts: ['ann'], contactgroups: ['admins'], hostgroups: ['web'], servicegroups: [] }
+  const known = { host: ['generic-host'], service: ['generic-service'] }
+  const host = {
+    name: 'web9',
+    address: '192.0.2.9',
+    use: 'generic-host',
+    hostgroups: ['web'],
+    contacts: [],
+    contact_groups: ['admins'],
+    services: [{ description: 'ping', use: 'generic-service', check_command: 'check_ping!100,20%!500,60%', servicegroups: [], contacts: ['ann'], contact_groups: [] }],
+  }
+
+  it('goes into a file and comes back the same', () => {
+    const checked = checkHost(host, choices, known)
+    const text = hostFile(checked)
+    expect(text).toContain('define host {\n    host_name       web9\n    use             generic-host\n')
+    expect(text).toContain('    check_command        check_ping!100,20%!500,60%\n')
+    expect(readHostFile(text)).toEqual(JSON.parse(JSON.stringify(checked)))
+  })
+
+  it('cannot carry a definition of its own, or what the engine has not', () => {
+    const bad = (change: Record<string, unknown>) => () => checkHost({ ...host, ...change }, choices, known)
+    expect(bad({ alias: 'x\n}\ndefine command {' })).toThrow()
+    expect(bad({ notes: 'a ; b' })).toThrow()
+    expect(bad({ name: '../etc' })).toThrow()
+    expect(bad({ name: 'a b' })).toThrow()
+    expect(bad({ address: '192.0.2.9 extra' })).toThrow()
+    expect(bad({ use: 'other' })).toThrow()
+    expect(bad({ check_command: 'rm!-rf' })).toThrow()
+    expect(bad({ hostgroups: ['web,db'] })).toThrow()
+    expect(bad({ contacts: ['nobody'] })).toThrow()
+    expect(bad({ services: [{ ...host.services[0], description: 'x\ny' }] })).toThrow()
+    expect(bad({ services: [host.services[0], host.services[0]] })).toThrow()
+  })
+
+  it('is left alone when a hand changed its file beyond what is edited', () => {
+    expect(() => readHostFile('define host {\n host_name a\n use t\n address x\n max_check_attempts 9\n}\n')).toThrow('max_check_attempts')
+    expect(() => readHostFile('define host {\n host_name a\n}\ndefine host {\n host_name b\n}\n')).toThrow('exactly one host')
+    expect(() => readHostFile('define host {\n host_name a\n}\ndefine service {\n host_name b\n service_description s\n}\n')).toThrow('another host')
   })
 })

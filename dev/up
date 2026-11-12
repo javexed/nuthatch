@@ -5,14 +5,15 @@
 #                    without a network
 #   dev/up checkd    checkd, built from ../checkd (or $CHECKD)
 #
-# Livestatus answers at dev/run/<engine>/live. Stop with Ctrl-C. The state
+# Livestatus answers at dev/run/<engine>/live. The engine also reads the
+# object files of dev/run/<engine>/managed, which nuthatch writes. Stop with Ctrl-C. The state
 # is kept in dev/run/<engine> between runs.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 engine=${1:-}
 run=$here/run/$engine
-mkdir -p "$run"
+mkdir -p "$run/managed"
 
 main() {
     # $1: the directory the engine sees dev/ as; $2: the one it sees
@@ -20,6 +21,7 @@ main() {
     cat <<CFG
 # Written by dev/up.
 cfg_file=$1/objects.cfg
+cfg_dir=$2/managed
 resource_file=$2/resource.cfg
 interval_length=60
 check_external_commands=1
@@ -32,6 +34,7 @@ check_result_path=$2/checkresults
 temp_path=$2
 lock_file=$2/naemon.pid
 precached_object_file=$2/objects.precache
+object_cache_file=$2/objects.cache
 status_file=$2/status.dat
 query_socket=$2/naemon.qh
 broker_module=/usr/lib/naemon/naemon-livestatus/livestatus.so $2/live

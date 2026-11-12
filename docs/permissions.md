@@ -27,7 +27,8 @@ is everyone.
 | `system_information` | the engine's status and versions, the log's lines about the program, nuthatch's audit log |
 | `configuration_information` | contacts, contact groups, commands, timeperiods; check commands and custom variables of hosts and services |
 | `read_only` | no commands at all, whatever else |
-| `system_commands`, `config_edit` | nothing yet: for commands about the engine itself, and for changing the config |
+| `config_edit` | adding, changing and taking out hosts and services ([config](config.md)) |
+| `system_commands` | nothing yet: for commands about the engine itself |
 
 A user with no role and no contact of their name can log in and sees
 nothing.
@@ -73,7 +74,7 @@ nothing.
 ## Tested
 
 `dev/matrix` logs in as five kinds of user and tries every table and a set
-of commands on each engine: about 230 checks.
+of commands on each engine, and changes the config: about 290 checks.
 
 ## Not done
 

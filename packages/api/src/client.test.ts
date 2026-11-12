@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, Client, parseEvents } from './client.ts'
+import { Client, parseEvents } from './client.ts'
 
 function server(answers: Record<string, { status?: number; body: unknown }>) {
   const calls: { path: string; init: RequestInit }[] = []
@@ -36,7 +36,7 @@ describe('the client', () => {
   it('gives the server\'s reason for a refusal', async () => {
     const { fake } = server({ 'POST /api/v1/command': { status: 403, body: { error: 'this user is read-only' } } })
     const sent = new Client({ fetch: fake }).command({ backend: 'a', command: 'ENABLE_HOST_CHECK', args: ['web1'] })
-    await expect(sent).rejects.toEqual(new ApiError(403, 'this user is read-only'))
+    await expect(sent).rejects.toMatchObject({ status: 403, message: 'this user is read-only' })
   })
 
   it('reads server-sent events in pieces', () => {

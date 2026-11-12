@@ -6,14 +6,16 @@ Livestatus, so it works with [Naemon](https://www.naemon.io/) and with
 checkd, the engine it is written beside. It aims to do what Thruk does,
 written anew.
 
-**Status: phases 0 to 2 of the plan below are done.** People can log in
+**Status: phases 0 to 3 of the plan below are done.** People can log in
 and see what is theirs to see: an overview, problems, hosts and services
 with filters, sorting and pages, host and service groups, and a page for
 each host and service. From there they can check now, acknowledge,
 schedule downtimes, comment, and turn notifications and checks off and
 on, for one object or for several ticked in a list. There is the history
 of alerts and notifications, and availability over a span of time, with
-a CSV file. Changing the config and dashboards are not there yet.
+a CSV file. Those with the role for it add, change and take out hosts
+and services, which the engine checks before anything is written.
+Dashboards are not there yet.
 
 ## How it fits together
 
@@ -30,7 +32,8 @@ Everything is TypeScript, in one pnpm workspace:
 - `web/`: the interface, Vue 3.
 - `dev/`: a demo site with invented hosts, run on either engine.
 - `docs/`: [who may see and do what](docs/permissions.md),
-  [history and availability](docs/history.md).
+  [history and availability](docs/history.md),
+  [changing the config](docs/config.md).
 
 ## Try it
 
@@ -71,6 +74,7 @@ Then open <http://127.0.0.1:8080>.
 - `dev_user = "admin"` in place of `htpasswd`: nobody logs in and everyone
   is that user. For trying things on one machine; refused otherwise.
 - `[roles]`: see [docs/permissions.md](docs/permissions.md).
+- `[backend.config]`: see [docs/config.md](docs/config.md).
 
 ## Dependencies
 
@@ -93,7 +97,7 @@ The last two need `dev/up naemon` and `dev/up checkd` running.
 0. Foundations and permissions (done)
 1. Status views and actions (done)
 2. History and availability (done)
-3. Adding and changing hosts and services
+3. Adding and changing hosts and services (done)
 4. Dashboards
 5. One interface over several sites
 6. Phone app

@@ -14,6 +14,8 @@ import { parse } from 'smol-toml'
 import { VERSION, buildApp, userName } from './app.ts'
 import { Htpasswd, Limiter } from './auth.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
+import { ConfigAdmin } from './configadmin.ts'
+import { PathMap } from './nagioscfg.ts'
 import { Events } from './events.ts'
 import { RolesConfig } from './policy.ts'
 import { Store } from './store.ts'
@@ -77,12 +79,24 @@ function main(): void {
   }
 
   const backends: Backend[] = []
+  const admins = new Map<string, ConfigAdmin>()
   for (const entry of Array.isArray(config.backend) ? (config.backend as Record<string, unknown>[]) : []) {
     const { name, livestatus } = entry
     if (typeof name !== 'string' || name === '' || backends.some((b) => b.name === name)) fail(`${path}: each backend needs a name of its own`)
     if (typeof livestatus !== 'string') fail(`${path}: backend ${name} needs livestatus = "unix:<socket>"`)
     try {
-      backends.push(new LivestatusBackend(name, livestatus))
+      const backend = new LivestatusBackend(name, livestatus)
+      backends.push(backend)
+      // [backend.config]: where its config can be changed.
+      if (entry.config !== undefined) {
+        const c = entry.config as Record<string, unknown>
+        const strings = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === 'string')
+        if (typeof c.dir !== 'string' || typeof c.main !== 'string' || !strings(c.verify)) {
+          fail(`${path}: backend ${name}: config needs dir, main and verify = ["program", ..., "{main}"]`)
+        }
+        if (c.reload !== undefined && !strings(c.reload)) fail(`${path}: backend ${name}: config.reload is a command, as a list`)
+        admins.set(name, new ConfigAdmin(backend, { dir: c.dir, main: c.main, verify: c.verify, reload: c.reload, paths: new PathMap((c.paths ?? {}) as Record<string, string>) }))
+      }
     } catch (err) {
       fail(`${path}: backend ${name}: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -108,6 +122,7 @@ function main(): void {
     devUser,
     cookieSecure: behindProxy,
     webRoot: webRoot === undefined ? undefined : resolve(webRoot),
+    config: admins,
   })
   const server = serve({ fetch: app.fetch, hostname, port }, () => {
     console.error(`nuthatch ${VERSION} listening at http://${listen}`)

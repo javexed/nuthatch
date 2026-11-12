@@ -62,7 +62,7 @@ class Client:
             request.add_header(name, value)
         opener = urllib.request.build_opener() if self.token else self.opener
         try:
-            with opener.open(request, timeout=30) as answer:
+            with opener.open(request, timeout=90) as answer:
                 return answer.status, json.loads(answer.read() or b"null")
         except urllib.error.HTTPError as err:
             text = err.read()
@@ -97,6 +97,16 @@ def main():
     for engine in ("naemon", "checkd"):
         if not os.path.exists(os.path.join(run, engine, "live")):
             sys.exit(f"dev/up {engine} is not running")
+    # Hosts that an earlier, broken-off run added go, and the engine is
+    # told.
+    for engine in ("naemon", "checkd"):
+        managed = os.path.join(run, engine, "managed")
+        left = os.listdir(managed)
+        for name in left:
+            os.remove(os.path.join(managed, name))
+        if left:
+            subprocess.run([os.path.join(HERE, "restart"), engine], check=True)
+            time.sleep(3)
     work = os.path.join(run, "matrix")
     os.makedirs(work, exist_ok=True)
     for name in os.listdir(work):
@@ -253,11 +263,75 @@ def tests():
         expected = [("admin", "by admin")] + ([] if closed else [("ops", "by ops")])
         check(f"{backend}: comments carry their sender's name, and only the allowed ones arrived", authors, expected)
 
+    for backend in ("naemon", "checkd"):
+        config(clients, backend)
+
     status, body = admin.call("GET", "/api/v1/audit")
     refused = [row for row in body if row["action"] == "command refused"]
     check("refused commands are in the audit log", len(refused) > 0, True)
     check("the audit log needs a role", clients["ops"].call("GET", "/api/v1/audit")[0], 403)
     check("logout ends the session", (admin.call("POST", "/api/v1/logout")[0], admin.call("GET", "/api/v1/session")[0]), (200, 401))
+
+
+def config(clients, backend):
+    """Changing the config: for admin only, checked by the engine before
+    anything is written, and taken up by the engine without losing state."""
+    admin = clients["admin"]
+    path = f"/api/v1/config/{backend}"
+    directory = os.path.join(HERE, "run", backend, "managed")
+    print(f"\n== config of {backend}")
+    for user in ("ops", "viewer", "stranger"):
+        check(f"{backend}: {user} may not read the config", clients[user].call("GET", path)[0], 403)
+        check(f"{backend}: {user} may not change it", clients[user].call("POST", path, {"revision": "", "change": {"kind": "delete", "name": "x"}})[0], 403)
+    status, state = admin.call("GET", path)
+    check(f"{backend}: admin reads the config", (status, state.get("hosts"), state.get("templates")), (200, [], {"host": ["demo-host"], "service": ["demo-service"]}))
+    check(f"{backend}: the engine's commands are there to choose from", state["choices"]["commands"], ["demo", "notify"])
+    host = {"name": "added1", "alias": "Added by the matrix", "address": "192.0.2.80", "use": "demo-host", "hostgroups": ["web"], "contact_groups": ["admins"],
+            "contacts": [], "services": [{"description": "extra", "use": "demo-service", "check_command": "demo!extra!30!0", "servicegroups": [], "contacts": ["ops"], "contact_groups": []}]}
+    put = lambda host, revision=None, **more: admin.call("POST", path, {"revision": revision or state["revision"], "change": {"kind": "put", "host": host}, **more})
+
+    # What is refused before the engine is asked.
+    check(f"{backend}: a template that is none", put({**host, "use": "nothing"})[0], 400)
+    check(f"{backend}: a command the engine has not", put({**host, "check_command": "rm!-rf"})[0], 400)
+    check(f"{backend}: a value of two lines", put({**host, "alias": "a\ndefine command {"})[0], 400)
+    check(f"{backend}: a value with a comment sign", put({**host, "alias": "a ; b"})[0], 400)
+    check(f"{backend}: a name that is a path", put({**host, "name": "../x"})[0], 400)
+    check(f"{backend}: a group the engine has not", put({**host, "hostgroups": ["nothing"]})[0], 400)
+    check(f"{backend}: an old revision", put(host, revision="0" * 24)[0], 409)
+
+    # What the engine itself refuses: a host it already has elsewhere.
+    status, body = put({**host, "name": "web1"})
+    check(f"{backend}: the engine's verifier refuses a second web1", (status, bool(body.get("output"))), (422, True))
+    check(f"{backend}: and nothing was written", os.listdir(directory), [])
+
+    # Only checked.
+    status, body = put(host, dry_run=True)
+    check(f"{backend}: a dry run is checked and not written", (status, body.get("verified"), body.get("applied"), os.listdir(directory)), (200, True, False, []))
+    check(f"{backend}: it shows the file", "host_name" in body.get("text", "") and "service_description  extra" in body.get("text", ""), True)
+
+    # For real, with a comment on another host that must outlast it.
+    admin.command(backend, "ADD_HOST_COMMENT", "web2", 1, "x", "outlasts the reload")
+    time.sleep(1)
+    status, body = put(host)
+    check(f"{backend}: the host is added", (status, body.get("applied")), (200, True))
+    check(f"{backend}: the engine has it, with its service", (admin.rows(backend, "hosts", ["name"], ["Filter: name = added1"]), admin.rows(backend, "services", ["description"], ["Filter: host_name = added1"])), (1, 1))
+    check(f"{backend}: in its host group", admin.rows(backend, "hosts", ["name"], ["Filter: name = added1", "Filter: groups >= web"]), 1)
+    check(f"{backend}: ops, a contact of its service, sees the service", clients["ops"].rows(backend, "services", ["description"], ["Filter: host_name = added1"]), 1)
+    check(f"{backend}: the comment is still there", admin.rows(backend, "comments", ["id"], ["Filter: comment = outlasts the reload"]), 1)
+    status, state = admin.call("GET", path)
+    check(f"{backend}: nuthatch reads back what it wrote", [h["name"] for h in state["hosts"]], ["added1"])
+    check(f"{backend}: field by field", {k: state["hosts"][0].get(k) for k in ("alias", "address", "use", "hostgroups", "contact_groups")},
+          {"alias": "Added by the matrix", "address": "192.0.2.80", "use": "demo-host", "hostgroups": ["web"], "contact_groups": ["admins"]})
+    check(f"{backend}: a second host of the name is refused", put(host)[0], 400)
+
+    # Renamed, then taken away.
+    status, body = admin.call("POST", path, {"revision": state["revision"], "change": {"kind": "put", "host": {**host, "name": "added2"}, "previous": "added1"}})
+    check(f"{backend}: the host is renamed", (status, body.get("applied"), os.listdir(directory)), (200, True, ["added2.cfg"]))
+    check(f"{backend}: the engine has the new name only", (admin.rows(backend, "hosts", ["name"], ["Filter: name = added2"]), admin.rows(backend, "hosts", ["name"], ["Filter: name = added1"])), (1, 0))
+    status, body = admin.call("POST", path, {"revision": body.get("revision"), "change": {"kind": "delete", "name": "added2"}})
+    check(f"{backend}: the host is taken away", (status, body.get("applied"), os.listdir(directory)), (200, True, []))
+    check(f"{backend}: the engine has it no more", admin.rows(backend, "hosts", ["name"], ["Filter: name ~ ^added"]), 0)
+    check(f"{backend}: the comment is still there, after three reloads", admin.rows(backend, "comments", ["id"], ["Filter: comment = outlasts the reload"]), 1)
 
 
 def ops_services(client, backend):

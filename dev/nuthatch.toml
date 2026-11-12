@@ -21,6 +21,19 @@ authorized_for_read_only = ["viewer"]
 name = "naemon"
 livestatus = "unix:dev/run/naemon/live"
 
+# Naemon runs in a container: its verifier is run there, and the paths it
+# knows are mapped to where they are here.
+[backend.config]
+dir = "dev/run/naemon/managed"
+main = "dev/run/naemon/naemon.cfg"
+verify = ["docker", "exec", "nuthatch-dev-naemon", "naemon", "-v", "{main}"]
+paths = { "/run-site" = "dev/run/naemon", "/site" = "dev" }
+
 [[backend]]
 name = "checkd"
 livestatus = "unix:dev/run/checkd/live"
+
+[backend.config]
+dir = "dev/run/checkd/managed"
+main = "dev/run/checkd/naemon.cfg"
+verify = ["../checkd/target/debug/checkd", "verify", "--quiet", "{main}"]

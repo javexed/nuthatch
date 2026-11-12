@@ -1,0 +1,147 @@
+<script setup lang="ts">
+// The hosts and services nuthatch keeps the config of: adding, changing
+// and taking away. Every change is checked by the engine itself before it
+// is written, and the engine then reads its config again.
+import type { ConfigChange, ConfigResult, ConfigState, ManagedHost } from '@nuthatch/api'
+import { ApiError } from '@nuthatch/api'
+import { computed, ref, watch } from 'vue'
+import HostForm from '../components/HostForm.vue'
+import { useLive } from '../stores/live'
+import { api, useSession } from '../stores/session'
+
+const session = useSession()
+const live = useLive()
+const backends = computed(() => session.session?.config_backends ?? [])
+const backend = ref(backends.value[0] ?? '')
+const state = ref<ConfigState | null>(null)
+const error = ref('')
+/** The host in the form: one being changed, 'new', or none. */
+const editing = ref<ManagedHost | 'new' | null>(null)
+const busy = ref(false)
+const notice = ref('')
+/** What the engine's own check said, when it refused, or on a check only. */
+const report = ref<{ title: string; output: string; text?: string } | null>(null)
+
+async function load() {
+  if (backend.value === '') return
+  try {
+    state.value = await api.config(backend.value)
+    error.value = ''
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+  }
+}
+watch(backend, () => {
+  state.value = null
+  editing.value = null
+  void load()
+}, { immediate: true })
+
+async function send(change: ConfigChange, dryRun: boolean, done: string): Promise<boolean> {
+  if (!state.value) return false
+  busy.value = true
+  notice.value = dryRun ? 'The engine is checking…' : 'The engine is checking, and then reading its config again…'
+  report.value = null
+  try {
+    const result: ConfigResult = await api.changeConfig(backend.value, state.value.revision, change, dryRun)
+    notice.value = done
+    if (dryRun) report.value = { title: 'The engine takes this config. It would be written as:', output: result.output, text: result.text }
+    else {
+      await load()
+      live.nudge()
+    }
+    return true
+  } catch (err) {
+    notice.value = ''
+    const message = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    const output = err instanceof ApiError && typeof err.detail.output === 'string' ? err.detail.output : ''
+    report.value = { title: `Not changed: ${message}.`, output }
+    if (err instanceof ApiError && err.status === 409) await load()
+    return false
+  } finally {
+    busy.value = false
+  }
+}
+
+async function save(host: ManagedHost) {
+  const previous = editing.value !== 'new' && editing.value !== null ? editing.value.name : undefined
+  if (await send({ kind: 'put', host, previous }, false, `${host.name} is saved, and the engine has it.`)) editing.value = null
+}
+
+const check = (host: ManagedHost) => {
+  const previous = editing.value !== 'new' && editing.value !== null ? editing.value.name : undefined
+  return send({ kind: 'put', host, previous }, true, '')
+}
+
+async function remove(host: ManagedHost) {
+  if (!window.confirm(`Take ${host.name} and its ${host.services.length} services out of the config? Their history stays in the log.`)) return
+  await send({ kind: 'delete', name: host.name }, false, `${host.name} is taken out.`)
+}
+</script>
+
+<template>
+  <h1>Config</h1>
+  <p v-if="backends.length === 0" class="none">
+    No backend's config can be changed here, or you have not the role for it (config_edit).
+  </p>
+  <template v-else>
+    <label v-if="backends.length > 1" class="backend-choice">
+      Backend
+      <select v-model="backend" name="backend" :disabled="busy || editing !== null">
+        <option v-for="name in backends" :key="name" :value="name">{{ name }}</option>
+      </select>
+    </label>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+    <section v-if="report" class="card report" role="alert">
+      <p><strong>{{ report.title }}</strong></p>
+      <pre v-if="report.text" class="long">{{ report.text }}</pre>
+      <details v-if="report.output" :open="!report.text">
+        <summary>What the engine's check said</summary>
+        <pre class="long">{{ report.output }}</pre>
+      </details>
+    </section>
+
+    <template v-if="state">
+      <HostForm
+        v-if="editing !== null"
+        :key="editing === 'new' ? ' new' : editing.name"
+        :state="state"
+        :host="editing === 'new' ? undefined : editing"
+        :busy="busy"
+        @check="check"
+        @save="save"
+        @cancel="editing = null"
+      />
+      <template v-else>
+        <p>
+          <button type="button" :disabled="busy || state.templates.host.length === 0" @click="editing = 'new'">Add a host</button>
+        </p>
+        <p v-if="state.templates.host.length === 0" class="error">
+          The engine's config has no host template (a host with a name and register 0) to build a host on.
+        </p>
+        <p class="notice">
+          These are the hosts nuthatch keeps the config of on {{ backend }}. The engine's other hosts are in its own files.
+        </p>
+        <ul v-if="state.hosts.length > 0" class="managed">
+          <li v-for="host in state.hosts" :key="host.name" class="card">
+            <div>
+              <strong>{{ host.name }}</strong> <span class="by">{{ host.address }} · {{ host.use }}</span>
+              <p v-if="host.services.length > 0" class="by">Services: {{ host.services.map((s) => s.description).join(', ') }}</p>
+            </div>
+            <div class="actions">
+              <button type="button" class="quiet" :disabled="busy" @click="editing = host">Change</button>
+              <button type="button" class="plain" :disabled="busy" @click="remove(host)">Take out</button>
+            </div>
+          </li>
+        </ul>
+        <p v-else class="none">None yet.</p>
+        <ul v-if="state.unreadable.length > 0" class="unreadable">
+          <li v-for="file in state.unreadable" :key="file.file">
+            <strong>{{ file.file }}</strong> was changed by hand and is left alone: {{ file.why }}.
+          </li>
+        </ul>
+      </template>
+    </template>
+  </template>
+</template>

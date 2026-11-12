@@ -4,14 +4,17 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
 
 export class ApiError extends Error {
   readonly status: number
+  /** What else the server said, such as the output of an engine's check. */
+  readonly detail: Record<string, unknown>
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail: Record<string, unknown> = {}) {
     super(message)
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -77,7 +80,7 @@ export class Client {
     }
     if (!answer.ok) {
       const message = (parsed as { error?: string } | null)?.error ?? `the server answered ${answer.status}`
-      throw new ApiError(answer.status, message)
+      throw new ApiError(answer.status, message, typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {})
     }
     return parsed as T
   }
@@ -129,6 +132,18 @@ export class Client {
 
   setPref(key: string, value: unknown): Promise<void> {
     return this.call('PUT', `/api/v1/prefs/${encodeURIComponent(key)}`, value)
+  }
+
+  config(backend: string): Promise<ConfigState> {
+    return this.call('GET', `/api/v1/config/${encodeURIComponent(backend)}`)
+  }
+
+  /**
+   * Changes a backend's config: checked by the engine, written, and the
+   * engine told to read it. With `dryRun`, only checked.
+   */
+  changeConfig(backend: string, revision: string, change: ConfigChange, dryRun = false): Promise<ConfigResult> {
+    return this.call('POST', `/api/v1/config/${encodeURIComponent(backend)}`, { revision, change, dry_run: dryRun })
   }
 
   /**

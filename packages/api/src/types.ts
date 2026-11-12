@@ -35,6 +35,8 @@ export interface Session {
   commands: string[]
   tables: string[]
   backends: BackendStatus[]
+  /** The backends whose config can be changed here, by those with the role config_edit. */
+  config_backends: string[]
 }
 
 export interface Sort {
@@ -100,3 +102,55 @@ export interface Token {
 export type ServerEvent =
   | { type: 'changed'; backend?: string }
   | { type: 'backend'; name: string; ok: boolean }
+
+/** A service of a host that nuthatch keeps the config of. */
+export interface ManagedService {
+  description: string
+  /** The template it takes its settings from. */
+  use: string
+  /** A command's name, with its arguments after `!`. */
+  check_command?: string
+  servicegroups: string[]
+  contacts: string[]
+  contact_groups: string[]
+  notes?: string
+}
+
+/** A host that nuthatch keeps the config of, with its services. */
+export interface ManagedHost {
+  name: string
+  alias?: string
+  address: string
+  use: string
+  check_command?: string
+  hostgroups: string[]
+  contacts: string[]
+  contact_groups: string[]
+  notes?: string
+  services: ManagedService[]
+}
+
+export interface ConfigState {
+  backend: string
+  /** What the files are now; sent back with a change, which is refused when they changed in between. */
+  revision: string
+  hosts: ManagedHost[]
+  /** Files in nuthatch's directory that it cannot edit, and why. */
+  unreadable: { file: string; why: string }[]
+  templates: { host: string[]; service: string[] }
+  /** What the engine has, to choose from. */
+  choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[] }
+}
+
+export type ConfigChange = { kind: 'put'; host: ManagedHost; /** Its name before, when it is not new. */ previous?: string } | { kind: 'delete'; name: string }
+
+export interface ConfigResult {
+  /** Whether the engine's own check took the config. */
+  verified: boolean
+  applied: boolean
+  revision: string
+  /** The file as it is written, for a `put`. */
+  text: string
+  /** What the engine's check said. */
+  output: string
+}

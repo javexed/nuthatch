@@ -10,6 +10,7 @@ import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
+import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
 import type { Events } from './events.ts'
 import { Refused, type Roles, type RolesConfig, TABLES } from './policy.ts'
 import { Forbidden, rows, stats } from './query.ts'
@@ -33,6 +34,8 @@ export interface Deps {
   cookieSecure: boolean
   /** The built interface. */
   webRoot?: string
+  /** By backend: the config that can be changed here. */
+  config?: Map<string, ConfigAdmin>
 }
 
 /** Who a request is from. */
@@ -109,6 +112,8 @@ export function buildApp(deps: Deps): Hono<Env> {
   app.onError((err, c) => {
     if (err instanceof Forbidden) return c.json({ error: err.message }, 403)
     if (err instanceof Refused) return c.json({ error: err.message }, 400)
+    if (err instanceof Conflict) return c.json({ error: err.message }, 409)
+    if (err instanceof Unverified) return c.json({ error: err.message, output: err.output }, 422)
     if (err instanceof SyntaxError) return c.json({ error: 'the body is not JSON' }, 400)
     console.error(err)
     return c.json({ error: 'nuthatch failed on this request; see its log' }, 500)
@@ -198,6 +203,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       commands: COMMAND_NAMES,
       tables: TABLES,
       backends,
+      config_backends: roles.has('config_edit') ? [...(deps.config?.keys() ?? [])] : [],
     }
     return c.json(answer)
   })
@@ -308,6 +314,35 @@ export function buildApp(deps: Deps): Hono<Env> {
       return c.json({ error: 'the audit log needs the role system_information' }, 403)
     }
     return c.json(deps.store.auditTail(500))
+  })
+
+  // Changing the config, for one role.
+  async function configOf(c: Context<Env>): Promise<{ admin: ConfigAdmin; user: string }> {
+    const { user } = c.get('identity')
+    if (!(await who(user)).roles.has('config_edit')) throw new Forbidden('changing the config needs the role config_edit')
+    const admin = deps.config?.get(c.req.param('backend') ?? '')
+    if (!admin) throw new Refused(`the config of '${c.req.param('backend')}' cannot be changed here`)
+    return { admin, user }
+  }
+
+  app.get('/api/v1/config/:backend', async (c) => c.json(await (await configOf(c)).admin.state()))
+
+  app.post('/api/v1/config/:backend', async (c) => {
+    const { admin, user } = await configOf(c)
+    const backend = c.req.param('backend')
+    const sent = await body(c)
+    const change = sent.change as { kind?: unknown; name?: unknown; host?: { name?: unknown } } | undefined
+    if (typeof change !== 'object' || change === null || (change.kind !== 'put' && change.kind !== 'delete')) throw new Refused('a change is a put or a delete')
+    const dryRun = sent.dry_run === true
+    const what = `${change.kind} ${String(change.kind === 'put' ? change.host?.name : change.name)}`
+    try {
+      const result = await admin.change(sent.revision, change as never, dryRun)
+      if (!dryRun) deps.store.audit(user, backend, 'config', what)
+      return c.json(result)
+    } catch (err) {
+      if (!dryRun) deps.store.audit(user, backend, 'config refused', `${what}: ${err instanceof Error ? err.message : String(err)}`)
+      throw err
+    }
   })
 
   app.get('/api/v1/events', (c) =>

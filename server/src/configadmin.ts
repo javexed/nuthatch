@@ -1,0 +1,377 @@
+// Changing an engine's config: the hosts and services nuthatch keeps in a
+// directory of its own, one file to a host.
+//
+// A change is first written to a copy of the directory and checked by the
+// engine's own verifier, on a copy of the main config that reads the copy
+// instead. Only what the engine takes is written to the directory itself,
+// and then the engine is told to read its config again. If the change does
+// not show in the engine within half a minute, the files are put back.
+//
+// Who can change a check command can make the engine run a program, so
+// all of this is for one role, config_edit, and commands themselves are
+// only chosen from those the engine has.
+
+import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import type { ConfigChange, ConfigResult, ConfigState, ManagedHost, ManagedService } from '@nuthatch/api'
+import type { Backend } from './backend.ts'
+import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
+import { Refused } from './policy.ts'
+import { now } from './store.ts'
+
+export interface ConfigSettings {
+  /** The directory nuthatch keeps its files in. */
+  dir: string
+  /** The engine's main config. */
+  main: string
+  /** The engine's verifier, `{main}` standing for the main config to check. */
+  verify: string[]
+  /** A command that makes the engine read its config again; without it, RESTART_PROGRAM is sent. */
+  reload?: string[]
+  paths: PathMap
+}
+
+/** The files changed since the revision the change was made from. */
+export class Conflict extends Error {}
+/** The engine's verifier did not take the config. */
+export class Unverified extends Error {
+  readonly output: string
+  constructor(output: string) {
+    super('the engine does not take this config')
+    this.output = output
+  }
+}
+
+const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
+const DESCRIPTION = /^[A-Za-z0-9][A-Za-z0-9 _.:/+-]{0,62}$/
+const ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:_-]{0,254}$/
+const MEMBER = /^[A-Za-z0-9][A-Za-z0-9 _.@-]{0,62}$/
+const HOST_KEYS = ['host_name', 'use', 'alias', 'address', 'check_command', 'hostgroups', 'contacts', 'contact_groups', 'notes']
+const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes']
+const HEADER = 'Written by nuthatch. A file changed by hand is left alone when nuthatch\nno longer understands it.'
+
+function text(value: unknown, what: string, required = false): string | undefined {
+  if (value === undefined || value === null || value === '') {
+    if (required) throw new Refused(`${what} is needed`)
+    return undefined
+  }
+  if (typeof value !== 'string') throw new Refused(`${what} is a text`)
+  const trimmed = value.trim()
+  // A `;` starts a comment in an object file, and a line ends a value.
+  if (/[;\n\r\0]/.test(trimmed) || trimmed.length > 500) throw new Refused(`${what} is one line of at most 500 letters, without ';'`)
+  if (trimmed === '' && required) throw new Refused(`${what} is needed`)
+  return trimmed === '' ? undefined : trimmed
+}
+
+function names(value: unknown, what: string, known: string[]): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || !MEMBER.test(v))) throw new Refused(`${what} is a list of names`)
+  const unknown = (value as string[]).find((v) => !known.includes(v))
+  if (unknown !== undefined) throw new Refused(`${what}: the engine has no '${unknown}'`)
+  return [...new Set(value as string[])]
+}
+
+function command(value: unknown, what: string, known: string[]): string | undefined {
+  const line = text(value, what)
+  if (line === undefined) return undefined
+  const name = line.split('!')[0] ?? ''
+  if (!known.includes(name)) throw new Refused(`${what}: the engine has no command '${name}'`)
+  return line
+}
+
+type Choices = ConfigState['choices']
+type Templates = ConfigState['templates']
+
+/** A host as it may be written, or the reason it may not. */
+export function checkHost(given: unknown, choices: Choices, known: Templates): ManagedHost {
+  if (typeof given !== 'object' || given === null) throw new Refused('a host is needed')
+  const h = given as Record<string, unknown>
+  if (typeof h.name !== 'string' || !NAME.test(h.name)) throw new Refused("a host's name is letters, digits, '.', '_' and '-', at most 63")
+  if (typeof h.address !== 'string' || !ADDRESS.test(h.address)) throw new Refused("a host's address is a name or an IP address")
+  if (typeof h.use !== 'string' || !known.host.includes(h.use)) throw new Refused('choose one of the host templates')
+  const services: ManagedService[] = []
+  for (const given of Array.isArray(h.services) ? (h.services as Record<string, unknown>[]) : []) {
+    if (typeof given !== 'object' || given === null) throw new Refused('a service is needed')
+    if (typeof given.description !== 'string' || !DESCRIPTION.test(given.description)) {
+      throw new Refused("a service's name is letters, digits, spaces and '_.:/+-', at most 63")
+    }
+    const what = `service ${given.description}`
+    if (services.some((s) => s.description === given.description)) throw new Refused(`${what} is there twice`)
+    if (typeof given.use !== 'string' || !known.service.includes(given.use)) throw new Refused(`${what}: choose one of the service templates`)
+    services.push({
+      description: given.description,
+      use: given.use,
+      check_command: command(given.check_command, `${what}: the check command`, choices.commands),
+      servicegroups: names(given.servicegroups, `${what}: service groups`, choices.servicegroups),
+      contacts: names(given.contacts, `${what}: contacts`, choices.contacts),
+      contact_groups: names(given.contact_groups, `${what}: contact groups`, choices.contactgroups),
+      notes: text(given.notes, `${what}: notes`),
+    })
+  }
+  return {
+    name: h.name,
+    alias: text(h.alias, 'the alias'),
+    address: h.address,
+    use: h.use,
+    check_command: command(h.check_command, 'the check command', choices.commands),
+    hostgroups: names(h.hostgroups, 'host groups', choices.hostgroups),
+    contacts: names(h.contacts, 'contacts', choices.contacts),
+    contact_groups: names(h.contact_groups, 'contact groups', choices.contactgroups),
+    notes: text(h.notes, 'notes'),
+    services,
+  }
+}
+
+function put(attrs: [string, string][], key: string, value: string | string[] | undefined): void {
+  const text = Array.isArray(value) ? value.join(',') : value
+  if (text !== undefined && text !== '') attrs.push([key, text])
+}
+
+/** A host and its services as an object file's text. */
+export function hostFile(host: ManagedHost): string {
+  const definitions: Definition[] = []
+  const attrs: [string, string][] = [['host_name', host.name], ['use', host.use]]
+  put(attrs, 'alias', host.alias)
+  put(attrs, 'address', host.address)
+  put(attrs, 'check_command', host.check_command)
+  put(attrs, 'hostgroups', host.hostgroups)
+  put(attrs, 'contacts', host.contacts)
+  put(attrs, 'contact_groups', host.contact_groups)
+  put(attrs, 'notes', host.notes)
+  definitions.push({ type: 'host', attrs })
+  for (const service of host.services) {
+    const attrs: [string, string][] = [['host_name', host.name], ['service_description', service.description], ['use', service.use]]
+    put(attrs, 'check_command', service.check_command)
+    put(attrs, 'servicegroups', service.servicegroups)
+    put(attrs, 'contacts', service.contacts)
+    put(attrs, 'contact_groups', service.contact_groups)
+    put(attrs, 'notes', service.notes)
+    definitions.push({ type: 'service', attrs })
+  }
+  return writeObjects(definitions, HEADER)
+}
+
+const list = (value: string | undefined) => (value === undefined ? [] : value.split(',').map((v) => v.trim()).filter((v) => v !== ''))
+
+/** Reads a file nuthatch wrote. Throws the reason when it is not one it can edit. */
+export function readHostFile(content: string): ManagedHost {
+  const definitions = parseObjects(content)
+  const hosts = definitions.filter((d) => d.type === 'host')
+  const [first] = hosts
+  if (hosts.length !== 1 || first === undefined) throw new Error('it does not define exactly one host')
+  const name = attr(first, 'host_name')
+  if (name === undefined) throw new Error('its host has no host_name')
+  const strange = (d: Definition, keys: string[]) => d.attrs.find(([key]) => !keys.includes(key))?.[0]
+  if (strange(first, HOST_KEYS) !== undefined) throw new Error(`its host has '${strange(first, HOST_KEYS)}', which nuthatch does not edit`)
+  const services: ManagedService[] = []
+  for (const d of definitions) {
+    if (d === first) continue
+    if (d.type !== 'service') throw new Error(`it defines a ${d.type}`)
+    if (attr(d, 'host_name') !== name) throw new Error('it has a service of another host')
+    if (strange(d, SERVICE_KEYS) !== undefined) throw new Error(`a service has '${strange(d, SERVICE_KEYS)}', which nuthatch does not edit`)
+    services.push({
+      description: attr(d, 'service_description') ?? '',
+      use: attr(d, 'use') ?? '',
+      check_command: attr(d, 'check_command'),
+      servicegroups: list(attr(d, 'servicegroups')),
+      contacts: list(attr(d, 'contacts')),
+      contact_groups: list(attr(d, 'contact_groups')),
+      notes: attr(d, 'notes'),
+    })
+  }
+  return {
+    name,
+    alias: attr(first, 'alias'),
+    address: attr(first, 'address') ?? '',
+    use: attr(first, 'use') ?? '',
+    check_command: attr(first, 'check_command'),
+    hostgroups: list(attr(first, 'hostgroups')),
+    contacts: list(attr(first, 'contacts')),
+    contact_groups: list(attr(first, 'contact_groups')),
+    notes: attr(first, 'notes'),
+    services,
+  }
+}
+
+function run(command: string[], limit: number): Promise<{ code: number; output: string }> {
+  return new Promise((done) => {
+    const [program = '', ...args] = command
+    execFile(program, args, { timeout: limit, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+      const output = `${stdout}${stderr}`.slice(0, 64 * 1024)
+      if (err === null) done({ code: 0, output })
+      else done({ code: typeof err.code === 'number' ? err.code : 1, output: output || err.message })
+    })
+  })
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+export class ConfigAdmin {
+  private readonly backend: Backend
+  private readonly settings: ConfigSettings
+  /** One change at a time. */
+  private busy: Promise<unknown> = Promise.resolve()
+
+  constructor(backend: Backend, settings: ConfigSettings) {
+    this.backend = backend
+    this.settings = { ...settings, dir: resolve(settings.dir), main: resolve(settings.main) }
+    mkdirSync(this.settings.dir, { recursive: true })
+  }
+
+  private files(): Map<string, string> {
+    const out = new Map<string, string>()
+    for (const name of readdirSync(this.settings.dir).sort()) {
+      if (name.endsWith('.cfg')) out.set(name, readFileSync(join(this.settings.dir, name), 'utf8'))
+    }
+    return out
+  }
+
+  private revision(files: Map<string, string>): string {
+    const hash = createHash('sha256')
+    for (const [name, content] of files) hash.update(`${name}\0${content.length}\0${content}`)
+    return hash.digest('hex').slice(0, 24)
+  }
+
+  private async names(table: string): Promise<string[]> {
+    return (await this.backend.query(`GET ${table}\nColumns: name`)).map((row) => String(row[0])).sort()
+  }
+
+  async state(): Promise<ConfigState> {
+    const files = this.files()
+    const hosts: ManagedHost[] = []
+    const unreadable: ConfigState['unreadable'] = []
+    for (const [file, content] of files) {
+      try {
+        hosts.push(readHostFile(content))
+      } catch (err) {
+        unreadable.push({ file, why: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    const main = readMain(this.settings.main, this.settings.paths)
+    const [commands, contacts, contactgroups, hostgroups, servicegroups] = await Promise.all(
+      ['commands', 'contacts', 'contactgroups', 'hostgroups', 'servicegroups'].map((table) => this.names(table)),
+    )
+    return {
+      backend: this.backend.name,
+      revision: this.revision(files),
+      hosts: hosts.sort((a, b) => a.name.localeCompare(b.name)),
+      unreadable,
+      templates: { host: templates(main.files, 'host'), service: templates(main.files, 'service') },
+      choices: { commands: commands ?? [], contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [] },
+    }
+  }
+
+  /** Makes a change, or with `dryRun` only has the engine check it. */
+  change(revision: unknown, change: ConfigChange, dryRun: boolean): Promise<ConfigResult> {
+    const next = this.busy.then(() => this.changeNow(revision, change, dryRun))
+    this.busy = next.catch(() => undefined)
+    return next
+  }
+
+  private async hostThere(name: string): Promise<boolean> {
+    const rows = await this.backend.query(`GET hosts\nFilter: name = ${name}\nStats: state >= 0`)
+    return rows[0]?.[0] === 1
+  }
+
+  private async reload(): Promise<void> {
+    if (this.settings.reload) {
+      const { code, output } = await run(this.settings.reload, 60_000)
+      if (code !== 0) throw new Error(`the reload command failed: ${output.trim()}`)
+    } else {
+      await this.backend.command(`[${now()}] RESTART_PROGRAM`)
+    }
+  }
+
+  private async changeNow(revision: unknown, change: ConfigChange, dryRun: boolean): Promise<ConfigResult> {
+    const { dir, paths } = this.settings
+    const state = await this.state()
+    if (revision !== state.revision) throw new Conflict('the config was changed in the meantime; read it again')
+    const main = readMain(this.settings.main, paths)
+    const engineDir = paths.toEngine(dir)
+    if (!main.dirs.some((d) => d.replace(/\/+$/, '') === engineDir)) {
+      throw new Refused(`the engine's main config does not read ${engineDir} with a cfg_dir line of its own`)
+    }
+
+    // What the directory will hold.
+    const writes = new Map<string, string>()
+    const removes: string[] = []
+    let name: string
+    if (change.kind === 'put') {
+      const host = checkHost(change.host, state.choices, state.templates)
+      name = host.name
+      const before = typeof change.previous === 'string' ? change.previous : undefined
+      const taken = state.hosts.some((h) => h.name === host.name) || state.unreadable.some((u) => u.file === `${host.name}.cfg`)
+      if (before === undefined && taken) throw new Refused(`nuthatch already keeps a host '${host.name}'`)
+      if (before !== undefined && !state.hosts.some((h) => h.name === before)) throw new Refused(`nuthatch keeps no host '${before}'`)
+      if (before !== undefined && before !== host.name) {
+        if (taken) throw new Refused(`nuthatch already keeps a host '${host.name}'`)
+        removes.push(`${before}.cfg`)
+      }
+      writes.set(`${host.name}.cfg`, hostFile(host))
+    } else if (change.kind === 'delete' && typeof change.name === 'string' && state.hosts.some((h) => h.name === change.name)) {
+      name = change.name
+      removes.push(`${change.name}.cfg`)
+    } else {
+      throw new Refused('nuthatch keeps no such host')
+    }
+    const text = writes.values().next().value ?? ''
+
+    // The engine's verifier, on a copy.
+    const before = this.files()
+    const staging = mkdtempSync(join(dirname(dir), '.nuthatch-staging-'))
+    let verified: { code: number; output: string }
+    try {
+      const copy = join(staging, 'objects')
+      mkdirSync(copy)
+      for (const [file, content] of before) if (!removes.includes(file)) writeFileSync(join(copy, file), content)
+      for (const [file, content] of writes) writeFileSync(join(copy, file), content)
+      const stagedMain = join(staging, 'main.cfg')
+      writeFileSync(stagedMain, mainWith(main, engineDir, paths.toEngine(copy)))
+      verified = await run(this.settings.verify.map((part) => part.replace('{main}', paths.toEngine(stagedMain))), 60_000)
+    } finally {
+      rmSync(staging, { recursive: true, force: true })
+    }
+    const output = verified.output.trim()
+    if (verified.code !== 0) throw new Unverified(output)
+    if (dryRun) return { verified: true, applied: false, revision: state.revision, text, output }
+
+    // Taken: written, and the engine told.
+    const write = (files: Map<string, string>, gone: string[]) => {
+      for (const [file, content] of files) {
+        writeFileSync(join(dir, `.${file}.new`), content)
+        renameSync(join(dir, `.${file}.new`), join(dir, file))
+      }
+      for (const file of gone) unlinkSync(join(dir, file))
+    }
+    write(writes, removes)
+    const wanted = change.kind === 'put'
+    let shown = false
+    let problem = ''
+    try {
+      // Taken up: the engine started anew, and has the host or has it no more.
+      const started = () => this.backend.query('GET status\nColumns: program_start').then((rows) => rows[0]?.[0])
+      const startedBefore = await started()
+      // The start is known to the second: a restart within the second of
+      // the last one could not be told from none.
+      while (typeof startedBefore === 'number' && Date.now() / 1000 < startedBefore + 1.1) await sleep(100)
+      await this.reload()
+      for (let tries = 0; tries < 60 && !shown; tries++) {
+        await sleep(500)
+        const anew = await started().then((at) => at !== undefined && at !== startedBefore, () => false)
+        shown = anew && (await this.hostThere(name).catch(() => !wanted)) === wanted
+      }
+    } catch (err) {
+      problem = err instanceof Error ? err.message : String(err)
+    }
+    if (!shown) {
+      // Put back as it was, and the engine told again.
+      const restore = new Map([...before].filter(([file]) => writes.has(file) || removes.includes(file)))
+      write(restore, [...writes.keys()].filter((file) => !before.has(file)))
+      await this.reload().catch(() => undefined)
+      throw new Error(`the engine did not take up the change within 30 seconds${problem ? ` (${problem})` : ''}; the files are as they were`)
+    }
+    return { verified: true, applied: true, revision: this.revision(this.files()), text, output }
+  }
+}

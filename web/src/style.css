@@ -201,3 +201,18 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .bar-of .warning { background: var(--warning); }
 .bar-of .critical { background: var(--critical); }
 .bar-of .unknown { background: var(--unknown); }
+
+/* Changing the config. */
+.host-form { display: grid; gap: 0.8rem; }
+.host-form h3 { margin: 0.4rem 0 0; font-size: 1rem; color: var(--muted); }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.7rem; }
+.fields select[multiple] { min-height: 5.5rem; }
+.service-fields { border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.8rem; margin: 0; display: grid; gap: 0.6rem; min-width: 0; }
+.service-fields legend { color: var(--muted); font-size: 0.9rem; padding: 0 0.3rem; }
+.host-form > button.quiet { justify-self: start; }
+.managed { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.managed li { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: space-between; align-items: center; margin: 0; }
+.managed .actions { margin: 0; }
+.unreadable { color: var(--muted); }
+.report p { margin-top: 0; }
+.backend-choice { max-width: 16rem; margin-bottom: 0.8rem; }

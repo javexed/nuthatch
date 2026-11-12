@@ -1,0 +1,93 @@
+// Phase 3: adding, changing and taking away a host from the interface, on
+// each engine.
+import { execFileSync } from 'node:child_process'
+import { readdirSync, unlinkSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { expect, test } from '@playwright/test'
+import { ENGINES, fits, livestatus, login, send, sleep } from './helpers'
+
+const dev = join(dirname(fileURLToPath(import.meta.url)), '../../dev')
+test.setTimeout(180_000)
+
+// Hosts that an earlier, broken-off run added go, and the engine is told.
+test.beforeAll(async () => {
+  for (const engine of ENGINES) {
+    const managed = join(dev, 'run', engine, 'managed')
+    const left = readdirSync(managed)
+    for (const file of left) unlinkSync(join(managed, file))
+    if (left.length > 0) {
+      execFileSync(join(dev, 'restart'), [engine])
+      await sleep(3000)
+    }
+  }
+})
+
+for (const engine of ENGINES) {
+  test(`a host is added, refused when broken, and taken out on ${engine}`, async ({ page }) => {
+    const name = `ui-${engine}-${test.info().project.name}`
+    const kept = `kept over the config change ${name} ${Date.now()}`
+    // A downtime elsewhere, which the engine must still have afterwards.
+    const start = Math.floor(Date.now() / 1000)
+    await send(engine, `SCHEDULE_HOST_DOWNTIME;lab2;${start};${start + 600};1;0;0;admin;${kept}`)
+
+    await login(page, 'admin')
+    await page.getByRole('link', { name: 'Config' }).click()
+    await expect(page.getByRole('heading', { name: 'Config' })).toBeVisible()
+    await page.locator('select[name=backend]').selectOption(engine)
+    await expect(page.getByText(`on ${engine}`)).toBeVisible()
+    await page.getByRole('button', { name: 'Add a host' }).click()
+    await page.getByLabel('Name').first().fill(name)
+    await page.getByLabel('Address').fill('192.0.2.90')
+    await page.getByLabel('Alias').fill('Added in the browser')
+    await page.getByLabel('Host groups').selectOption(['web'])
+    await page.getByRole('button', { name: 'Add a service' }).click()
+    const service = page.getByRole('group', { name: 'Service 1' })
+    await service.getByLabel('Name').fill('probe')
+    await service.getByLabel('Check command').selectOption('demo')
+    await service.getByLabel('Its arguments').fill('probe!30!0')
+    await fits(page)
+
+    await page.getByRole('button', { name: 'Check only' }).click()
+    await expect(page.locator('.report')).toContainText('The engine takes this config', { timeout: 60_000 })
+    await expect(page.locator('.report pre').first()).toContainText(`host_name  ${name}`)
+    expect((await livestatus(engine, `GET hosts\nFilter: name = ${name}\nStats: state >= 0`))[0]?.[0]).toBe(0)
+
+    await page.getByRole('button', { name: 'Save and apply' }).click()
+    await expect(page.getByRole('status')).toContainText(`${name} is saved, and the engine has it.`, { timeout: 90_000 })
+    await expect(page.locator('.managed li', { hasText: name })).toContainText('Services: probe')
+    expect(await livestatus(engine, `GET services\nColumns: host_name description host_groups\nFilter: host_name = ${name}`)).toEqual([[name, 'probe', ['web']]])
+    expect((await livestatus(engine, `GET downtimes\nFilter: comment = ${kept}\nStats: id >= 0`))[0]?.[0]).toBe(1)
+    await page.goto(`/host/${engine}/${name}`)
+    await expect(page.getByRole('heading', { name })).toBeVisible()
+    await expect(page.locator('table.rows tbody tr')).toHaveCount(1)
+
+    // A change the engine refuses: the name of a host it has elsewhere.
+    await page.goto('/config')
+    await expect(page.getByRole('heading', { name: 'Config' })).toBeVisible()
+    await page.locator('select[name=backend]').selectOption(engine)
+    await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Change' }).click()
+    await page.getByLabel('Name').first().fill('web1')
+    await page.getByRole('button', { name: 'Save and apply' }).click()
+    await expect(page.locator('.report')).toContainText('Not changed: the engine does not take this config', { timeout: 60_000 })
+    await expect(page.locator('.report details pre')).toContainText('web1')
+    expect((await livestatus(engine, `GET hosts\nFilter: name = ${name}\nStats: state >= 0`))[0]?.[0]).toBe(1)
+    await page.getByRole('button', { name: 'Cancel' }).click()
+
+    // Taken out again.
+    page.once('dialog', (dialog) => void dialog.accept())
+    await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Take out' }).click()
+    await expect(page.getByRole('status')).toContainText(`${name} is taken out.`, { timeout: 90_000 })
+    await expect(page.locator('.managed li', { hasText: name })).toHaveCount(0)
+    expect((await livestatus(engine, `GET hosts\nFilter: name = ${name}\nStats: state >= 0`))[0]?.[0]).toBe(0)
+    expect((await livestatus(engine, `GET downtimes\nFilter: comment = ${kept}\nStats: id >= 0`))[0]?.[0]).toBe(1)
+    await fits(page)
+  })
+}
+
+test('the config is not for ops', async ({ page }) => {
+  await login(page, 'ops')
+  await expect(page.getByRole('link', { name: 'Config' })).toHaveCount(0)
+  await page.goto('/config')
+  await expect(page.getByText('you have not the role')).toBeVisible()
+})
