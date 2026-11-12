@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { ApiError, Client } from '../api/client'
-import type { Role, Session } from '../api/types'
+import { ApiError, Client } from '@nuthatch/api'
+import type { Role, Session } from '@nuthatch/api'
 
 /** The one client of the page. */
 export const api = new Client()

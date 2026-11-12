@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ApiError } from '../api/client'
+import { ApiError } from '@nuthatch/api'
 import { useSession } from '../stores/session'
 
 const session = useSession()

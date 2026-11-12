@@ -1,0 +1,25 @@
+{
+  "name": "nuthatch-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "build": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.6",
+    "@nuthatch/api": "workspace:*",
+    "bcryptjs": "^3.0.3",
+    "hono": "^4.13.17",
+    "smol-toml": "^1.9.1",
+    "unixcrypt": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "6.0.3",
+    "vitest": "^5.1.0"
+  }
+}

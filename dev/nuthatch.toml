@@ -1,6 +1,6 @@
 # nuthatch against the demo site on both engines. Start them with
 # `dev/up naemon` and `dev/up checkd`, make the users with `dev/users`,
-# then, from the repo's top: server/target/debug/nuthatch dev/nuthatch.toml
+# then, from the repo's top: pnpm start dev/nuthatch.toml
 listen = "127.0.0.1:8080"
 web_root = "web/dist"
 store = "dev/run/nuthatch.sqlite"

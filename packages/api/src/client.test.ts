@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, Client, parseEvents } from './client'
+import { ApiError, Client, parseEvents } from './client.ts'
 
 function server(answers: Record<string, { status?: number; body: unknown }>) {
   const calls: { path: string; init: RequestInit }[] = []

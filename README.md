@@ -14,11 +14,15 @@ with totals. The views people work in come next.
 
     browser ── HTTPS (your proxy) ── nuthatch ── Livestatus socket ── Naemon or checkd
 
-- `server/`: the nuthatch server, in Rust. The browser talks only to it.
-  It checks every request against the user's rights, asks the engines,
-  and puts the answers of several engines together.
-- `web/`: the interface, Vue 3 and TypeScript. `web/src/api` is the client
-  of the server, free of Vue, for the phone app to use as it is.
+Everything is TypeScript, in one pnpm workspace:
+
+- `server/`: the nuthatch server, on Node 22 or later. The browser talks
+  only to it. It checks every request against the user's rights, asks the
+  engines, and puts the answers of several engines together.
+- `packages/api/`: the shapes of requests and answers, and the client of
+  the server. Free of any framework: the server, the web interface and
+  the phone app share it.
+- `web/`: the interface, Vue 3.
 - `dev/`: a demo site with invented hosts, run on either engine.
 - `docs/`: [who may see and do what](docs/permissions.md).
 
@@ -27,9 +31,8 @@ with totals. The views people work in come next.
     dev/up naemon            # in one terminal: the demo site on Naemon, in a container
     dev/up checkd            # in another: the same on checkd (built from ../checkd)
     dev/users                # users admin, ops, viewer, nobody, stranger; password nuthatch-dev
-    (cd web && pnpm install && pnpm build)
-    (cd server && cargo build)
-    server/target/debug/nuthatch dev/nuthatch.toml
+    pnpm install && pnpm build
+    pnpm start dev/nuthatch.toml
 
 Then open <http://127.0.0.1:8080>.
 
@@ -63,12 +66,17 @@ Then open <http://127.0.0.1:8080>.
   is that user. For trying things on one machine; refused otherwise.
 - `[roles]`: see [docs/permissions.md](docs/permissions.md).
 
+## Dependencies
+
+The server: Hono for HTTP, `bcryptjs` and `unixcrypt` for the password
+forms of htpasswd, `smol-toml` for the config file, and Node's own SQLite.
+Node runs the TypeScript as it is; nothing is compiled to install it.
+
 ## Tests
 
-    (cd server && cargo test)
-    (cd web && pnpm test)
+    pnpm build && pnpm test    # types, and the unit tests of every package
     dev/matrix                 # every kind of user × every table and command, on both engines
-    (cd web && pnpm build && pnpm e2e)    # in a browser, at desktop and phone width
+    (cd web && pnpm e2e)       # in a browser, at desktop and phone width
 
 The last two need `dev/up naemon` and `dev/up checkd` running.
 

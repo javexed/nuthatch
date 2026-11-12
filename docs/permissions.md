@@ -42,9 +42,11 @@ nothing.
 - **Tables the engine gives to anyone.** Measured on Naemon 1.5.2:
   `AuthUser` limits hosts, services, host groups, comments, downtimes and
   the log's lines about objects. It does not limit contacts, contact
-  groups, commands, timeperiods or status, and it gives everyone the log's
-  lines about no object. nuthatch asks a role for those tables, and leaves
-  the log's other lines out for limited users.
+  groups, commands, timeperiods or status. It gives everyone the log's
+  lines about no object, and the lines of external commands whose first
+  argument is no host's name (`DEL_HOST_COMMENT;9`). nuthatch asks a role
+  for those tables, and gives limited users only the log's alerts,
+  notifications, passive checks and state lines.
 - **Secrets.** Check commands, event handlers, command lines and custom
   variables can carry passwords. Asking for such a column, or filtering by
   it, needs `configuration_information`.
@@ -71,7 +73,7 @@ nothing.
 ## Tested
 
 `dev/matrix` logs in as five kinds of user and tries every table and a set
-of commands on each engine: 230 checks.
+of commands on each engine: about 230 checks.
 
 ## Not done
 

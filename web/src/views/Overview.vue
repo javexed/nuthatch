@@ -3,7 +3,7 @@
 // backends are. It is read again when the server says something changed,
 // and once a minute.
 import { onMounted, onUnmounted, ref } from 'vue'
-import type { StatsAnswer } from '../api/types'
+import type { StatsAnswer } from '@nuthatch/api'
 import { api, useSession } from '../stores/session'
 
 const session = useSession()

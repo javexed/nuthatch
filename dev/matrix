@@ -110,9 +110,8 @@ def main():
     config = config.replace("dev/run/nuthatch.sqlite", "dev/run/matrix/store.sqlite").replace("dev/run/htpasswd", "dev/run/matrix/htpasswd")
     with open(os.path.join(work, "nuthatch.toml"), "w") as out:
         out.write(config)
-    subprocess.run(["cargo", "build", "--quiet"], cwd=os.path.join(ROOT, "server"), check=True)
     log = open(os.path.join(work, "nuthatch.log"), "w")
-    server = subprocess.Popen([os.path.join(ROOT, "server/target/debug/nuthatch"), "dev/run/matrix/nuthatch.toml"], cwd=ROOT, stderr=log)
+    server = subprocess.Popen(["node", "--disable-warning=ExperimentalWarning", "server/src/main.ts", "dev/run/matrix/nuthatch.toml"], cwd=ROOT, stderr=log)
     try:
         for _ in range(50):
             try:

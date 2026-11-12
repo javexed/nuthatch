@@ -4,14 +4,14 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types'
+import type { Command, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
 
 export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
+  readonly status: number
+
+  constructor(status: number, message: string) {
     super(message)
+    this.status = status
   }
 }
 

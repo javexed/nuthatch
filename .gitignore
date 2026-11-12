@@ -1,6 +1,5 @@
-/server/target
-/web/node_modules
+node_modules
 /web/dist
-/dev/run
 /web/test-results
 /web/playwright-report
+/dev/run

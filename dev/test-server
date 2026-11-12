@@ -14,5 +14,4 @@ done
 sed -e 's/127.0.0.1:8080/127.0.0.1:8092/' -e 's#dev/run/nuthatch.sqlite#dev/run/e2e/store.sqlite#' \
     -e 's#dev/run/htpasswd#dev/run/e2e/htpasswd#' "$here/nuthatch.toml" > "$work/nuthatch.toml"
 cd "$root"
-(cd server && cargo build --quiet)
-exec server/target/debug/nuthatch dev/run/e2e/nuthatch.toml
+exec node --disable-warning=ExperimentalWarning server/src/main.ts dev/run/e2e/nuthatch.toml

@@ -1,0 +1,11 @@
+{
+  "name": "nuthatch",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "start": "node --disable-warning=ExperimentalWarning server/src/main.ts"
+  }
+}
