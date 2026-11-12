@@ -1,0 +1,25 @@
+# nuthatch, the web interface. Install the repository at /opt/nuthatch
+# (pnpm install && pnpm build), Node 22 or later, a user `nuthatch` that
+# may read the engine's Livestatus socket, and the config at
+# /etc/nuthatch/nuthatch.toml (README.md).
+[Unit]
+Description=nuthatch web interface
+After=network-online.target checkd.service naemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nuthatch
+Group=nuthatch
+WorkingDirectory=/opt/nuthatch
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/src/main.ts /etc/nuthatch/nuthatch.toml
+Restart=on-failure
+RestartSec=2s
+StateDirectory=nuthatch
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

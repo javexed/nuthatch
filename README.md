@@ -54,6 +54,14 @@ Everything is TypeScript, in one pnpm workspace:
 
 Then open <http://127.0.0.1:8080>.
 
+## Running it as a service
+
+`contrib/systemd/nuthatch.service`: the repository at `/opt/nuthatch`
+after `pnpm install && pnpm build`, Node 22 or later, a user `nuthatch`
+that may read the engine's Livestatus socket, and the config at
+`/etc/nuthatch/nuthatch.toml`. It passes `systemd-analyze verify`; not
+yet tried on a machine of its own.
+
 ## The config file
 
     listen = "127.0.0.1:8080"
