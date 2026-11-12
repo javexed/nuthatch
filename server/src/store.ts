@@ -37,6 +37,16 @@ export interface TokenInfo {
   last_used: number | null
 }
 
+export interface DashboardRow {
+  id: number
+  owner: string
+  title: string
+  shared: number
+  /** JSON. */
+  widgets: string
+  updated: number
+}
+
 export interface AuditRow {
   time: number
   user: string
@@ -65,7 +75,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS audit (
         id INTEGER PRIMARY KEY, time INTEGER NOT NULL, user TEXT NOT NULL,
         backend TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS audit_time ON audit (time);`)
+      CREATE INDEX IF NOT EXISTS audit_time ON audit (time);
+      CREATE TABLE IF NOT EXISTS dashboards (
+        id INTEGER PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
+        shared INTEGER NOT NULL, widgets TEXT NOT NULL, updated INTEGER NOT NULL);`)
   }
 
   /** Starts a session. The answer is the cookie's secret and the session. */
@@ -127,6 +140,32 @@ export class Store {
     this.db
       .prepare('INSERT INTO prefs (user, key, value) VALUES (?, ?, ?) ON CONFLICT (user, key) DO UPDATE SET value = excluded.value')
       .run(user, key, value)
+  }
+
+  /** A user's own dashboards and the shared ones, by title. */
+  dashboards(user: string): DashboardRow[] {
+    const rows = this.db.prepare('SELECT id, owner, title, shared, widgets, updated FROM dashboards WHERE owner = ? OR shared = 1 ORDER BY title, id').all(user)
+    return rows.map((row) => ({ ...row }) as unknown as DashboardRow)
+  }
+
+  /** One dashboard, when it is the user's or shared. */
+  dashboard(user: string, id: number): DashboardRow | null {
+    const row = this.db.prepare('SELECT id, owner, title, shared, widgets, updated FROM dashboards WHERE id = ? AND (owner = ? OR shared = 1)').get(id, user)
+    return row ? ({ ...row } as unknown as DashboardRow) : null
+  }
+
+  newDashboard(owner: string, title: string, shared: boolean, widgets: string): number {
+    const made = this.db.prepare('INSERT INTO dashboards (owner, title, shared, widgets, updated) VALUES (?, ?, ?, ?, ?)').run(owner, title, shared ? 1 : 0, widgets, now())
+    return Number(made.lastInsertRowid)
+  }
+
+  /** Changes a dashboard of the user's own. */
+  saveDashboard(owner: string, id: number, title: string, shared: boolean, widgets: string): boolean {
+    return this.db.prepare('UPDATE dashboards SET title = ?, shared = ?, widgets = ?, updated = ? WHERE id = ? AND owner = ?').run(title, shared ? 1 : 0, widgets, now(), id, owner).changes > 0
+  }
+
+  deleteDashboard(owner: string, id: number): boolean {
+    return this.db.prepare('DELETE FROM dashboards WHERE id = ? AND owner = ?').run(id, owner).changes > 0
   }
 
   /** Writes down what somebody did: logins, commands, refusals. */

@@ -22,6 +22,7 @@ async function logout() {
 
 const PAGES = [
   { name: 'overview', label: 'Overview' },
+  { name: 'dashboards', label: 'Dashboards' },
   { name: 'problems', label: 'Problems' },
   { name: 'hosts', label: 'Hosts' },
   { name: 'services', label: 'Services' },

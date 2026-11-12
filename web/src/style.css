@@ -132,6 +132,20 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
   .rows .output { grid-column: 2 / 4; }
 }
 
+/* The same in a narrow box, whatever the screen. */
+.rows.stacked thead { display: none; }
+.rows.stacked, .rows.stacked tbody { display: block; }
+.rows.stacked tr { display: grid; grid-template-columns: auto 1fr auto; gap: 0.2rem 0.6rem; padding: 0.6rem; border-bottom: 1px solid var(--line); align-items: baseline; }
+.rows.stacked tr:last-child { border-bottom: 0; }
+.rows.stacked td { display: block; padding: 0; border: 0; }
+.rows.stacked .tick { grid-row: 1; grid-column: 1; }
+.rows.stacked .state { grid-row: 1; grid-column: 3; }
+.rows.stacked .host { grid-row: 1; grid-column: 2; }
+.rows.stacked .service { grid-column: 2 / 4; }
+.rows.stacked .when { grid-column: 2 / 4; display: inline; }
+.rows.stacked .when::before { content: attr(data-label) ' '; }
+.rows.stacked .output { grid-column: 2 / 4; }
+
 /* A host or a service. */
 .crumbs { display: flex; gap: 0.4rem; color: var(--muted); font-size: 0.9rem; }
 .headline { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
@@ -216,3 +230,15 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .unreadable { color: var(--muted); }
 .report p { margin-top: 0; }
 .backend-choice { max-width: 16rem; margin-bottom: 0.8rem; }
+
+/* Dashboards. */
+.dashboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: 1rem; align-items: start; }
+.dashboard .widget { margin: 0; min-width: 0; }
+.dashboard .widget.wide { grid-column: 1 / -1; }
+.widget .rows, .widget .events { border: 0; }
+.widget .rows.stacked tr { padding-left: 0; padding-right: 0; }
+.object-card p { margin: 0.2rem 0; }
+.object-card .headline a { font-weight: 600; text-decoration: none; }
+.new-dashboard { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin-top: 1rem; }
+.dashboard-form { display: grid; gap: 0.8rem; }
+.add-box { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; }

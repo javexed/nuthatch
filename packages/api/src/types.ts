@@ -154,3 +154,23 @@ export interface ConfigResult {
   /** What the engine's check said. */
   output: string
 }
+
+/** A box on a dashboard. What it shows is asked as the one who looks. */
+export type Widget =
+  | { type: 'totals'; title?: string; of: 'hosts' | 'services'; /** Of this host group only. */ hostgroup?: string }
+  | { type: 'problems'; title?: string; of: 'hosts' | 'services'; unhandled?: boolean; hostgroup?: string; limit?: number }
+  | { type: 'object'; title?: string; backend: string; host: string; service?: string }
+  | { type: 'log'; title?: string; lines: 'alerts' | 'notifications'; hours?: number; limit?: number }
+
+export interface Dashboard {
+  id: number
+  owner: string
+  title: string
+  /** Shown to everyone who logs in; changed by its owner only. */
+  shared: boolean
+  widgets: Widget[]
+  updated: number
+}
+
+/** A dashboard to make or to change. */
+export type DashboardDraft = Pick<Dashboard, 'title' | 'shared' | 'widgets'>

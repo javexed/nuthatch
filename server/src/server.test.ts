@@ -354,3 +354,28 @@ describe('a host to write', () => {
     expect(() => readHostFile('define host {\n host_name a\n}\ndefine service {\n host_name b\n service_description s\n}\n')).toThrow('another host')
   })
 })
+
+describe('dashboards', () => {
+  it('are the owner\'s to change, and everyone\'s to see when shared', async () => {
+    const store = new Store(':memory:')
+    const app = buildApp({ backends: [], store, events: new Events([]), roles: new RolesConfig(), limiter: new Limiter(), cookieSecure: false })
+    const call = (user: string, method: string, path: string, body?: unknown) =>
+      app.request(path, { method, headers: { Authorization: `Bearer ${store.newToken(user, 't').token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+    const draft = { title: 'Mine', shared: false, widgets: [{ type: 'totals', of: 'hosts', extra: 'dropped' }, { type: 'object', backend: 'a', host: 'web1' }] }
+    const made = (await (await call('ann', 'POST', '/api/v1/dashboards', draft)).json()) as { id: number; widgets: unknown[]; owner: string }
+    expect(made.owner).toBe('ann')
+    expect(made.widgets[0]).toEqual({ type: 'totals', of: 'hosts' })
+
+    expect((await call('bob', 'GET', `/api/v1/dashboards/${made.id}`)).status).toBe(404)
+    expect(await (await call('bob', 'GET', '/api/v1/dashboards')).json()).toEqual([])
+    expect((await call('ann', 'PUT', `/api/v1/dashboards/${made.id}`, { ...draft, shared: true })).status).toBe(200)
+    expect((await call('bob', 'GET', `/api/v1/dashboards/${made.id}`)).status).toBe(200)
+    expect((await call('bob', 'PUT', `/api/v1/dashboards/${made.id}`, draft)).status).toBe(404)
+    expect((await call('bob', 'DELETE', `/api/v1/dashboards/${made.id}`)).status).toBe(404)
+
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'script' }] })).status).toBe(400)
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: '', widgets: [] })).status).toBe(400)
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'problems', of: 'services', limit: 100000 }] })).status).toBe(400)
+    expect((await call('ann', 'DELETE', `/api/v1/dashboards/${made.id}`)).status).toBe(200)
+  })
+})

@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, DashboardDraft, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
 
 export class ApiError extends Error {
   readonly status: number
@@ -132,6 +132,27 @@ export class Client {
 
   setPref(key: string, value: unknown): Promise<void> {
     return this.call('PUT', `/api/v1/prefs/${encodeURIComponent(key)}`, value)
+  }
+
+  /** The user's own dashboards, and those shared with everyone. */
+  dashboards(): Promise<Dashboard[]> {
+    return this.call('GET', '/api/v1/dashboards')
+  }
+
+  dashboard(id: number): Promise<Dashboard> {
+    return this.call('GET', `/api/v1/dashboards/${id}`)
+  }
+
+  newDashboard(draft: DashboardDraft): Promise<Dashboard> {
+    return this.call('POST', '/api/v1/dashboards', draft)
+  }
+
+  saveDashboard(id: number, draft: DashboardDraft): Promise<Dashboard> {
+    return this.call('PUT', `/api/v1/dashboards/${id}`, draft)
+  }
+
+  deleteDashboard(id: number): Promise<void> {
+    return this.call('DELETE', `/api/v1/dashboards/${id}`)
   }
 
   config(backend: string): Promise<ConfigState> {

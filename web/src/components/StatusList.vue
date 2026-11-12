@@ -30,8 +30,10 @@ const props = withDefaults(
     /** The column sorted by at first; a leading '-' for descending. */
     sort?: string
     empty?: string
+    /** Rows as blocks, as on a narrow screen: for a narrow box. */
+    stacked?: boolean
   }>(),
-  { controls: false, pageSize: 50, empty: 'Nothing here.' },
+  { controls: false, pageSize: 50, empty: 'Nothing here.', stacked: false },
 )
 
 const route = useRoute()
@@ -238,7 +240,7 @@ const now = () => Date.now() / 1000
     </div>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
 
-    <label v-if="rows.length > 1" class="sort-select">
+    <label v-if="rows.length > 1 && !stacked" class="sort-select">
       Sort by
       <select :value="sortBy" @change="update({ sort: ($event.target as HTMLSelectElement).value })">
         <option v-for="choice in sortChoices" :key="choice.value" :value="choice.value">{{ choice.label }}</option>
@@ -247,7 +249,7 @@ const now = () => Date.now() / 1000
     <label v-if="canCommand && rows.length > 1" class="check tick-all">
       <input type="checkbox" :checked="allTicked" @change="tickAll(($event.target as HTMLInputElement).checked)" /> Tick all
     </label>
-    <table v-if="rows.length > 0" class="rows">
+    <table v-if="rows.length > 0" :class="['rows', { stacked }]">
       <thead>
         <tr>
           <th v-if="canCommand" class="tick"></th>

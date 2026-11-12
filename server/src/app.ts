@@ -11,6 +11,7 @@ import type { Htpasswd, Limiter } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
+import { checkDraft, fromRow } from './dashboards.ts'
 import type { Events } from './events.ts'
 import { Refused, type Roles, type RolesConfig, TABLES } from './policy.ts'
 import { Forbidden, rows, stats } from './query.ts'
@@ -314,6 +315,40 @@ export function buildApp(deps: Deps): Hono<Env> {
       return c.json({ error: 'the audit log needs the role system_information' }, 403)
     }
     return c.json(deps.store.auditTail(500))
+  })
+
+  // Dashboards: the user's own, and those shared with everyone.
+  app.get('/api/v1/dashboards', (c) => c.json(deps.store.dashboards(c.get('identity').user).map(fromRow)))
+
+  app.get('/api/v1/dashboards/:id', (c) => {
+    const row = deps.store.dashboard(c.get('identity').user, Number(c.req.param('id')))
+    return row ? c.json(fromRow(row)) : c.json({ error: 'no such dashboard' }, 404)
+  })
+
+  app.post('/api/v1/dashboards', async (c) => {
+    const { user } = c.get('identity')
+    const draft = checkDraft(await body(c))
+    const id = deps.store.newDashboard(user, draft.title, draft.shared, JSON.stringify(draft.widgets))
+    const row = deps.store.dashboard(user, id)
+    return row ? c.json(fromRow(row)) : c.json({ error: 'not kept' }, 500)
+  })
+
+  app.put('/api/v1/dashboards/:id', async (c) => {
+    const { user } = c.get('identity')
+    const id = Number(c.req.param('id'))
+    const draft = checkDraft(await body(c))
+    // Only its owner changes a dashboard, shared or not.
+    if (!Number.isInteger(id) || !deps.store.saveDashboard(user, id, draft.title, draft.shared, JSON.stringify(draft.widgets))) {
+      return c.json({ error: 'no such dashboard of yours' }, 404)
+    }
+    const row = deps.store.dashboard(user, id)
+    return row ? c.json(fromRow(row)) : c.json({ error: 'not kept' }, 500)
+  })
+
+  app.delete('/api/v1/dashboards/:id', (c) => {
+    const id = Number(c.req.param('id'))
+    if (!Number.isInteger(id) || !deps.store.deleteDashboard(c.get('identity').user, id)) return c.json({ error: 'no such dashboard of yours' }, 404)
+    return c.json({})
   })
 
   // Changing the config, for one role.
