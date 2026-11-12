@@ -125,6 +125,47 @@ export async function rows(backends: Backend[], user: string, roles: Roles, body
   }
 }
 
+/**
+ * Puts the answers of several nuthatches together: each gave its first
+ * `offset + limit` rows in the order asked for, so the first rows of all
+ * are among them.
+ */
+export function combine(parts: QueryAnswer[], sort: { column: string; desc?: boolean }[], offset: number, limit: number | undefined): QueryAnswer {
+  let rows = parts.flatMap((part) => part.rows)
+  if (sort.length > 0) {
+    rows.sort((a, b) => {
+      for (const { column, desc } of sort) {
+        const order = compare((a as Record<string, unknown>)[column], (b as Record<string, unknown>)[column])
+        if (order !== 0) return desc ? -order : order
+      }
+      return compare(a.backend, b.backend)
+    })
+  }
+  rows = rows.slice(offset, limit === undefined ? undefined : offset + limit)
+  const totals = parts.map((part) => part.total)
+  return {
+    rows,
+    total: sort.length > 0 && totals.every((t) => t !== null) ? totals.reduce<number>((sum, t) => sum + (t ?? 0), 0) : null,
+    errors: Object.assign({}, ...parts.map((part) => part.errors)) as Record<string, string>,
+  }
+}
+
+/** The same for stats: groups of the same key are merged. */
+export function combineStats(parts: StatsAnswer[], merges: Merge[]): StatsAnswer {
+  const groups = new Map<string, Group>()
+  for (const part of parts) {
+    for (const group of part.groups) {
+      const id = JSON.stringify(group.key)
+      groups.set(id, { key: group.key, values: merge(groups.get(id)?.values ?? [], group.values, merges) })
+    }
+  }
+  return {
+    groups: [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, group]) => group),
+    by_backend: Object.assign({}, ...parts.map((part) => part.by_backend)) as Record<string, Group[]>,
+    errors: Object.assign({}, ...parts.map((part) => part.errors)) as Record<string, string>,
+  }
+}
+
 export function merge(into: number[], more: number[], merges: Merge[]): number[] {
   if (into.length === 0) return [...more]
   return into.map((value, n) => {

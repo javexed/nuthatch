@@ -16,6 +16,13 @@ with what must happen:
 
 An engine that does not limit what a user sees (no AuthUser) must be closed
 to ops, nobody and stranger altogether; open to admin and viewer.
+
+    dev/matrix --federated
+
+The same, asked of a central nuthatch that has no engine of its own: it
+reaches each engine through a nuthatch at its "site" (ports 8093 and
+8094), with a key. And then what a key is for: a wrong one, and one that
+may only read.
 """
 import http.cookiejar
 import json
@@ -32,6 +39,7 @@ PORT = 8091
 BASE = f"http://127.0.0.1:{PORT}"
 PASSWORD = "matrix-" + os.urandom(6).hex()
 USERS = ["admin", "viewer", "ops", "nobody", "stranger"]
+FEDERATED = "--federated" in sys.argv[1:]
 failures = []
 
 
@@ -48,9 +56,10 @@ class Client:
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self.csrf = None
         self.token = None
+        self.base = BASE
 
     def call(self, method, path, body=None, csrf=True, headers=None):
-        request = urllib.request.Request(BASE + path, method=method)
+        request = urllib.request.Request(self.base + path, method=method)
         if body is not None:
             request.data = json.dumps(body).encode()
             request.add_header("Content-Type", "application/json")
@@ -116,24 +125,66 @@ def main():
             hashed = subprocess.run(["openssl", "passwd", "-apr1", PASSWORD], capture_output=True, text=True, check=True).stdout.strip()
             out.write(f"{user}:{hashed}\n")
     config = open(os.path.join(HERE, "nuthatch.toml")).read()
-    config = config.replace('listen = "127.0.0.1:8080"', f'listen = "127.0.0.1:{PORT}"')
-    config = config.replace("dev/run/nuthatch.sqlite", "dev/run/matrix/store.sqlite").replace("dev/run/htpasswd", "dev/run/matrix/htpasswd")
-    with open(os.path.join(work, "nuthatch.toml"), "w") as out:
-        out.write(config)
-    log = open(os.path.join(work, "nuthatch.log"), "w")
-    server = subprocess.Popen(["node", "--disable-warning=ExperimentalWarning", "server/src/main.ts", "dev/run/matrix/nuthatch.toml"], cwd=ROOT, stderr=log)
-    try:
+    config = config.replace("dev/run/htpasswd", "dev/run/matrix/htpasswd")
+    top, _, backends = config.partition("[[backend]]")
+    servers = []
+
+    def start(name, port, text):
+        text = text.replace('listen = "127.0.0.1:8080"', f'listen = "127.0.0.1:{port}"').replace("dev/run/nuthatch.sqlite", f"dev/run/matrix/{name}.sqlite")
+        with open(os.path.join(work, f"{name}.toml"), "w") as out:
+            out.write(text)
+        log = open(os.path.join(work, f"{name}.log"), "w")
+        servers.append(subprocess.Popen(["node", "--disable-warning=ExperimentalWarning", "server/src/main.ts", f"dev/run/matrix/{name}.toml"], cwd=ROOT, stderr=log))
         for _ in range(50):
             try:
-                urllib.request.urlopen(BASE + "/api/v1/session", timeout=1)
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/session", timeout=1)
             except urllib.error.HTTPError:
                 break
             except OSError:
                 time.sleep(0.1)
-        tests()
+
+    try:
+        if FEDERATED:
+            # A nuthatch at each engine's site, which lets the central one in
+            # by a key, and lets it change the config; the central one has no
+            # engine of its own.
+            keys = {}
+            for kind in ("central", "reader", "stranger"):
+                keys[kind] = os.path.join(work, f"{kind}.key")
+                with open(keys[kind], "w") as out:
+                    out.write(os.urandom(24).hex())
+            sites = {"naemon": 8093, "checkd": 8094}
+            for site, port in sites.items():
+                own = "[[backend]]" + [part for part in backends.split("[[backend]]") if f'name = "{site}"' in part][0]
+                peers = f'\n[[peer]]\nname = "central"\nkey_file = "{keys["central"]}"\nconfig = true\n\n[[peer]]\nname = "reader"\nkey_file = "{keys["reader"]}"\nread_only = true\n'
+                start(f"site-{site}", port, top + own + peers)
+            remote = "".join(f'[[backend]]\nname = "{site}"\nnuthatch = "http://127.0.0.1:{port}"\nkey_file = "{keys["central"]}"\n\n' for site, port in sites.items())
+            start("nuthatch", PORT, top + remote)
+            tests()
+            # What a key is for.
+            print("\n== keys")
+            for kind, port in (("reader", 8095), ("stranger", 8096)):
+                remote = f'[[backend]]\nname = "naemon"\nnuthatch = "http://127.0.0.1:8093"\nkey_file = "{keys[kind]}"\n'
+                start(f"central-{kind}", port, top + remote)
+                client = Client()
+                client.base = f"http://127.0.0.1:{port}"
+                check(f"admin logs in at the nuthatch with the key of {kind}", client.login("admin"), 200)
+                if kind == "reader":
+                    check("a key that may only read: reads", client.rows("naemon", "hosts", ["name"]), 11)
+                    check("a key that may only read: sends no command", client.command("naemon", "ADD_HOST_COMMENT", "web1", 1, "x", "by a reader"), 403)
+                    check("a key that may only read: changes no config", client.call("GET", "/api/v1/config/naemon")[0], 403)
+                else:
+                    status, body = client.call("POST", "/api/v1/query", {"table": "hosts", "columns": ["name"]})
+                    check("a key the site does not know: nothing, and the user stays logged in", (status, "key" in body.get("error", ""), client.call("GET", "/api/v1/tokens")[0]), (502, True, 200))
+                    check("a key the site does not know: no command", client.command("naemon", "ADD_HOST_COMMENT", "web1", 1, "x", "by a stranger"), 502)
+        else:
+            start("nuthatch", PORT, top + "[[backend]]" + backends)
+            tests()
     finally:
-        server.terminate()
-        server.wait()
+        for server in servers:
+            server.terminate()
+        for server in servers:
+            server.wait()
     print()
     if failures:
         print(f"{len(failures)} checks failed.")
@@ -264,6 +315,8 @@ def tests():
         check(f"{backend}: comments carry their sender's name, and only the allowed ones arrived", authors, expected)
 
     for backend in ("naemon", "checkd"):
+        events(admin, backend)
+    for backend in ("naemon", "checkd"):
         config(clients, backend)
 
     status, body = admin.call("GET", "/api/v1/audit")
@@ -271,6 +324,34 @@ def tests():
     check("refused commands are in the audit log", len(refused) > 0, True)
     check("the audit log needs a role", clients["ops"].call("GET", "/api/v1/audit")[0], 403)
     check("logout ends the session", (admin.call("POST", "/api/v1/logout")[0], admin.call("GET", "/api/v1/session")[0]), (200, 401))
+
+
+def events(admin, backend):
+    """A change of a state is told to those who listen, by its backend's name."""
+    import threading
+    seen = []
+    request = urllib.request.Request(admin.base + "/api/v1/events")
+
+    def listen():
+        try:
+            with admin.opener.open(request, timeout=20) as stream:
+                for line in stream:
+                    seen.append(line.decode().strip())
+        except OSError:
+            pass
+
+    threading.Thread(target=listen, daemon=True).start()
+    time.sleep(3)
+    state = 2 if admin.rows(backend, "services", ["state"], ["Filter: host_name = passive1", "Filter: description = b", "Filter: state = 0"]) == 1 else 0
+    admin.command(backend, "PROCESS_SERVICE_CHECK_RESULT", "passive1", "b", state, "for the events")
+    told = False
+    for _ in range(40):
+        told = any(line == "data: " + json.dumps({"backend": backend}, separators=(",", ":")) for line in seen)
+        if told:
+            break
+        time.sleep(0.25)
+    check(f"{backend}: a change of state is told to those who listen", told, True)
+    admin.command(backend, "PROCESS_SERVICE_CHECK_RESULT", "passive1", "b", 0, "fine")
 
 
 def config(clients, backend):

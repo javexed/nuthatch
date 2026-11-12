@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Role } from '@nuthatch/api'
+import type { QueryAnswer, Role } from '@nuthatch/api'
 import bcrypt from 'bcryptjs'
 import * as unixcrypt from 'unixcrypt'
 import { describe, expect, it } from 'vitest'
@@ -14,6 +15,7 @@ import { Events } from './events.ts'
 import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagioscfg.ts'
 import { RolesConfig, access, checkColumns, checkHeaders } from './policy.ts'
 import { compare, limits, merge, rows, stats } from './query.ts'
+import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const roles = (...held: Role[]) => new Set<Role>(held)
@@ -377,5 +379,98 @@ describe('dashboards', () => {
     expect((await call('ann', 'POST', '/api/v1/dashboards', { title: '', widgets: [] })).status).toBe(400)
     expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'problems', of: 'services', limit: 100000 }] })).status).toBe(400)
     expect((await call('ann', 'DELETE', `/api/v1/dashboards/${made.id}`)).status).toBe(200)
+  })
+})
+
+describe('one nuthatch over the nuthatch of a site', () => {
+  const KEY = 'k'.repeat(40)
+  const hashOf = (key: string) => createHash('sha256').update(key).digest('hex')
+
+  /** A site with one engine, and a central nuthatch with an engine of its own that asks the site with `key`. */
+  function pair(peer: { readOnly?: boolean; config?: boolean } = {}, key = KEY) {
+    const engine = (name: string, hosts: string[]) =>
+      fake(name, (request) => {
+        if (request.startsWith('GET contactgroups')) return [['admins', ['ann']]]
+        if (request.startsWith('GET contacts')) return [[1]]
+        if (request.startsWith('GET status')) return [['1.5.2', '1.5.1', 1]]
+        if (request.includes('Stats:') && request.includes('AuthUser: ops')) return [[request.includes('name = web1') ? 1 : 0]]
+        if (request.includes('Stats:')) return [[hosts.length]]
+        // ops is a contact of web1 only.
+        return hosts.filter((h) => !request.includes('AuthUser: ops') || h === 'web1').map((h) => [h, h.length])
+      })
+    const roles = () => new RolesConfig({ authorized_contactgroup_for_all_hosts: ['admins'], authorized_for_all_host_commands: ['ann'] })
+    const siteEngine = engine('only', ['web1', 'far1'])
+    const siteStore = new Store(':memory:')
+    const site = buildApp({
+      backends: [siteEngine],
+      store: siteStore,
+      events: new Events([]),
+      roles: roles(),
+      limiter: new Limiter(),
+      cookieSecure: false,
+      peers: [{ name: 'central', keyHash: hashOf(KEY), readOnly: peer.readOnly === true, config: peer.config === true }],
+    })
+    const toSite = ((input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input).replace('https://site.example.test', '')
+      // The stream of events is not part of these tests.
+      if (path === '/api/v1/events') return new Promise<Response>(() => undefined)
+      return Promise.resolve(site.request(path, init))
+    }) as typeof fetch
+    const store = new Store(':memory:')
+    const central = buildApp({
+      backends: [engine('near', ['near1', 'web1'])],
+      store,
+      events: new Events([]),
+      roles: roles(),
+      limiter: new Limiter(),
+      cookieSecure: false,
+      remotes: [new RemoteSite('east', 'https://site.example.test', key, toSite)],
+    })
+    const post = (path: string, user: string, body: unknown) =>
+      central.request(path, { method: 'POST', headers: { Authorization: `Bearer ${store.newToken(user, 't').token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    return { central, site, siteEngine, siteStore, store, post }
+  }
+
+  it('shows both, sorted as one, each under its name', async () => {
+    const { post } = pair()
+    const answer = (await (await post('/api/v1/query', 'ann', { table: 'hosts', columns: ['name', 'state'], sort: [{ column: 'name' }], offset: 1, limit: 2 })).json()) as QueryAnswer
+    expect(answer.rows).toEqual([
+      { name: 'near1', state: 5, backend: 'near' },
+      { name: 'web1', state: 4, backend: 'east' },
+    ])
+    expect(answer.total).toBe(4)
+    const stats = (await (await post('/api/v1/stats', 'ann', { table: 'hosts', headers: ['Stats: state >= 0'] })).json()) as { groups: { values: number[] }[]; by_backend: Record<string, unknown> }
+    expect(stats.groups[0]?.values).toEqual([4])
+    expect(Object.keys(stats.by_backend).sort()).toEqual(['east', 'near'])
+  })
+
+  it('leaves it to the site what a user may see and do there', async () => {
+    const { post, siteEngine, siteStore, store } = pair()
+    const ops = (await (await post('/api/v1/query', 'ops', { table: 'hosts', columns: ['name', 'state'], backends: ['east'] })).json()) as QueryAnswer
+    expect(ops.rows.map((r) => r.name)).toEqual(['web1'])
+    const comment = (host: string) => ({ backend: 'east', command: 'ADD_HOST_COMMENT', args: [host, '1', 'x', 'hello'] })
+    expect((await post('/api/v1/command', 'ops', comment('web1'))).status).toBe(200)
+    expect((await post('/api/v1/command', 'ops', comment('far1'))).status).toBe(403)
+    expect(siteEngine.sent.map((line) => line.replace(/^\[\d+\] /, ''))).toEqual(['ADD_HOST_COMMENT;web1;1;ops;hello'])
+    expect(siteStore.auditTail(5).find((row) => row.action === 'command')?.detail).toContain('(through central)')
+    expect(store.auditTail(5).map((row) => row.action).sort()).toEqual(['command passed on', 'command refused'])
+  })
+
+  it('is kept to reading by a key that may only read, and out by a wrong one', async () => {
+    const readOnly = pair({ readOnly: true })
+    expect((await readOnly.post('/api/v1/query', 'ann', { table: 'hosts', columns: ['name'], backends: ['east'] })).status).toBe(200)
+    expect((await readOnly.post('/api/v1/command', 'ann', { backend: 'east', command: 'ADD_HOST_COMMENT', args: ['web1', '1', 'x', 'y'] })).status).toBe(403)
+    expect(readOnly.siteEngine.sent).toEqual([])
+
+    const wrong = pair({}, 'w'.repeat(40))
+    const answer = (await (await wrong.post('/api/v1/query', 'ann', { table: 'hosts', columns: ['name'] })).json()) as QueryAnswer
+    expect(answer.rows.map((r) => r.backend)).toEqual(['near', 'near'])
+    expect(answer.errors.east).toBe("the site does not take this nuthatch's key")
+    // What is only this nuthatch's is not for another one.
+    const direct = (path: string) => wrong.site.request(path, { headers: { Authorization: `Peer ${KEY}`, 'X-Nuthatch-User': 'ann' } })
+    expect((await direct('/api/v1/session')).status).toBe(200)
+    expect((await direct('/api/v1/dashboards')).status).toBe(403)
+    expect((await direct('/api/v1/audit')).status).toBe(403)
+    expect((await wrong.site.request('/api/v1/session', { headers: { Authorization: `Peer ${KEY}`, 'X-Nuthatch-User': 'a%0Ab' } })).status).toBe(401)
   })
 })

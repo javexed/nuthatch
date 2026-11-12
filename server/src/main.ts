@@ -6,22 +6,24 @@
 // commands, tells the browser when something changed, and serves the
 // interface's files.
 
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { resolve } from 'node:path'
 import { serve } from '@hono/node-server'
 import { parse } from 'smol-toml'
-import { VERSION, buildApp, userName } from './app.ts'
+import { type Peer, VERSION, buildApp, userName } from './app.ts'
 import { Htpasswd, Limiter } from './auth.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
 import { ConfigAdmin } from './configadmin.ts'
 import { PathMap } from './nagioscfg.ts'
 import { Events } from './events.ts'
 import { RolesConfig } from './policy.ts'
+import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'roles', 'backend']
+const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'roles', 'backend', 'peer']
 
 function fail(message: string): never {
   console.error(message)
@@ -80,10 +82,37 @@ function main(): void {
 
   const backends: Backend[] = []
   const admins = new Map<string, ConfigAdmin>()
+  const remotes: RemoteSite[] = []
+  const keyOf = (file: unknown, what: string): string => {
+    if (typeof file !== 'string') fail(`${path}: ${what} needs key_file, the file that holds its key`)
+    let key: string
+    try {
+      key = readFileSync(file, 'utf8').trim()
+    } catch (err) {
+      fail(`${path}: ${what}: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    if (key.length < 32 || /\s/.test(key)) fail(`${path}: ${what}: a key is one word of at least 32 letters`)
+    return key
+  }
   for (const entry of Array.isArray(config.backend) ? (config.backend as Record<string, unknown>[]) : []) {
     const { name, livestatus } = entry
-    if (typeof name !== 'string' || name === '' || backends.some((b) => b.name === name)) fail(`${path}: each backend needs a name of its own`)
-    if (typeof livestatus !== 'string') fail(`${path}: backend ${name} needs livestatus = "unix:<socket>"`)
+    if (typeof name !== 'string' || name === '' || name.includes('/') || backends.some((b) => b.name === name) || remotes.some((r) => r.name === name)) {
+      fail(`${path}: each backend needs a name of its own, without '/'`)
+    }
+    if (typeof entry.nuthatch === 'string') {
+      // A site reached through its own nuthatch.
+      let url: URL
+      try {
+        url = new URL(entry.nuthatch)
+      } catch {
+        fail(`${path}: backend ${name}: nuthatch is the URL of the site's nuthatch`)
+      }
+      const loopback = ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)
+      if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) fail(`${path}: backend ${name}: the site's nuthatch is reached over https`)
+      remotes.push(new RemoteSite(name, entry.nuthatch, keyOf(entry.key_file, `backend ${name}`)))
+      continue
+    }
+    if (typeof livestatus !== 'string') fail(`${path}: backend ${name} needs livestatus = "unix:<socket>", or nuthatch = "https://..."`)
     try {
       const backend = new LivestatusBackend(name, livestatus)
       backends.push(backend)
@@ -101,7 +130,15 @@ function main(): void {
       fail(`${path}: backend ${name}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
-  if (backends.length === 0) fail(`${path}: no [[backend]]`)
+  if (backends.length === 0 && remotes.length === 0) fail(`${path}: no [[backend]]`)
+
+  // Other nuthatches that may ask here for their users.
+  const peers: Peer[] = []
+  for (const entry of Array.isArray(config.peer) ? (config.peer as Record<string, unknown>[]) : []) {
+    if (typeof entry.name !== 'string' || entry.name === '') fail(`${path}: each peer needs a name`)
+    const key = keyOf(entry.key_file, `peer ${entry.name}`)
+    peers.push({ name: entry.name, keyHash: createHash('sha256').update(key).digest('hex'), readOnly: entry.read_only === true, config: entry.config === true })
+  }
 
   let roles: RolesConfig
   try {
@@ -123,6 +160,8 @@ function main(): void {
     cookieSecure: behindProxy,
     webRoot: webRoot === undefined ? undefined : resolve(webRoot),
     config: admins,
+    remotes,
+    peers,
   })
   const server = serve({ fetch: app.fetch, hostname, port }, () => {
     console.error(`nuthatch ${VERSION} listening at http://${listen}`)

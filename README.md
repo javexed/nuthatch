@@ -6,7 +6,7 @@ Livestatus, so it works with [Naemon](https://www.naemon.io/) and with
 checkd, the engine it is written beside. It aims to do what Thruk does,
 written anew.
 
-**Status: phases 0 to 4 of the plan below are done.** People can log in
+**Status: phases 0 to 5 of the plan below are done.** People can log in
 and see what is theirs to see: an overview, problems, hosts and services
 with filters, sorting and pages, host and service groups, and a page for
 each host and service. From there they can check now, acknowledge,
@@ -14,9 +14,10 @@ schedule downtimes, comment, and turn notifications and checks off and
 on, for one object or for several ticked in a list. There is the history
 of alerts and notifications, and availability over a span of time, with
 a CSV file. Those with the role for it add, change and take out hosts
-and services, which the engine checks before anything is written. And
-there are dashboards, one's own or shared. One interface over several
-sites and the phone app are not there yet.
+and services, which the engine checks before anything is written. There
+are dashboards, one's own or shared. And one nuthatch can show the
+engines of several sites, each through the nuthatch at its site. The
+phone app is not there yet.
 
 ## How it fits together
 
@@ -35,7 +36,8 @@ Everything is TypeScript, in one pnpm workspace:
 - `docs/`: [who may see and do what](docs/permissions.md),
   [history and availability](docs/history.md),
   [changing the config](docs/config.md),
-  [dashboards](docs/dashboards.md).
+  [dashboards](docs/dashboards.md),
+  [several sites](docs/sites.md).
 
 ## Try it
 
@@ -88,6 +90,7 @@ Node runs the TypeScript as it is; nothing is compiled to install it.
 
     pnpm build && pnpm test    # types, and the unit tests of every package
     dev/matrix                 # every kind of user × every table and command, on both engines
+    dev/matrix --federated     # the same through a central nuthatch over a nuthatch at each engine
     (cd web && pnpm e2e)       # in a browser, at desktop and phone width: what a
                                # user sees is compared with what the engines
                                # give that user, and every action is done on both
@@ -101,7 +104,7 @@ The last two need `dev/up naemon` and `dev/up checkd` running.
 2. History and availability (done)
 3. Adding and changing hosts and services (done)
 4. Dashboards (done)
-5. One interface over several sites
+5. One interface over several sites (done)
 6. Phone app
 
 Each phase ends with a test that must pass on both engines.

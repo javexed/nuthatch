@@ -1,8 +1,9 @@
 // The HTTP side: who a request is from, and the routes.
 
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
-import type { Role, Session as SessionAnswer } from '@nuthatch/api'
+import type { BackendStatus, QueryAnswer, Role, Session as SessionAnswer, StatsAnswer } from '@nuthatch/api'
 import { getConnInfo } from '@hono/node-server/conninfo'
 import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
@@ -13,8 +14,9 @@ import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
 import { checkDraft, fromRow } from './dashboards.ts'
 import type { Events } from './events.ts'
-import { Refused, type Roles, type RolesConfig, TABLES } from './policy.ts'
-import { Forbidden, rows, stats } from './query.ts'
+import { ROLES, Refused, type Roles, type RolesConfig, TABLES, checkHeaders } from './policy.ts'
+import { Forbidden, combine, combineStats, rows, stats } from './query.ts'
+import { RemoteError, type RemoteSite } from './remote.ts'
 import { type Store, now } from './store.ts'
 
 export const VERSION = '0.0.0'
@@ -37,6 +39,21 @@ export interface Deps {
   webRoot?: string
   /** By backend: the config that can be changed here. */
   config?: Map<string, ConfigAdmin>
+  /** Sites reached through their own nuthatch. */
+  remotes?: RemoteSite[]
+  /** Other nuthatches that may ask here for their users. */
+  peers?: Peer[]
+}
+
+/** A nuthatch elsewhere that shows this site to its users. */
+export interface Peer {
+  name: string
+  /** The SHA-256 of its key, in hex. */
+  keyHash: string
+  /** It may send no commands and change no config. */
+  readOnly: boolean
+  /** It may change the config, for users who have the role here. */
+  config: boolean
 }
 
 /** Who a request is from. */
@@ -45,6 +62,8 @@ interface Identity {
   /** The session's cookie, when that is how they logged in. */
   cookie?: string
   csrf?: string
+  /** Asked for by another nuthatch, for one of its users. */
+  peer?: Peer
 }
 
 /** What nuthatch knows of a user, from the config and the backends. */
@@ -110,11 +129,31 @@ export function buildApp(deps: Deps): Hono<Env> {
     return found
   }
 
+  const remotes = deps.remotes ?? []
+  for (const site of remotes) void site.events((event, data) => deps.events.forward(event, data))
+
+  /** Sorts backend names into those of this nuthatch and those of each site. None given means all. */
+  function sites(names: string[]): { local: string[] | null; remote: { site: RemoteSite; names: string[] }[] } {
+    if (names.length === 0) return { local: deps.backends.length > 0 ? [] : null, remote: remotes.map((site) => ({ site, names: [] })) }
+    const local: string[] = []
+    const remote = new Map<RemoteSite, string[]>()
+    for (const name of names) {
+      const site = remotes.find((r) => r.owns(name))
+      if (site) remote.set(site, [...(remote.get(site) ?? []), name])
+      else local.push(name)
+    }
+    return { local: local.length > 0 ? local : null, remote: [...remote].map(([site, names]) => ({ site, names })) }
+  }
+
+  const why = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
   app.onError((err, c) => {
     if (err instanceof Forbidden) return c.json({ error: err.message }, 403)
     if (err instanceof Refused) return c.json({ error: err.message }, 400)
     if (err instanceof Conflict) return c.json({ error: err.message }, 409)
     if (err instanceof Unverified) return c.json({ error: err.message, output: err.output }, 422)
+    // What a site answered goes on as it was.
+    if (err instanceof RemoteError) return c.json({ ...err.detail, error: err.message }, err.status as 400)
     if (err instanceof SyntaxError) return c.json({ error: 'the body is not JSON' }, 400)
     console.error(err)
     return c.json({ error: 'nuthatch failed on this request; see its log' }, 500)
@@ -152,8 +191,23 @@ export function buildApp(deps: Deps): Hono<Env> {
   app.use('/api/*', async (c, next) => {
     let identity: Identity | undefined
     const bearer = c.req.header('authorization')?.match(/^Bearer (.+)$/)?.[1]
+    const peerKey = c.req.header('authorization')?.match(/^Peer (.+)$/)?.[1]
     const cookie = getCookie(c, COOKIE)
-    if (bearer !== undefined) {
+    if (peerKey !== undefined) {
+      // Another nuthatch, with the key it was given, for one of its users.
+      const hash = createHash('sha256').update(peerKey.trim()).digest()
+      const peer = deps.peers?.find((p) => timingSafeEqual(Buffer.from(p.keyHash, 'hex'), hash))
+      let user: string | undefined
+      try {
+        user = decodeURIComponent(c.req.header('x-nuthatch-user') ?? '')
+      } catch {
+        user = undefined
+      }
+      if (peer && userName(user)) identity = { user, peer }
+      const path = c.req.path
+      const passedOn = ['/api/v1/session', '/api/v1/query', '/api/v1/stats', '/api/v1/command', '/api/v1/events'].includes(path) || path.startsWith('/api/v1/config/')
+      if (identity && !passedOn) return c.json({ error: 'not for another nuthatch' }, 403)
+    } else if (bearer !== undefined) {
       const user = deps.store.tokenUser(bearer.trim())
       if (user !== null) identity = { user }
     } else if (cookie !== undefined) {
@@ -183,8 +237,8 @@ export function buildApp(deps: Deps): Hono<Env> {
     const identity = c.get('identity')
     const { roles, canSubmit } = await who(identity.user)
     const system = roles.has('system_information')
-    const backends = await Promise.all(
-      deps.backends.map(async (backend) => {
+    const backends: BackendStatus[] = await Promise.all(
+      deps.backends.map(async (backend): Promise<BackendStatus> => {
         const limits_users = await backend.enforcesAuth()
         try {
           const [row] = await backend.query('GET status\nColumns: program_version livestatus_version program_start')
@@ -195,16 +249,34 @@ export function buildApp(deps: Deps): Hono<Env> {
         }
       }),
     )
+    const configBackends = roles.has('config_edit') ? [...(deps.config?.keys() ?? [])] : []
+    // The roles shown are for the interface to know what to offer: what
+    // the user has here or at any site, and read-only when nowhere more.
+    // What a user may do at a site is decided there.
+    const held = new Set<Role>(roles)
+    const readOnly = deps.backends.length > 0 ? [roles.has('read_only')] : []
+    for (const site of remotes) {
+      try {
+        const theirs = await site.session(identity.user)
+        for (const role of theirs.roles) held.add(role)
+        readOnly.push(theirs.roles.includes('read_only'))
+        backends.push(...theirs.backends)
+        Object.assign(canSubmit, theirs.canSubmit)
+        configBackends.push(...theirs.configBackends)
+      } catch (err) {
+        backends.push({ name: site.name, ok: false, limits_users: true, error: why(err) })
+      }
+    }
     const answer: SessionAnswer = {
       user: identity.user,
-      roles: [...roles] as Role[],
+      roles: ROLES.filter((role) => (role === 'read_only' ? readOnly.length > 0 && readOnly.every(Boolean) : held.has(role))),
       can_submit_commands: canSubmit,
       csrf: identity.csrf ?? null,
       version: VERSION,
       commands: COMMAND_NAMES,
       tables: TABLES,
       backends,
-      config_backends: roles.has('config_edit') ? [...(deps.config?.keys() ?? [])] : [],
+      config_backends: configBackends,
     }
     return c.json(answer)
   })
@@ -245,14 +317,62 @@ export function buildApp(deps: Deps): Hono<Env> {
     return c.json({})
   })
 
+  /** The names a request gave under `backends`. */
+  function named(sent: Record<string, unknown>): string[] {
+    const names = sent.backends ?? []
+    if (!Array.isArray(names) || names.some((n) => typeof n !== 'string')) throw new Refused('backends is a list of names')
+    return names as string[]
+  }
+
+  /**
+   * Asks this nuthatch's own backends and each site, and gives all the
+   * answers. A part that failed is an error under its name, unless
+   * nothing else was asked: then the failure is the answer.
+   */
+  async function everywhere<T extends { errors: Record<string, string> }>(
+    user: string,
+    sent: Record<string, unknown>,
+    path: string,
+    here: (names: string[]) => Promise<T>,
+    empty: () => T,
+  ): Promise<T[]> {
+    const { local, remote } = sites(named(sent))
+    const asks: Promise<T>[] = []
+    const failed = (names: string[], err: unknown): T => ({ ...empty(), errors: Object.fromEntries(names.map((n) => [n, why(err)])) })
+    if (local !== null) {
+      asks.push(remote.length === 0 ? here(local) : here(local).catch((err) => failed(local.length > 0 ? local : deps.backends.map((b) => b.name), err)))
+    }
+    for (const { site, names } of remote) {
+      const ask = site.ask<T>(user, path, sent, names)
+      asks.push(local === null && remote.length === 1 ? ask : ask.catch((err) => failed(names.length > 0 ? names : [site.name], err)))
+    }
+    return Promise.all(asks)
+  }
+
   app.post('/api/v1/query', async (c) => {
     const { user } = c.get('identity')
-    return c.json(await rows(deps.backends, user, (await who(user)).roles, await body(c)))
+    const sent = await body(c)
+    const { roles } = await who(user)
+    if (remotes.length === 0) return c.json(await rows(deps.backends, user, roles, sent))
+    // Each part gives its first rows; the page is cut from all of them.
+    const offset = typeof sent.offset === 'number' && Number.isInteger(sent.offset) && sent.offset > 0 ? sent.offset : 0
+    const limit = typeof sent.limit === 'number' && Number.isInteger(sent.limit) && sent.limit >= 0 ? sent.limit : undefined
+    const sort = (Array.isArray(sent.sort) ? sent.sort : []).filter((k): k is { column: string; desc?: boolean } => typeof k?.column === 'string')
+    const top = { ...sent, offset: 0, limit: limit === undefined ? undefined : offset + limit }
+    const parts = await everywhere<QueryAnswer>(user, top, '/api/v1/query', (names) => rows(deps.backends, user, roles, { ...top, backends: names }), () => ({ rows: [], total: 0, errors: {} }))
+    return c.json(combine(parts, sort, offset, limit))
   })
 
   app.post('/api/v1/stats', async (c) => {
     const { user } = c.get('identity')
-    return c.json(await stats(deps.backends, user, (await who(user)).roles, await body(c)))
+    const sent = await body(c)
+    const { roles } = await who(user)
+    if (remotes.length === 0) return c.json(await stats(deps.backends, user, roles, sent))
+    const parts = await everywhere<StatsAnswer>(user, sent, '/api/v1/stats', (names) => stats(deps.backends, user, roles, { ...sent, backends: names }), () => ({ groups: [], by_backend: {}, errors: {} }))
+    // How each number is merged follows from the lines, whoever asks.
+    const lines = Array.isArray(sent.headers) ? sent.headers.filter((h): h is string => typeof h === 'string') : []
+    const everything = new Set<Role>(['configuration_information'])
+    return c.json(combineStats(parts, checkHeaders(lines, true, everything)))
   })
 
   /**
@@ -280,8 +400,23 @@ export function buildApp(deps: Deps): Hono<Env> {
   }
 
   app.post('/api/v1/command', async (c) => {
-    const { user } = c.get('identity')
+    const { user, peer } = c.get('identity')
     const sent = await body(c)
+    if (peer?.readOnly) return c.json({ error: `${peer.name} may only read here` }, 403)
+    const site = remotes.find((r) => typeof sent.backend === 'string' && r.owns(sent.backend))
+    if (site) {
+      // The site decides, and keeps its own record of it.
+      const line = `${String(sent.command)};${Array.isArray(sent.args) ? sent.args.join(';') : ''}`.slice(0, 500)
+      try {
+        await site.session(user)
+        const passed = await site.call(user, 'POST', '/api/v1/command', { ...sent, backend: site.theirs(sent.backend as string) ?? sent.backend })
+        deps.store.audit(user, String(sent.backend), 'command passed on', line)
+        return c.json(passed)
+      } catch (err) {
+        deps.store.audit(user, String(sent.backend), 'command refused', `${line}: ${why(err)}`)
+        throw err
+      }
+    }
     const backend = deps.backends.find((b) => b.name === sent.backend)
     if (!backend) return c.json({ error: `no backend '${String(sent.backend)}'` }, 400)
     if (typeof sent.command !== 'string' || !Array.isArray(sent.args) || sent.args.some((a) => typeof a !== 'string')) {
@@ -306,7 +441,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 502)
     }
-    deps.store.audit(user, backend.name, 'command', checked.line)
+    deps.store.audit(user, backend.name, 'command', peer ? `${checked.line} (through ${peer.name})` : checked.line)
     return c.json({ sent: checked.line })
   })
 
@@ -353,16 +488,38 @@ export function buildApp(deps: Deps): Hono<Env> {
 
   // Changing the config, for one role.
   async function configOf(c: Context<Env>): Promise<{ admin: ConfigAdmin; user: string }> {
-    const { user } = c.get('identity')
+    const { user, peer } = c.get('identity')
+    if (peer && (peer.readOnly || !peer.config)) throw new Forbidden(`${peer.name} may not change the config here`)
     if (!(await who(user)).roles.has('config_edit')) throw new Forbidden('changing the config needs the role config_edit')
     const admin = deps.config?.get(c.req.param('backend') ?? '')
     if (!admin) throw new Refused(`the config of '${c.req.param('backend')}' cannot be changed here`)
     return { admin, user }
   }
 
-  app.get('/api/v1/config/:backend', async (c) => c.json(await (await configOf(c)).admin.state()))
+  /** The site whose backend a config request names, with the site's name for it. */
+  async function configSite(c: Context<Env>): Promise<{ site: RemoteSite; path: string } | undefined> {
+    const name = c.req.param('backend') ?? ''
+    const site = remotes.find((r) => r.owns(name))
+    if (!site) return undefined
+    await site.session(c.get('identity').user)
+    return { site, path: `/api/v1/config/${encodeURIComponent(site.theirs(name) ?? name)}` }
+  }
+
+  app.get('/api/v1/config/:backend', async (c) => {
+    const far = await configSite(c)
+    if (far) return c.json({ ...(await far.site.call<Record<string, unknown>>(c.get('identity').user, 'GET', far.path)), backend: c.req.param('backend') })
+    return c.json(await (await configOf(c)).admin.state())
+  })
 
   app.post('/api/v1/config/:backend', async (c) => {
+    const far = await configSite(c)
+    if (far) {
+      const { user } = c.get('identity')
+      const sent = await body(c)
+      const result = await far.site.call(user, 'POST', far.path, sent)
+      if (sent.dry_run !== true) deps.store.audit(user, c.req.param('backend'), 'config passed on', JSON.stringify(sent.change).slice(0, 200))
+      return c.json(result)
+    }
     const { admin, user } = await configOf(c)
     const backend = c.req.param('backend')
     const sent = await body(c)

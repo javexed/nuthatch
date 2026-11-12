@@ -50,6 +50,11 @@ export class Events {
     return () => this.listeners.delete(listener)
   }
 
+  /** Passes on an event of a site that another nuthatch watches. */
+  forward(event: string, data: unknown): void {
+    this.send(event, data)
+  }
+
   private send(event: string, data: unknown): void {
     for (const listener of this.listeners) listener(event, JSON.stringify(data))
   }
