@@ -39,6 +39,32 @@ describe('the client', () => {
     await expect(sent).rejects.toMatchObject({ status: 403, message: 'this user is read-only' })
   })
 
+  it('says when the stream of events opens and when it breaks', async () => {
+    const stop = new AbortController()
+    const seen: string[] = []
+    let asked = 0
+    const fake = (async (_: unknown, init?: RequestInit) => {
+      asked++
+      // The first stream says one thing and ends; the second stays open
+      // until the request is given up, as a real one would.
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (asked === 1) {
+            controller.enqueue(new TextEncoder().encode('event: changed\ndata: {"backend":"a"}\n\n'))
+            controller.close()
+          } else init?.signal?.addEventListener('abort', () => controller.error(new Error('aborted')))
+        },
+      })
+      return new Response(body, { status: 200 })
+    }) as unknown as typeof fetch
+    const done = new Client({ fetch: fake }).events((event) => {
+      seen.push(event.type)
+      if (seen.filter((type) => type === 'connected').length === 2) stop.abort()
+    }, stop.signal)
+    await done
+    expect(seen).toEqual(['connected', 'changed', 'changed', 'disconnected', 'connected', 'changed'])
+  }, 10_000)
+
   it('reads server-sent events in pieces', () => {
     const first = parseEvents('event: changed\ndata: {"backend":"a"}\n\nevent: back')
     expect(first.events).toEqual([{ event: 'changed', data: '{"backend":"a"}' }])

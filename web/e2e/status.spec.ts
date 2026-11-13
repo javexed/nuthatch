@@ -150,6 +150,8 @@ for (const engine of ENGINES) {
     await expect
       .poll(async () => (await livestatus(engine, 'GET services\nColumns: last_check\nFilter: host_name = mail1\nFilter: description = queue'))[0]?.[0], { timeout: 15000 })
       .toBeGreaterThan(before)
+    // The page waited for the result, and shows it without being asked.
+    await expect(page.getByRole('button', { name: 'Check now' })).toBeEnabled({ timeout: 20_000 })
 
     // Tidy up: the comments of this test go.
     while ((await card('Comments').getByRole('button', { name: 'Delete' }).count()) > 0) {

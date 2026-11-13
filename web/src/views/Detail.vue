@@ -3,7 +3,7 @@
 // was done about it, and what can be done.
 import type { Command } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import CommandDialog, { type Action } from '../components/CommandDialog.vue'
 import EventLog from '../components/EventLog.vue'
 import StateBadge from '../components/StateBadge.vue'
@@ -76,14 +76,33 @@ const farAhead = Date.now() / 1000 + 365 * 86400
 const dialog = ref<Action | null>(null)
 const notice = ref('')
 
-async function send(command: Command, done: string) {
+// A check that was asked for: waited for, and shown when it is back.
+const checking = computed(() => live.checking(target.value, Number(object.value?.last_check ?? 0)))
+const flash = ref(false)
+watch(object, (now, before) => {
+  if (now === undefined) return
+  const back = live.arrived(target.value, Number(now.last_check ?? 0))
+  if (!back && (before === undefined || before.state === now.state)) return
+  flash.value = true
+  setTimeout(() => (flash.value = false), 1600)
+})
+
+async function checkNow() {
+  const last = Number(object.value?.last_check ?? 0)
+  if (await send(recheck(target.value), 'Asked for a check.')) live.expectCheck(target.value, last)
+}
+
+async function send(command: Command, done: string): Promise<boolean> {
+  let sent = true
   try {
     await api.command(command)
     notice.value = done
   } catch (err) {
+    sent = false
     notice.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
   }
   live.nudge()
+  return sent
 }
 </script>
 
@@ -100,7 +119,7 @@ async function send(command: Command, done: string) {
   <p v-else-if="!loading && !object" class="none">There is no such {{ kind }} here, or it is not one of yours.</p>
 
   <template v-if="object">
-    <section class="card">
+    <section :class="['card', { flash }]">
       <div class="headline">
         <StateBadge :kind="kind" :state="object.state" :checked="object.has_been_checked" />
         <span v-if="object.last_state_change">for {{ duration(Date.now() / 1000 - Number(object.last_state_change)) }}</span>
@@ -114,7 +133,9 @@ async function send(command: Command, done: string) {
       <p class="output">{{ object.plugin_output || 'No output yet.' }}</p>
       <pre v-if="object.long_plugin_output" class="long">{{ String(object.long_plugin_output).replace(/\\n/g, '\n') }}</pre>
       <div v-if="canCommand" class="actions" role="toolbar" aria-label="Actions">
-        <button type="button" @click="send(recheck(target), 'Asked for a check.')">Check now</button>
+        <button type="button" :disabled="checking" @click="checkNow">
+          <span v-if="checking" class="spinner" aria-hidden="true"></span>{{ checking ? 'Checking…' : 'Check now' }}
+        </button>
         <button v-if="problem && !object.acknowledged" type="button" class="quiet" @click="dialog = 'acknowledge'">Acknowledge</button>
         <button v-if="object.acknowledged" type="button" class="quiet" @click="send(removeAcknowledgement(target), 'Acknowledgement removed.')">
           Remove acknowledgement

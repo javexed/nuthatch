@@ -150,9 +150,20 @@ function target(row: Row<Column>): Target {
 const keyOf = (row: Row<Column>) => JSON.stringify(target(row))
 
 const ticked = ref(new Set<string>())
-watch(rows, (now) => {
+/** Rows whose state just changed, or whose check that was asked for came back: shown for a moment. */
+const flashing = ref(new Set<string>())
+watch(rows, (now, before) => {
   const there = new Set(now.map(keyOf))
   ticked.value = new Set([...ticked.value].filter((k) => there.has(k)))
+  const states = new Map(before.map((row) => [keyOf(row), cell(row, 'state')]))
+  const changed = now.filter((row) => {
+    const back = live.arrived(target(row), Number(cell(row, 'last_check')))
+    return back || (states.has(keyOf(row)) && states.get(keyOf(row)) !== cell(row, 'state'))
+  })
+  if (changed.length === 0) return
+  const keys = changed.map(keyOf)
+  flashing.value = new Set([...flashing.value, ...keys])
+  setTimeout(() => (flashing.value = new Set([...flashing.value].filter((k) => !keys.includes(k)))), 1600)
 })
 const tickedTargets = computed(() => rows.value.filter((r) => ticked.value.has(keyOf(r))).map(target))
 const allTicked = computed(() => rows.value.length > 0 && ticked.value.size === rows.value.length)
@@ -173,9 +184,11 @@ const notice = ref('')
 
 async function recheckTicked() {
   const failures: string[] = []
+  const lastChecks = new Map(rows.value.map((row) => [keyOf(row), Number(cell(row, 'last_check'))]))
   for (const t of tickedTargets.value) {
     try {
       await api.command(recheck(t))
+      live.expectCheck(t, lastChecks.get(JSON.stringify(t)) ?? 0)
     } catch (err) {
       failures.push(`${targetName(t)}: ${err instanceof ApiError ? err.message : 'the server cannot be reached'}`)
     }
@@ -262,7 +275,7 @@ const now = () => Date.now() / 1000
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="keyOf(row)">
+        <tr v-for="row in rows" :key="keyOf(row)" :class="{ flash: flashing.has(keyOf(row)) }">
           <td v-if="canCommand" class="tick">
             <input type="checkbox" :checked="ticked.has(keyOf(row))" :aria-label="`Tick ${targetName(target(row))}`" @change="tick(row, ($event.target as HTMLInputElement).checked)" />
           </td>
@@ -276,7 +289,10 @@ const now = () => Date.now() / 1000
             <RouterLink :to="serviceLink(row)">{{ target(row).service }}</RouterLink>
             <Marks :row="row" />
           </td>
-          <td class="when" data-label="Checked">{{ ago(Number(cell(row, 'last_check')), now()) }}</td>
+          <td class="when" data-label="Checked">
+            <span v-if="live.checking(target(row), Number(cell(row, 'last_check')))" class="checking"><span class="spinner" aria-hidden="true"></span>checking…</span>
+            <template v-else>{{ ago(Number(cell(row, 'last_check')), now()) }}</template>
+          </td>
           <td class="when" data-label="For">{{ Number(cell(row, 'last_state_change')) ? duration(now() - Number(cell(row, 'last_state_change'))) : '' }}</td>
           <td class="output">{{ cell(row, 'plugin_output') }}</td>
         </tr>

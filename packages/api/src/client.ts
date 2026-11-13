@@ -6,6 +6,9 @@
 
 import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
 
+/** How long the stream of events may say nothing before it is opened anew. */
+export const EVENTS_SILENCE = 40_000
+
 export class ApiError extends Error {
   readonly status: number
   /** What else the server said, such as the output of an engine's check. */
@@ -215,14 +218,30 @@ export class Client {
         if (answer.status === 401) throw new ApiError(401, 'log in first')
         if (!answer.ok || !answer.body) throw new Error(`the server answered ${answer.status}`)
         pause = 1000
+        onEvent({ type: 'connected' })
         // What happened while not connected is not known.
         onEvent({ type: 'changed' })
         const reader = answer.body.pipeThrough(new TextDecoderStream()).getReader()
         let buffer = ''
         for (;;) {
-          const { value, done } = await reader.read()
+          // The server writes a line every 15 seconds: a stream silent for
+          // 40 is one whose connection died without saying so.
+          let quiet: ReturnType<typeof setTimeout> | undefined
+          const silent = new Promise<never>((_, reject) => {
+            quiet = setTimeout(() => reject(new Error('the stream went silent')), EVENTS_SILENCE)
+          })
+          let read: { value?: string; done: boolean }
+          try {
+            read = await Promise.race([reader.read(), silent])
+          } catch (err) {
+            void reader.cancel().catch(() => undefined)
+            throw err
+          } finally {
+            clearTimeout(quiet)
+          }
+          const { value, done } = read
           if (done) break
-          const parsed = parseEvents(buffer + value.replace(/\r\n/g, '\n'))
+          const parsed = parseEvents(buffer + (value ?? '').replace(/\r\n/g, '\n'))
           buffer = parsed.rest
           for (const { event, data } of parsed.events) {
             const body = JSON.parse(data) as Record<string, unknown>
@@ -233,6 +252,8 @@ export class Client {
       } catch (err) {
         if (signal.aborted || (err instanceof ApiError && err.status === 401)) return
       }
+      if (signal.aborted) return
+      onEvent({ type: 'disconnected' })
       await new Promise((resolve) => setTimeout(resolve, pause))
       pause = Math.min(pause * 2, 30000)
     }

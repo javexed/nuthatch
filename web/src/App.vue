@@ -2,6 +2,7 @@
 import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BottomBar from './components/BottomBar.vue'
+import ConnectionDot from './components/ConnectionDot.vue'
 import { updateReady, watchForUpdates } from './lib/update'
 import { useLive } from './stores/live'
 import { useSession } from './stores/session'
@@ -60,6 +61,7 @@ const logo = `${import.meta.env.BASE_URL}favicon.svg`
       <RouterLink v-for="page in PAGES" :key="page.name" :to="{ name: page.name }">{{ page.label }}</RouterLink>
       <RouterLink v-if="session.session.config_backends.length > 0" :to="{ name: 'config' }">Config</RouterLink>
     </nav>
+    <ConnectionDot />
     <RouterLink :to="{ name: 'device' }" class="who" title="This device: notifications">{{ session.session.user }}</RouterLink>
     <button v-if="!session.session.by_tailnet" type="button" class="plain logout" @click="logout">Log out</button>
   </header>

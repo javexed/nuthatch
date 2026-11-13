@@ -104,6 +104,9 @@ export interface Token {
 export type ServerEvent =
   | { type: 'changed'; backend?: string }
   | { type: 'backend'; name: string; ok: boolean }
+  /** The stream of events is open; or it broke, and is being opened again. */
+  | { type: 'connected' }
+  | { type: 'disconnected' }
 
 /** A service of a host that nuthatch keeps the config of. */
 export interface ManagedService {
