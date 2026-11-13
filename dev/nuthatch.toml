@@ -14,6 +14,10 @@ htpasswd = "dev/run/htpasswd"
 [push]
 subject = "mailto:ops@example.test"
 
+# A short history of performance data, for graphs (docs/graphs.md).
+[graphs]
+days = 2
+
 [roles]
 authorized_contactgroup_for_all_hosts = ["admins"]
 authorized_for_all_host_commands = ["admin"]

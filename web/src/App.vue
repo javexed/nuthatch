@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BottomBar from './components/BottomBar.vue'
 import ConnectionDot from './components/ConnectionDot.vue'
+import { pulled } from './lib/gestures'
 import { updateReady, watchForUpdates } from './lib/update'
 import { useLive } from './stores/live'
 import { useSession } from './stores/session'
@@ -25,6 +26,30 @@ onMounted(() => watchForUpdates(() => route.name !== 'config' && document.queryS
 
 function reload() {
   location.reload()
+}
+
+// On a touch screen, a pull down from the top of the page asks the
+// server anew for what the page shows (the browser's own pull, which
+// would load the whole page again, is turned off in style.css).
+const pull = ref<{ y: number; dy: number } | null>(null)
+const refreshed = ref(false)
+const pullAmount = computed(() => (pull.value ? pulled(pull.value.dy) : 0))
+function pullStart(event: TouchEvent) {
+  const [finger] = event.touches
+  const top = (document.scrollingElement?.scrollTop ?? 0) <= 0
+  pull.value = top && event.touches.length === 1 && finger && session.session && !document.querySelector('dialog[open]') ? { y: finger.clientY, dy: 0 } : null
+}
+function pullMove(event: TouchEvent) {
+  const [finger] = event.touches
+  if (pull.value && finger) pull.value.dy = finger.clientY - pull.value.y
+}
+function pullEnd() {
+  const enough = pullAmount.value >= 1
+  pull.value = null
+  if (!enough) return
+  live.version++
+  refreshed.value = true
+  setTimeout(() => (refreshed.value = false), 900)
 }
 
 async function logout() {
@@ -69,7 +94,11 @@ const logo = `${import.meta.env.BASE_URL}favicon.svg`
     A new version of nuthatch is ready.
     <button type="button" @click="reload">Reload</button>
   </div>
-  <main :class="{ 'with-tabbar': session.session }">
+  <div v-if="pullAmount > 0 || refreshed" class="pull" :class="{ ready: pullAmount >= 1, done: refreshed }" :style="{ height: `${refreshed ? 2.2 : pullAmount * 3}rem` }" aria-hidden="true">
+    <span class="spinner" :style="refreshed ? undefined : { animation: 'none', transform: `rotate(${pullAmount * 300}deg)` }"></span>
+    {{ refreshed ? 'Refreshing…' : pullAmount >= 1 ? 'Let go to refresh' : 'Pull to refresh' }}
+  </div>
+  <main :class="{ 'with-tabbar': session.session }" @touchstart.passive="pullStart" @touchmove.passive="pullMove" @touchend.passive="pullEnd" @touchcancel.passive="pull = null">
     <RouterView :key="$route.path" />
   </main>
   <BottomBar v-if="session.session" :more="MORE" @logout="logout" />

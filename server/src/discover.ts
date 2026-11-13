@@ -392,3 +392,43 @@ export async function discover(given: unknown): Promise<Discovery> {
     suggestions,
   }
 }
+
+/** A machine of the tailnet this server is on. */
+export interface TailnetMachine {
+  /** Its short name. */
+  name: string
+  /** Its full name on the tailnet, to check it by. */
+  address: string
+  os: string
+  online: boolean
+  /** Someone else's, shared with this tailnet. */
+  shared: boolean
+}
+
+/** Reads what `tailscale status --json` says: the other machines, one's own and online ones first. */
+export function tailnetMachines(status: unknown): TailnetMachine[] {
+  const peers = Object.values(((status as { Peer?: Record<string, unknown> } | null)?.Peer ?? {}) as Record<string, Record<string, unknown>>)
+  const out: TailnetMachine[] = []
+  for (const peer of peers) {
+    const address = String(peer.DNSName ?? '').replace(/\.$/, '').toLowerCase()
+    // What cannot be an address of a host is left out, whatever it is.
+    if (!HOST.test(address)) continue
+    out.push({ name: hostName(address), address, os: String(peer.OS ?? '').slice(0, 20), online: peer.Online === true, shared: peer.ShareeNode === true })
+  }
+  const rank = (m: TailnetMachine) => (m.shared ? 2 : 0) + (m.online ? 0 : 1)
+  return out.sort((a, b) => rank(a) - rank(b) || a.address.localeCompare(b.address))
+}
+
+/** The tailnet's machines as the local tailscale knows them; null where there is none. */
+export function askTailscale(): Promise<TailnetMachine[] | null> {
+  return new Promise((done) => {
+    execFile('tailscale', ['status', '--json'], { timeout: 5000, maxBuffer: 8 << 20 }, (err, stdout) => {
+      if (err) return done(null)
+      try {
+        done(tailnetMachines(JSON.parse(stdout)))
+      } catch {
+        done(null)
+      }
+    })
+  })
+}

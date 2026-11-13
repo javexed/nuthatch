@@ -3,3 +3,4 @@
 // interface, the phone app and the server's own types all use it.
 export * from './types.ts'
 export * from './client.ts'
+export * from './perfdata.ts'

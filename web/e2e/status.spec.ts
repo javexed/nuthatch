@@ -208,3 +208,42 @@ test('on a phone: the bar at the bottom, with the open problems counted', async 
   await expect(page.locator('dialog[open]')).toHaveCount(0)
   await fits(page)
 })
+
+for (const engine of ENGINES) {
+  test(`a service's numbers are drawn over time, on ${engine}`, async ({ page }) => {
+    await login(page, 'admin')
+    await page.goto(`/service/${engine}/db1/ping`)
+    const graphs = page.getByRole('region', { name: 'Graphs' })
+    // The server asks the engines once a minute for what was checked.
+    await expect(graphs).toBeVisible({ timeout: 90_000 })
+    const plot = graphs.getByRole('img', { name: /^time: now / })
+    await expect(plot).toBeVisible()
+    expect(await plot.locator('path.line').getAttribute('d')).toMatch(/^M[\d.]+ [\d.]+/)
+    // The value under the pointer.
+    await plot.hover({ position: { x: 40, y: 20 } })
+    await expect(graphs.locator('.graph .now.at').first()).toContainText(/[\d.]+s\s+\d\d:\d\d/)
+    await graphs.getByRole('button', { name: '6 hours' }).click()
+    await expect(graphs.getByRole('button', { name: '6 hours' })).toHaveAttribute('aria-pressed', 'true')
+    await fits(page)
+  })
+}
+
+test('on a phone: a row swiped right is checked now', async ({ page }, info) => {
+  test.skip(info.project.name !== 'phone', 'swipes are for touch screens')
+  await login(page, 'admin')
+  await page.goto('/services?host=mail1')
+  const row = page.locator('table.rows tbody tr').first()
+  await expect(row).toBeVisible()
+  // A finger put down on the row, moved 130 px to the right, and lifted.
+  await row.evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    const at = (x: number) => new Touch({ identifier: 1, target: element, clientX: box.left + x, clientY: box.top + box.height / 2 })
+    const send = (type: string, x: number, lifted = false) =>
+      element.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: lifted ? [] : [at(x)], changedTouches: [at(x)] }))
+    send('touchstart', 20)
+    send('touchmove', 90)
+    send('touchmove', 150)
+    send('touchend', 150, true)
+  })
+  await expect(page.getByRole('status')).toContainText('Asked for a check of mail1')
+})

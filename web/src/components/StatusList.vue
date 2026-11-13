@@ -8,6 +8,7 @@ import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { type Target, recheck, targetName } from '../lib/commands'
+import { sideways, swipeOf } from '../lib/gestures'
 import { EMPTY, type ListFilter, fromQuery, toHeaders, toQuery } from '../lib/filters'
 import { ago, duration } from '../lib/format'
 import { type Kind, states } from '../lib/states'
@@ -198,6 +199,52 @@ async function recheckTicked() {
   live.nudge()
 }
 
+// On a touch screen: a row dragged left is acknowledged (when it is a
+// problem nobody has taken), one dragged right is checked now.
+const drag = ref<{ key: string; x: number; y: number; dx: number } | null>(null)
+const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+
+function dragStart(event: TouchEvent, row: Row<Column>) {
+  const [finger] = event.touches
+  if (!canCommand.value || event.touches.length !== 1 || !finger) return
+  drag.value = { key: keyOf(row), x: finger.clientX, y: finger.clientY, dx: 0 }
+}
+function dragMove(event: TouchEvent) {
+  const [finger] = event.touches
+  if (!drag.value || !finger) return
+  const dx = finger.clientX - drag.value.x
+  drag.value.dx = sideways(dx, finger.clientY - drag.value.y) ? dx : 0
+}
+async function dragEnd(event: TouchEvent, row: Row<Column>) {
+  const [finger] = event.changedTouches
+  const was = drag.value
+  drag.value = null
+  if (!was || !finger) return
+  const way = swipeOf(finger.clientX - was.x, finger.clientY - was.y)
+  if (way === null) return
+  const t = target(row)
+  if (way === 'right') {
+    try {
+      await api.command(recheck(t))
+      live.expectCheck(t, Number(cell(row, 'last_check')))
+      notice.value = `Asked for a check of ${targetName(t)}.`
+    } catch (err) {
+      notice.value = `${targetName(t)}: ${err instanceof ApiError ? err.message : 'the server cannot be reached'}`
+    }
+    live.nudge()
+    return
+  }
+  const problem = Number(cell(row, 'state')) !== 0 && cell(row, 'has_been_checked') !== 0
+  if (!problem || cell(row, 'acknowledged')) {
+    notice.value = problem ? `${targetName(t)} is acknowledged already.` : `${targetName(t)} has no problem to acknowledge.`
+    return
+  }
+  ticked.value = new Set([keyOf(row)])
+  dialog.value = 'acknowledge'
+}
+const dragStyle = (row: Row<Column>) => (drag.value?.key === keyOf(row) && drag.value.dx !== 0 ? { transform: `translateX(${Math.max(-120, Math.min(120, drag.value.dx))}px)`, transition: 'none' } : undefined)
+const dragWay = (row: Row<Column>) => (drag.value?.key === keyOf(row) ? (drag.value.dx <= -72 ? 'left' : drag.value.dx >= 72 ? 'right' : '') : '')
+
 function closeDialog() {
   dialog.value = null
   tickAll(false)
@@ -275,7 +322,16 @@ const now = () => Date.now() / 1000
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="keyOf(row)" :class="{ flash: flashing.has(keyOf(row)) }">
+        <tr
+          v-for="row in rows"
+          :key="keyOf(row)"
+          :class="[{ flash: flashing.has(keyOf(row)) }, dragWay(row) && `swipe-${dragWay(row)}`]"
+          :style="dragStyle(row)"
+          @touchstart.passive="dragStart($event, row)"
+          @touchmove.passive="dragMove"
+          @touchend.passive="dragEnd($event, row)"
+          @touchcancel.passive="drag = null"
+        >
           <td v-if="canCommand" class="tick">
             <input type="checkbox" :checked="ticked.has(keyOf(row))" :aria-label="`Tick ${targetName(target(row))}`" @change="tick(row, ($event.target as HTMLInputElement).checked)" />
           </td>
@@ -299,6 +355,7 @@ const now = () => Date.now() / 1000
       </tbody>
     </table>
     <p v-else-if="!loading && !error" class="none">{{ empty }}</p>
+    <p v-if="touch && canCommand && rows.length > 0 && controls" class="swipe-hint">Swipe a row right to check it now, left to acknowledge it.</p>
 
     <Pager v-if="data && data.total !== null && rows.length > 0" :offset="offset" :limit="pageSize" :total="data.total" @go="update({ offset: $event })" />
     <CommandDialog v-if="dialog" :action="dialog" :targets="tickedTargets" @close="closeDialog" />

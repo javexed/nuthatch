@@ -3,6 +3,8 @@ import { availabilityRequest, percent, showPercent, toCsv } from './availability
 import { acknowledge, downtime, recheck } from './commands.ts'
 import { EMPTY, fromQuery, literal, toHeaders, toQuery } from './filters.ts'
 import { ago, duration, fromInput, toInput } from './format.ts'
+import { pulled, sideways, swipeOf } from './gestures.ts'
+import { nearest, shape, short } from './graph.ts'
 import { fraction, parsePerfdata } from './perfdata.ts'
 import { stateOf } from './states.ts'
 import { decide, latestBuild } from './update.ts'
@@ -139,5 +141,39 @@ describe('updates', () => {
     expect(await latestBuild(answer('{"build":1}'))).toBeNull()
     expect(await latestBuild(answer('{}', 404))).toBeNull()
     expect(await latestBuild((async () => { throw new Error('offline') }) as unknown as typeof fetch)).toBeNull()
+  })
+})
+
+describe('graphs', () => {
+  it('places points in the box, and breaks the line where checks are missing', () => {
+    const drawn = shape([[0, 1], [60, 3], [120, 2], [600, 2], [660, 1]], 0, 660)
+    expect(drawn).toMatchObject({ min: 1, max: 3, low: 1, high: 3, from: 0, to: 660 })
+    expect(drawn.path).toBe('M0.00 100.00L9.09 0.00L18.18 50.00M90.91 50.00L100.00 100.00')
+    // A flat line runs through the middle.
+    expect(shape([[0, 5], [60, 5]], 0, 60).path).toBe('M0.00 50.00L100.00 50.00')
+    // One point alone still shows.
+    expect(shape([[30, 5]], 0, 60).path).toBe('M50.00 50.00h0.01')
+  })
+  it('finds the point a pointer is at, and writes numbers shortly', () => {
+    expect(nearest([[0, 1], [60, 3], [120, 2]], 0, 120, 0.45)).toEqual([60, 3])
+    expect(nearest([], 0, 120, 0.5)).toBeUndefined()
+    expect([0, 0.25, 1234.5, 0.000123, 41, 2500000].map(short)).toEqual(['0', '0.25', '1230', '1.2e-4', '41', '2.5e+6'])
+  })
+})
+
+describe('gestures', () => {
+  it('tells a swipe from a scroll', () => {
+    expect(swipeOf(-90, 10)).toBe('left')
+    expect(swipeOf(100, -20)).toBe('right')
+    expect(swipeOf(-60, 0)).toBeNull()
+    expect(swipeOf(-90, 60)).toBeNull()
+    expect(sideways(20, 5)).toBe(true)
+    expect(sideways(20, 30)).toBe(false)
+    expect(sideways(8, 0)).toBe(false)
+  })
+  it('lets go of a pull only when it came far enough', () => {
+    expect(pulled(-30)).toBe(0)
+    expect(pulled(60)).toBeLessThan(1)
+    expect(pulled(140)).toBe(1)
   })
 })

@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -166,6 +166,12 @@ export class Client {
     return this.call('DELETE', `/api/v1/dashboards/${id}`)
   }
 
+  /** The performance data of a host (no service) or a service over the last hours. */
+  graph(backend: string, host: string, service: string | undefined, hours: number): Promise<GraphAnswer> {
+    const query = new URLSearchParams({ backend, host, service: service ?? '', hours: String(hours) })
+    return this.call('GET', `/api/v1/graph?${query.toString()}`)
+  }
+
   push(): Promise<PushState> {
     return this.call('GET', '/api/v1/push')
   }
@@ -187,6 +193,11 @@ export class Client {
   /** Looks at a host before it is added: its ports, and the checks suggested. */
   discover(backend: string, target: string): Promise<Discovery> {
     return this.call('POST', `/api/v1/config/${encodeURIComponent(backend)}/discover`, { target })
+  }
+
+  /** The tailnet's machines that the backend's engine has no host for yet. */
+  machines(backend: string): Promise<{ available: boolean; machines: TailnetMachine[] }> {
+    return this.call('GET', `/api/v1/config/${encodeURIComponent(backend)}/machines`)
   }
 
   config(backend: string): Promise<ConfigState> {

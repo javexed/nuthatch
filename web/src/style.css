@@ -11,6 +11,8 @@
   --critical: #c0392b;
   --unknown: #7a5ba8;
   --pending: #6b7686;
+  /* The line of a graph: checked for chroma and contrast on --card. */
+  --series: #1f6fd1;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 16px;
 }
@@ -27,10 +29,11 @@
     --critical: #ee6b5e;
     --unknown: #b196dd;
     --pending: #9aa5b5;
+    --series: #3d8ee8;
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); }
+body { margin: 0; background: var(--bg); color: var(--text); overscroll-behavior-y: contain; }
 main { max-width: 72rem; margin: 0 auto; padding: 1rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom)); }
 h1 { font-size: 1.4rem; margin: 0.5rem 0 1rem; overflow-wrap: anywhere; }
 h2 { font-size: 1rem; margin: 1.2rem 0 0.6rem; color: var(--muted); font-weight: 600; }
@@ -353,3 +356,37 @@ tr.flash > td { animation: flash 1.6s ease-out; }
   .spinner, .bar .connection.lost .dot { animation-duration: 3s; }
   tr.flash > td, .card.flash, .events li.fresh { animation: none; }
 }
+
+/* Small graphs of performance data (PerfGraphs.vue). */
+.graphs-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 1rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.graphs-head h2 { margin: 0; }
+.graph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1.2rem 1.5rem; }
+.graph { margin: 0; min-width: 0; }
+.graph figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6rem; margin-bottom: 0.3rem; }
+.graph .name { color: var(--muted); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph .now { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.graph .plot { position: relative; height: 4.5rem; touch-action: pan-y; cursor: crosshair; }
+.graph svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.graph .line { fill: none; stroke: var(--series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.graph .rule { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.graph .edge { position: absolute; left: 0; padding: 0 0.2rem; font-size: 0.7rem; line-height: 1.3; color: var(--muted); background: var(--card); font-variant-numeric: tabular-nums; pointer-events: none; z-index: 1; }
+.graph .edge.top { top: 0; transform: translateY(-50%); }
+.graph .edge.bottom { bottom: 0; transform: translateY(50%); }
+.graph .cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--muted); pointer-events: none; }
+.graph .mark-at { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--series); box-shadow: 0 0 0 2px var(--card); pointer-events: none; }
+.graph .now .when { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
+.graph .axis { display: flex; justify-content: space-between; margin-top: 0.45rem; font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The tailnet's machines to add (AddHost.vue). */
+.tailnet { display: grid; gap: 0.4rem; }
+.tailnet .chip { cursor: pointer; color: var(--text); }
+.tailnet .chip.offline { opacity: 0.6; }
+
+/* Gestures: a row dragged aside, and the pull from the top. */
+.rows tbody tr { transition: transform 0.18s ease-out; }
+.rows tr.swipe-left { box-shadow: inset -0.3rem 0 0 var(--accent); }
+.rows tr.swipe-right { box-shadow: inset 0.3rem 0 0 var(--ok); }
+.swipe-hint { color: var(--muted); font-size: 0.85rem; margin: 0.6rem 0 0; }
+.pull { display: flex; align-items: center; justify-content: center; gap: 0.2rem; overflow: hidden; color: var(--muted); font-size: 0.9rem; }
+.pull.ready, .pull.done { color: var(--accent); font-weight: 600; }
+.pull.done { transition: height 0.2s; }

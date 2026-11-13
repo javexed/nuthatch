@@ -14,8 +14,9 @@ import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
 import { CATALOGUE_NAMES, catalogueFile, pluginsDir } from './catalogue.ts'
 import { checkHost, hostFile, readHostFile } from './configadmin.ts'
-import { discover, hostName, parseTarget, suggest } from './discover.ts'
+import { discover, hostName, parseTarget, suggest, tailnetMachines } from './discover.ts'
 import { Events } from './events.ts'
+import { Graphs, thin } from './graphs.ts'
 import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagioscfg.ts'
 import { RolesConfig, access, checkColumns, checkHeaders } from './policy.ts'
 import { Pusher, messageOf, parseNotice } from './push.ts'
@@ -663,6 +664,25 @@ describe('looking at a host before adding it', () => {
     }
   }, 20_000)
 
+  it("lists the tailnet's machines, one's own and those online first", () => {
+    const status = {
+      Self: { DNSName: 'me.tail.example.test.' },
+      Peer: {
+        a: { DNSName: 'nas.tail.example.test.', OS: 'linux', Online: true },
+        b: { DNSName: 'Old-Laptop.tail.example.test.', OS: 'windows', Online: false },
+        c: { DNSName: 'friend.other.example.test.', OS: '', Online: true, ShareeNode: true },
+        d: { DNSName: '', OS: 'linux', Online: true },
+        e: { DNSName: 'bad name;x.example.test.', Online: true },
+      },
+    }
+    expect(tailnetMachines(status)).toEqual([
+      { name: 'nas', address: 'nas.tail.example.test', os: 'linux', online: true, shared: false },
+      { name: 'old-laptop', address: 'old-laptop.tail.example.test', os: 'windows', online: false, shared: false },
+      { name: 'friend', address: 'friend.other.example.test', os: '', online: true, shared: true },
+    ])
+    expect(tailnetMachines(null)).toEqual([])
+  })
+
   it("brings its own commands, written from nuthatch's list only", () => {
     const text = catalogueFile('/usr/lib/monitoring-plugins')
     const defined = parseObjects(text)
@@ -814,5 +834,65 @@ describe('notifications pushed to browsers', () => {
     expect(sent).toEqual([subscription.endpoint])
     expect((await call(app, 'POST', '/api/v1/push/remove', { endpoint: subscription.endpoint })).status).toBe(200)
     expect(store.pushOf('ann')).toHaveLength(0)
+  })
+})
+
+describe('a short history for graphs', () => {
+  it('keeps the numbers of checks, once each, and gives them back by label', async () => {
+    let rows: unknown[][] = [
+      ['web1', 'http', 1000, 'time=0.25s;1;2;0 size=512B'],
+      ['web1', 'disk', 1000, "'/ used'=41%;80;90;0;100"],
+    ]
+    const backend = fake('site', (request) => (request.startsWith('GET services') ? rows : request.startsWith('GET hosts') ? [['web1', 990, 'rta=1.5ms pl=0%']] : []))
+    const graphs = new Graphs(':memory:', 7, [backend], 0)
+    expect(await graphs.sample(backend, 900)).toBe(1000)
+    expect(backend.asked.at(-1)).toContain('Filter: last_check > 900')
+    // Asked again with an overlap: nothing is kept twice.
+    rows = [...rows, ['web1', 'http', 1060, 'time=0.75s;1;2;0 size=512B']]
+    expect(await graphs.sample(backend, 900)).toBe(1060)
+    expect(graphs.series('site', 'web1', 'http', 24, 1100)).toEqual([
+      { label: 'time', unit: 's', points: [[1000, 0.25], [1060, 0.75]] },
+      { label: 'size', unit: 'B', points: [[1000, 512], [1060, 512]] },
+    ])
+    expect(graphs.series('site', 'web1', 'disk', 24, 1100)).toEqual([{ label: '/ used', unit: '%', points: [[1000, 41]] }])
+    expect(graphs.series('site', 'web1', '', 24, 1100).map((s) => s.label)).toEqual(['rta', 'pl'])
+    expect(graphs.series('other', 'web1', 'http', 24, 1100)).toEqual([])
+    // Only the hours asked for; and what is older than the days kept goes.
+    expect(graphs.series('site', 'web1', 'http', 1, 1000 + 3600 + 30)[0]?.points).toEqual([[1060, 0.75]])
+    graphs.prune(1030 + 7 * 86400)
+    expect(graphs.series('site', 'web1', 'http', 24 * 31, 1100 + 7 * 86400)[0]?.points).toEqual([[1060, 0.75]])
+    expect(graphs.series('site', 'web1', 'disk', 24 * 31, 1100 + 7 * 86400)).toEqual([])
+  })
+
+  it('averages when there are more points than a graph shows', () => {
+    const many: [number, number][] = Array.from({ length: 1000 }, (_, n) => [n * 60, n % 2])
+    const thinned = thin(many, 100)
+    expect(thinned.length).toBeLessThanOrEqual(100)
+    expect(thinned.length).toBeGreaterThan(90)
+    for (const [, value] of thinned) expect(value).toBeCloseTo(0.5, 1)
+    expect(thin([[1, 2], [3, 4]], 100)).toEqual([[1, 2], [3, 4]])
+  })
+
+  it('shows a graph only to those who see the host or service', async () => {
+    const backend = fake('site', (request) => {
+      if (request.startsWith('GET contactgroups')) return [['admins', ['ann']]]
+      if (request.startsWith('GET contacts')) return [[1]]
+      if (request.includes('AuthUser: ops') && request.includes('Stats:')) return [[request.includes('name = web1') ? 1 : 0]]
+      return []
+    })
+    const store = new Store(':memory:')
+    const graphs = new Graphs(':memory:', 7, [backend], 0)
+    const at = Math.floor(Date.now() / 1000) - 60
+    graphs.record('site', 'web1', '', at, 'rta=1.5ms')
+    graphs.record('site', 'db1', '', at, 'rta=2.5ms')
+    const make = (withGraphs: boolean) =>
+      buildApp({ backends: [backend], store, events: new Events([]), roles: new RolesConfig({ authorized_contactgroup_for_all_hosts: ['admins'] }), limiter: new Limiter(), cookieSecure: false, graphs: withGraphs ? graphs : undefined })
+    const get = (app: ReturnType<typeof make>, user: string, host: string) =>
+      app.request(`/api/v1/graph?backend=site&host=${host}`, { headers: { Authorization: `Bearer ${store.newToken(user, 't').token}` } })
+    const app = make(true)
+    expect(await (await get(app, 'ann', 'db1')).json()).toEqual({ enabled: true, series: [{ label: 'rta', unit: 'ms', points: [[at, 2.5]] }] })
+    expect((await get(app, 'ops', 'web1')).status).toBe(200)
+    expect((await get(app, 'ops', 'db1')).status).toBe(403)
+    expect(await (await get(make(false), 'ann', 'db1')).json()).toEqual({ enabled: false, series: [] })
   })
 })

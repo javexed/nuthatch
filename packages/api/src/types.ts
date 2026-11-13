@@ -230,3 +230,27 @@ export interface PushState {
   key?: string
   devices: { name: string; created: number; endpoint: string }[]
 }
+
+/** A number of a check's performance data over time. */
+export interface GraphSeries {
+  label: string
+  unit: string
+  /** Time in seconds and value, oldest first. */
+  points: [number, number][]
+}
+
+export interface GraphAnswer {
+  /** Whether the server keeps a history for graphs at all. */
+  enabled: boolean
+  series: GraphSeries[]
+}
+
+/** A machine of the tailnet that the engine has no host for. */
+export interface TailnetMachine {
+  name: string
+  address: string
+  os: string
+  online: boolean
+  /** Someone else's, shared with this tailnet. */
+  shared: boolean
+}

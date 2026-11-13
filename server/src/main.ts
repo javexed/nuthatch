@@ -20,12 +20,13 @@ import { ConfigAdmin } from './configadmin.ts'
 import { PathMap } from './nagioscfg.ts'
 import { Events } from './events.ts'
 import { RolesConfig } from './policy.ts'
+import { Graphs } from './graphs.ts'
 import { Pusher } from './push.ts'
 import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'push', 'roles', 'backend', 'peer', 'app_origins']
+const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'push', 'graphs', 'roles', 'backend', 'peer', 'app_origins']
 
 function fail(message: string): never {
   console.error(message)
@@ -195,10 +196,20 @@ function main(): void {
     pusher = new Pusher(store, subject, backends)
   }
 
+  // [graphs]: a short history of performance data, in a file beside the store.
+  let graphs: Graphs | undefined
+  if (config.graphs !== undefined) {
+    const { days = 7, ...rest } = (typeof config.graphs === 'object' && config.graphs !== null ? config.graphs : {}) as Record<string, unknown>
+    if (Object.keys(rest).length > 0) fail(`${path}: [graphs] has no setting ${Object.keys(rest).join(', ')}`)
+    if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 31) fail(`${path}: [graphs] days is a number of days, 1 to 31`)
+    graphs = new Graphs(`${storePath}-graphs`, days, backends)
+  }
+
   const app = buildApp({
     backends,
     store,
     pusher,
+    graphs,
     events: new Events(backends),
     roles,
     limiter: new Limiter(),

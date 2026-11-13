@@ -110,6 +110,11 @@ site), so what it finds is what the engine can reach:
   web page's status and title (one GET, no redirect followed), and a TLS
   certificate's name, issuer and expiry.
 
+Where the machine the engine runs on is on a tailnet, the page also
+lists the tailnet's machines that the engine has no host for yet (by
+name or address), as `tailscale status` there gives them: one's own and
+those online first. A tap looks at one.
+
 Only that one address is touched. From what was found it suggests checks,
 ticked or not (a port that only redirects to https is not ticked, nor
 Telnet), which can be saved at once or taken into the full form. A host

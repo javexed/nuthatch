@@ -3,9 +3,9 @@
 // the server looks at what answers there (from where the engine runs),
 // and the checks it suggests are ticked or not. The full form is a step
 // away, filled in from what was found, or empty.
-import type { ConfigState, Discovery, ManagedHost } from '@nuthatch/api'
+import type { ConfigState, Discovery, ManagedHost, TailnetMachine } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '../stores/session'
 
 const props = defineProps<{ backend: string; state: ConfigState; busy: boolean }>()
@@ -18,6 +18,25 @@ const found = ref<Discovery | null>(null)
 const name = ref('')
 const template = ref(props.state.templates.host[0] ?? '')
 const ticked = ref<boolean[]>([])
+
+// The tailnet's machines the engine has no host for: one tap to look at one.
+const machines = ref<TailnetMachine[]>([])
+const allMachines = ref(false)
+const FEW = 8
+onMounted(async () => {
+  try {
+    machines.value = (await api.machines(props.backend)).machines
+  } catch {
+    // Without them, the box above is what there is.
+  }
+})
+const shownMachines = computed(() => (allMachines.value ? machines.value : machines.value.slice(0, FEW)))
+/** Short names that two machines share: those are shown by their full names. */
+const twice = computed(() => new Set(machines.value.map((m) => m.name).filter((name, n, all) => all.indexOf(name) !== n)))
+function lookAt(machine: TailnetMachine) {
+  target.value = machine.address
+  void look()
+}
 
 async function look() {
   if (target.value.trim() === '') return
@@ -84,6 +103,23 @@ function days(n: number): string {
       Looks up the name, pings it and tries some well-known ports, from where {{ backend }} runs. Takes a few seconds.
     </p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <div v-if="machines.length > 0 && !found && !looking" class="tailnet" role="group" aria-label="On your tailnet, not monitored yet">
+      <p class="by">On your tailnet, not monitored yet:</p>
+      <div class="chips">
+        <button
+          v-for="machine in shownMachines"
+          :key="machine.address"
+          type="button"
+          :class="['chip', { offline: !machine.online }]"
+          :title="`${machine.address}${machine.os ? ` · ${machine.os}` : ''}${machine.online ? '' : ' · offline'}${machine.shared ? ' · shared with you' : ''}`"
+          :disabled="busy"
+          @click="lookAt(machine)"
+        >
+          {{ twice.has(machine.name) ? machine.address : machine.name }}<span v-if="!machine.online" class="by"> offline</span>
+        </button>
+        <button v-if="machines.length > FEW && !allMachines" type="button" class="plain" @click="allMachines = true">and {{ machines.length - FEW }} more</button>
+      </div>
+    </div>
 
     <template v-if="found">
       <div class="found">

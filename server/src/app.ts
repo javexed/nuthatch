@@ -13,8 +13,9 @@ import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
 import { checkDraft, fromRow } from './dashboards.ts'
-import { discover } from './discover.ts'
+import { type TailnetMachine, askTailscale, discover } from './discover.ts'
 import type { Events } from './events.ts'
+import type { Graphs } from './graphs.ts'
 import type { Pusher } from './push.ts'
 import { ROLES, Refused, type Roles, type RolesConfig, TABLES, checkHeaders } from './policy.ts'
 import { checkSubscription } from './webpush.ts'
@@ -43,6 +44,10 @@ export interface Deps {
    * behind it (main.ts sees to that).
    */
   tailscaleUsers?: Map<string, string>
+  /** The tailnet's machines, in place of asking the local tailscale (tests). */
+  tailnet?: () => Promise<TailnetMachine[] | null>
+  /** The short history of performance data, for graphs; without it, there are none. */
+  graphs?: Graphs
   /** Notifications pushed to browsers; without it, nobody can subscribe. */
   pusher?: Pusher
   /** Mark the session's cookie `Secure`: a proxy in front does TLS. */
@@ -261,7 +266,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       }
       if (peer && userName(user)) identity = { user, peer }
       const path = c.req.path
-      const passedOn = ['/api/v1/session', '/api/v1/query', '/api/v1/stats', '/api/v1/command', '/api/v1/events'].includes(path) || path.startsWith('/api/v1/config/')
+      const passedOn = ['/api/v1/session', '/api/v1/query', '/api/v1/stats', '/api/v1/command', '/api/v1/events', '/api/v1/graph'].includes(path) || path.startsWith('/api/v1/config/')
       if (identity && !passedOn) return c.json({ error: 'not for another nuthatch' }, 403)
     } else if (bearer !== undefined) {
       const user = deps.store.tokenUser(bearer.trim())
@@ -607,6 +612,34 @@ export function buildApp(deps: Deps): Hono<Env> {
     }
   })
 
+  // The graphs of a host or a service: its performance data over the last
+  // hours. For those who see it, as the lists decide.
+  app.get('/api/v1/graph', async (c) => {
+    const { user } = c.get('identity')
+    const name = c.req.query('backend') ?? ''
+    const host = c.req.query('host') ?? ''
+    const service = c.req.query('service') ?? ''
+    const hours = Math.min(24 * 31, Math.max(1, Number(c.req.query('hours')) || 24))
+    if (/[\r\n]/.test(host + service) || host === '') throw new Refused('a graph is of a host, or of a host and a service')
+    const site = remotes.find((r) => r.owns(name))
+    if (site) {
+      await site.session(user)
+      const query = new URLSearchParams({ backend: site.theirs(name) ?? name, host, service, hours: String(hours) })
+      return c.json(await site.call(user, 'GET', `/api/v1/graph?${query.toString()}`))
+    }
+    const backend = deps.backends.find((b) => b.name === name)
+    if (!backend) throw new Refused(`no backend '${name}'`)
+    if (!deps.graphs) return c.json({ enabled: false, series: [] })
+    const { roles } = await who(user)
+    const all = roles.has('all_hosts') || (service !== '' && roles.has('all_services'))
+    if (!all) {
+      const limited = await backend.enforcesAuth()
+      const target: Target = service === '' ? { kind: 'host', host } : { kind: 'service', host, service }
+      if (!limited || !(await sees(backend, user, target))) throw new Forbidden("not one of this user's hosts or services")
+    }
+    return c.json({ enabled: true, series: deps.graphs.series(name, host, service, hours) })
+  })
+
   // Notifications pushed to this user's browsers.
   app.get('/api/v1/push', (c) => {
     const { user } = c.get('identity')
@@ -661,6 +694,20 @@ export function buildApp(deps: Deps): Hono<Env> {
     const { user } = await configOf(c)
     deps.store.audit(user, c.req.param('backend'), 'looked at a host', String(target).slice(0, 200))
     return c.json(await discover(target))
+  })
+
+  // The tailnet's machines that the engine has no host for yet, to add one
+  // from: as the tailscale on the engine's machine knows them.
+  app.get('/api/v1/config/:backend/machines', async (c) => {
+    const far = await configSite(c)
+    if (far) return c.json(await far.site.call(c.get('identity').user, 'GET', `${far.path}/machines`))
+    await configOf(c)
+    const backend = deps.backends.find((b) => b.name === c.req.param('backend'))
+    const machines = await (deps.tailnet ?? askTailscale)()
+    if (machines === null || !backend) return c.json({ available: false, machines: [] })
+    const known = new Set<string>()
+    for (const row of await backend.query('GET hosts\nColumns: name address')) for (const value of row) known.add(String(value).toLowerCase().replace(/\.$/, ''))
+    return c.json({ available: true, machines: machines.filter((m) => !known.has(m.address) && !known.has(m.name)) })
   })
 
   app.get('/api/v1/events', (c) =>

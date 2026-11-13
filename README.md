@@ -71,6 +71,15 @@ the repository in `~/nuthatch`, the config in
 
 or, to sign in by Tailscale, on a socket (below).
 
+## On a phone
+
+On a narrow screen the pages are in a bar at the bottom. On a touch
+screen, a row swiped right is checked now, one swiped left is
+acknowledged (when it is a problem nobody has taken), and a pull down
+from the top of a page asks the server anew. A dot in the top bar says
+the page is live; when the connection breaks it says since when what is
+shown stands.
+
 ## Signed in by Tailscale
 
 `tailscale serve` tells the service behind it who each request is from,
@@ -151,6 +160,8 @@ here and in the Android app, are made from `docs/logo.svg` by
 - `[[peer]]`, and `nuthatch = "https://..."` under a backend: see
   [docs/sites.md](docs/sites.md).
 - `app_origins`: see [mobile/README.md](mobile/README.md).
+- `[graphs]`: a short history of the checks' numbers, see
+  [docs/graphs.md](docs/graphs.md).
 - `[push]`: notifications on phones and desktops, see
   [docs/notifications.md](docs/notifications.md).
 
