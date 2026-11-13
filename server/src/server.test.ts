@@ -7,7 +7,7 @@ import bcrypt from 'bcryptjs'
 import * as unixcrypt from 'unixcrypt'
 import { describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
-import { Htpasswd, Limiter, verify } from './auth.ts'
+import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
 import { checkHost, hostFile, readHostFile } from './configadmin.ts'
@@ -243,6 +243,66 @@ describe('the HTTP side', () => {
     expect((await app.request('/api/v1/session')).status).toBe(401)
     expect((await app.request('/api/v1/query', { method: 'POST', body: '{}' })).status).toBe(401)
     expect((await app.request('/api/v1/session', { headers: { Authorization: 'Bearer nh_wrong' } })).status).toBe(401)
+  })
+
+  it('lets a listed tailnet login in without a password, through a session of its own', async () => {
+    const backend = fake('site', (request) => (request.startsWith('GET status') ? [['1.5.2', '1.5.1', 1]] : [['web1']]))
+    const store = new Store(':memory:')
+    const app = buildApp({
+      backends: [backend],
+      store,
+      events: new Events([]),
+      roles: new RolesConfig({ authorized_for_all_hosts: ['ann', 'bob'] }),
+      limiter: new Limiter(),
+      cookieSecure: true,
+      tailscaleUsers: tailnetUsers({ users: { 'Ann@Example.test': 'ann', 'bob@example.test': 'bob' } }),
+    })
+    const tailnet = (login: string, more: Record<string, string> = {}) => ({ 'Tailscale-User-Login': login, ...more })
+    const cookieOf = (response: Response) => response.headers.get('set-cookie')?.match(/nuthatch_session=([^;]*)/)?.[1] ?? ''
+
+    // A listed login, in any case, gets a session: its cookie and CSRF value.
+    const first = await app.request('/api/v1/session', { headers: tailnet('ann@example.test') })
+    expect(first.status).toBe(200)
+    const session = (await first.json()) as { user: string; csrf: string; by_tailnet: boolean }
+    expect(session).toMatchObject({ user: 'ann', by_tailnet: true })
+    expect(first.headers.get('set-cookie')).toContain('Secure')
+    const cookie = cookieOf(first)
+    expect(store.session(cookie)?.user).toBe('ann')
+
+    // What changes things still needs the CSRF value: a page of another
+    // site cannot send it, though the tailnet identity comes along.
+    const query = (headers: Record<string, string>) =>
+      app.request('/api/v1/query', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ table: 'hosts', columns: ['name'] }) })
+    expect((await query(tailnet('ann@example.test'))).status).toBe(403)
+    expect((await query(tailnet('ann@example.test', { Cookie: `nuthatch_session=${cookie}` }))).status).toBe(403)
+    const ok = await query(tailnet('ann@example.test', { Cookie: `nuthatch_session=${cookie}`, 'X-Nuthatch-CSRF': session.csrf }))
+    expect(ok.status).toBe(200)
+    expect(ok.headers.get('set-cookie')).toBeNull()
+
+    // Someone else on the same browser: ann's session ends, bob's begins.
+    const other = await app.request('/api/v1/session', { headers: tailnet('bob@example.test', { Cookie: `nuthatch_session=${cookie}` }) })
+    expect(((await other.json()) as { user: string }).user).toBe('bob')
+    expect(store.session(cookie)).toBeNull()
+
+    // An unlisted login, or none, is asked to log in as before.
+    expect((await app.request('/api/v1/session', { headers: tailnet('eve@example.test') })).status).toBe(401)
+    expect((await app.request('/api/v1/session', { headers: tailnet('') })).status).toBe(401)
+    // A password session is not by the tailnet.
+    const { cookie: byPassword } = store.newSession('ann')
+    const plain = await app.request('/api/v1/session', { headers: { Cookie: `nuthatch_session=${byPassword}` } })
+    expect(((await plain.json()) as { by_tailnet: boolean }).by_tailnet).toBe(false)
+    // A token says who it is for, whatever the tailnet says.
+    const token = store.newToken('bob', 'phone').token
+    const byToken = await app.request('/api/v1/session', { headers: tailnet('ann@example.test', { Authorization: `Bearer ${token}` }) })
+    expect(((await byToken.json()) as { user: string }).user).toBe('bob')
+  })
+
+  it('reads the [tailscale] table strictly', () => {
+    expect(tailnetUsers({ users: { 'A@x.test': 'ann' } }).get('a@x.test')).toBe('ann')
+    expect(() => tailnetUsers({ users: { 'a@x.test': 'ann' }, trust_all: true })).toThrow(/no setting trust_all/)
+    expect(() => tailnetUsers({ users: ['a@x.test'] })).toThrow(/table of tailnet logins/)
+    expect(() => tailnetUsers({ users: { 'a b': 'ann' } })).toThrow(/no tailnet login/)
+    expect(() => tailnetUsers({ users: { 'a@x.test': 'ann;x' } })).toThrow(/user's name/)
   })
 
   it('asks for the CSRF value with a cookie, not with a token', async () => {

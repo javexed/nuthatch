@@ -12,6 +12,9 @@ WorkingDirectory=%h/nuthatch
 ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/src/main.ts %h/.config/nuthatch/nuthatch.toml
 Restart=on-failure
 RestartSec=2s
+# For listen = "unix:%t/nuthatch/http.sock": a directory for this user alone.
+RuntimeDirectory=nuthatch
+RuntimeDirectoryMode=0700
 NoNewPrivileges=yes
 
 [Install]

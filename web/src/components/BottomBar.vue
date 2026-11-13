@@ -55,8 +55,11 @@ watch(() => route.fullPath, close)
         <RouterLink v-for="page in more" :key="page.name" :to="{ name: page.name }">{{ page.label }}</RouterLink>
       </nav>
       <div class="sheet-foot">
-        <span class="who">Logged in as <strong>{{ session.session?.user }}</strong></span>
-        <button type="button" @click="emit('logout')">Log out</button>
+        <span v-if="session.session?.by_tailnet" class="who">Signed in by Tailscale as <strong>{{ session.session.user }}</strong></span>
+        <template v-else>
+          <span class="who">Logged in as <strong>{{ session.session?.user }}</strong></span>
+          <button type="button" @click="emit('logout')">Log out</button>
+        </template>
       </div>
       <button type="button" class="plain" @click="close">Close</button>
     </div>

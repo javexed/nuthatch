@@ -69,6 +69,36 @@ the repository in `~/nuthatch`, the config in
 
     tailscale serve --bg --https=10443 http://127.0.0.1:7780
 
+or, to sign in by Tailscale, on a socket (below).
+
+## Signed in by Tailscale
+
+`tailscale serve` tells the service behind it who each request is from,
+in the header `Tailscale-User-Login`, and drops such a header sent by a
+client. With a `[tailscale]` table, a listed login gets a session
+without a password, as if it had logged in; others see the login form.
+What changes things still needs the session's CSRF value, so a page of
+another site cannot act for you, although your tailnet identity comes
+with every request your device sends. A token, as the phone app uses,
+says who it is for, whatever the tailnet says.
+
+Anything that can reach nuthatch's listen address directly could send
+that header itself. So with `[tailscale]` nuthatch must listen on this
+machine behind the proxy (`behind_proxy = true`), and best on a Unix
+socket, which only its own user may open (it warns otherwise):
+
+    listen = "unix:/run/user/1000/nuthatch/http.sock"
+
+    [tailscale]
+    users = { "ann@example.test" = "ann" }
+
+and, as root (tailscale serves a socket only for root):
+
+    tailscale serve --bg --https=10443 unix:/run/user/1000/nuthatch/http.sock
+
+Funnel, which opens a service to the internet, sends no such header:
+there everyone logs in with a password.
+
 ## As an app on a phone or desktop (PWA)
 
 Served over HTTPS, nuthatch can be installed from the browser: Chrome's
@@ -108,6 +138,12 @@ here and in the Android app, are made from `docs/logo.svg` by
 - `store`: an SQLite file for sessions, API tokens, preferences and the
   audit log (logins, commands sent, commands refused). Nothing about what
   is monitored is kept there.
+- `listen = "unix:/run/nuthatch/http.sock"`: a Unix socket in place of
+  an address, made so that only nuthatch's own user may open it. For a
+  proxy on the same machine.
+- `[tailscale]`, `users = { "ann@example.test" = "ann" }`: behind
+  `tailscale serve`, these tailnet logins are let in without a password,
+  as the users named (see below).
 - `dev_user = "admin"` in place of `htpasswd`: nobody logs in and everyone
   is that user. For trying things on one machine; refused otherwise.
 - `[roles]`: see [docs/permissions.md](docs/permissions.md).

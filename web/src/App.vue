@@ -60,7 +60,7 @@ const logo = `${import.meta.env.BASE_URL}favicon.svg`
       <RouterLink v-if="session.session.config_backends.length > 0" :to="{ name: 'config' }">Config</RouterLink>
     </nav>
     <span class="who">{{ session.session.user }}</span>
-    <button type="button" class="plain logout" @click="logout">Log out</button>
+    <button v-if="!session.session.by_tailnet" type="button" class="plain logout" @click="logout">Log out</button>
   </header>
   <div v-if="updateReady" class="update" role="status">
     A new version of nuthatch is ready.

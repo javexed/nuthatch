@@ -33,6 +33,13 @@ export interface Deps {
   htpasswd?: Htpasswd
   /** Everyone is this user, and nobody logs in. */
   devUser?: string
+  /**
+   * Tailnet logins and the users they are, for requests that come through
+   * `tailscale serve`, which names the tailnet user in Tailscale-User-Login
+   * and drops any such header a client sent. Only for a loopback listen
+   * behind it (main.ts sees to that).
+   */
+  tailscaleUsers?: Map<string, string>
   /** Mark the session's cookie `Secure`: a proxy in front does TLS. */
   cookieSecure: boolean
   /** The built interface. */
@@ -214,9 +221,19 @@ export function buildApp(deps: Deps): Hono<Env> {
     }
     const { cookie, session } = deps.store.newSession(user)
     deps.store.audit(user, '', 'login', address)
-    c.header('Set-Cookie', `${COOKIE}=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${deps.cookieSecure ? '; Secure' : ''}`)
+    c.header('Set-Cookie', sessionCookie(cookie))
     return c.json({ user: session.user, csrf: session.csrf })
   })
+
+  function sessionCookie(cookie: string): string {
+    return `${COOKIE}=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${deps.cookieSecure ? '; Secure' : ''}`
+  }
+
+  /** The user a request's tailnet login is, when it is one of those listed. */
+  function tailnetUser(c: Context): string | undefined {
+    const login = c.req.header('tailscale-user-login')?.trim().toLowerCase()
+    return login ? deps.tailscaleUsers?.get(login) : undefined
+  }
 
   // Finds out who a request is from: an API token, a session's cookie, or
   // the dev user. A request that changes something and comes with a cookie
@@ -249,6 +266,19 @@ export function buildApp(deps: Deps): Hono<Env> {
       if (session) identity = { user: session.user, cookie, csrf: session.csrf }
     } else if (deps.devUser !== undefined) {
       identity = { user: deps.devUser }
+    }
+    // Through tailscale serve, a listed tailnet login needs no password: it
+    // gets a session as a login would, so the CSRF value guards what
+    // changes things as it does after a login (the tailnet identity comes
+    // with every request from the device, as a cookie does). A session of
+    // someone else is ended first.
+    const tailnet = peerKey === undefined && bearer === undefined ? tailnetUser(c) : undefined
+    if (tailnet !== undefined && identity?.user !== tailnet) {
+      if (identity?.cookie !== undefined) deps.store.endSession(identity.cookie)
+      const made = deps.store.newSession(tailnet)
+      deps.store.audit(tailnet, '', 'login by tailnet identity', c.req.header('tailscale-user-login')?.slice(0, 128) ?? '')
+      c.header('Set-Cookie', sessionCookie(made.cookie))
+      identity = { user: tailnet, cookie: made.cookie, csrf: made.session.csrf }
     }
     if (!identity) return c.json({ error: 'log in first' }, 401)
     const changes = c.req.method !== 'GET' && c.req.method !== 'HEAD'
@@ -306,6 +336,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       roles: ROLES.filter((role) => (role === 'read_only' ? readOnly.length > 0 && readOnly.every(Boolean) : held.has(role))),
       can_submit_commands: canSubmit,
       csrf: identity.csrf ?? null,
+      by_tailnet: tailnetUser(c) === identity.user,
       version: VERSION,
       commands: COMMAND_NAMES,
       tables: TABLES,

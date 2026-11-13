@@ -31,6 +31,8 @@ export interface Session {
   can_submit_commands: Record<string, boolean>
   /** Sent back in a header with every request that changes something. */
   csrf: string | null
+  /** Known by the tailnet identity, through tailscale serve: logging out would only log in again. */
+  by_tailnet?: boolean
   version: string
   commands: string[]
   tables: string[]

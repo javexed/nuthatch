@@ -7,13 +7,13 @@
 // interface's files.
 
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { chmodSync, lstatSync, readFileSync, unlinkSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { resolve } from 'node:path'
-import { serve } from '@hono/node-server'
+import { createAdaptorServer, serve } from '@hono/node-server'
 import { parse } from 'smol-toml'
 import { type Peer, VERSION, buildApp, userName } from './app.ts'
-import { Htpasswd, Limiter } from './auth.ts'
+import { Htpasswd, Limiter, tailnetUsers } from './auth.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
 import { ConfigAdmin } from './configadmin.ts'
 import { PathMap } from './nagioscfg.ts'
@@ -23,7 +23,7 @@ import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'roles', 'backend', 'peer', 'app_origins']
+const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'roles', 'backend', 'peer', 'app_origins']
 
 function fail(message: string): never {
   console.error(message)
@@ -48,12 +48,16 @@ function main(): void {
   const unknown = Object.keys(config).find((key) => !KEYS.includes(key))
   if (unknown !== undefined) fail(`${path}: '${unknown}' is not a setting`)
 
+  // address:port, or unix:<path> for a socket only its owner may open.
   const listen = text(config, 'listen') ?? '127.0.0.1:8080'
+  const socketPath = listen.startsWith('unix:') ? resolve(listen.slice(5)) : undefined
   const at = listen.lastIndexOf(':')
-  const hostname = listen.slice(0, at).replace(/^\[|\]$/g, '')
+  const hostname = socketPath === undefined ? listen.slice(0, at).replace(/^\[|\]$/g, '') : ''
   const port = Number(listen.slice(at + 1))
-  if (at < 0 || isIP(hostname) === 0 || !Number.isInteger(port)) fail(`listen: '${listen}' is not address:port`)
-  const local = hostname === '::1' || hostname.startsWith('127.')
+  // The kernel keeps no more of a socket's path than this.
+  if (socketPath !== undefined && Buffer.byteLength(socketPath) > 107) fail(`listen: the socket's path ${socketPath} is longer than 107 bytes, which a Unix socket cannot be`)
+  if (socketPath === undefined && (at < 0 || isIP(hostname) === 0 || !Number.isInteger(port))) fail(`listen: '${listen}' is not address:port or unix:<path>`)
+  const local = socketPath !== undefined || hostname === '::1' || hostname.startsWith('127.')
   const behindProxy = config.behind_proxy === true
   if (!local && !behindProxy) {
     fail(
@@ -147,6 +151,27 @@ function main(): void {
     fail(`${path}: ${err instanceof Error ? err.message : String(err)}`)
   }
   const appOrigins = config.app_origins ?? []
+  // Logins by tailnet identity: only behind tailscale serve on this
+  // machine, which sets the header and drops a client's.
+  let tailscaleUsers: Map<string, string> | undefined
+  if (config.tailscale !== undefined) {
+    if (!local || !behindProxy) {
+      fail('[tailscale] is for a listen on this machine behind tailscale serve: set behind_proxy = true and listen on unix:<path> (best) or 127.0.0.1')
+    }
+    try {
+      tailscaleUsers = tailnetUsers(config.tailscale)
+    } catch (err) {
+      fail(`${path}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    console.error(`tailnet logins without a password: ${[...tailscaleUsers.values()].join(', ') || 'none'}`)
+    if (socketPath === undefined) {
+      console.error(
+        `warning: [tailscale] with listen = ${listen}: any program on this machine can connect there and name a tailnet login. ` +
+          'listen = "unix:<path>" keeps it to this user',
+      )
+    }
+  }
+
   if (!Array.isArray(appOrigins) || appOrigins.some((o) => typeof o !== 'string' || !/^[a-z]+:\/\/[^/]+$/.test(o))) {
     fail(`${path}: app_origins is a list of origins, such as "capacitor://localhost"`)
   }
@@ -161,6 +186,7 @@ function main(): void {
     limiter: new Limiter(),
     htpasswd,
     devUser,
+    tailscaleUsers,
     cookieSecure: behindProxy,
     webRoot: webRoot === undefined ? undefined : resolve(webRoot),
     config: admins,
@@ -168,9 +194,27 @@ function main(): void {
     peers,
     appOrigins: appOrigins as string[],
   })
-  const server = serve({ fetch: app.fetch, hostname, port }, () => {
-    console.error(`nuthatch ${VERSION} listening at http://${listen}`)
-  })
+  const ready = () => console.error(`nuthatch ${VERSION} listening at ${socketPath === undefined ? `http://${listen}` : listen}`)
+  let server: ReturnType<typeof createAdaptorServer>
+  if (socketPath === undefined) {
+    server = serve({ fetch: app.fetch, hostname, port }, ready)
+  } else {
+    // A socket left by an earlier run goes; anything else there is kept.
+    try {
+      if (lstatSync(socketPath).isSocket()) unlinkSync(socketPath)
+    } catch {
+      // Not there.
+    }
+    server = createAdaptorServer({ fetch: app.fetch })
+    // Made for the owner alone: whoever may open it could say, through
+    // a proxy's headers, who they are.
+    const before = process.umask(0o177)
+    server.listen(socketPath, () => {
+      process.umask(before)
+      chmodSync(socketPath, 0o600)
+      ready()
+    })
+  }
   server.on('error', (err) => fail(`cannot listen at ${listen}: ${err.message}`))
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {

@@ -172,3 +172,29 @@ export class Limiter {
     this.failures.delete(userKey)
   }
 }
+
+/**
+ * The [tailscale] table of the config: `users`, tailnet logins and the
+ * users they are here. Logins are compared without case.
+ */
+export function tailnetUsers(table: unknown): Map<string, string> {
+  if (typeof table !== 'object' || table === null || Array.isArray(table)) throw new Error('[tailscale] is a table')
+  const { users, ...rest } = table as Record<string, unknown>
+  const unknown = Object.keys(rest)
+  if (unknown.length > 0) throw new Error(`[tailscale] has no setting ${unknown.join(', ')}`)
+  if (typeof users !== 'object' || users === null || Array.isArray(users)) {
+    throw new Error('[tailscale] users is a table of tailnet logins and user names, such as { "ann@example.test" = "ann" }')
+  }
+  const out = new Map<string, string>()
+  for (const [login, user] of Object.entries(users as Record<string, unknown>)) {
+    // eslint-disable-next-line no-control-regex
+    if (login.trim() === '' || /[\s\u0000-\u001f]/.test(login)) throw new Error(`[tailscale] users: '${login}' is no tailnet login`)
+    // As a user's name is checked elsewhere (app.ts, userName).
+    // eslint-disable-next-line no-control-regex
+    if (typeof user !== 'string' || user === '' || user.length > 128 || /[\u0000-\u001f\u007f;]/.test(user) || user.trim() !== user) {
+      throw new Error(`[tailscale] users: the user of ${login} is a user's name`)
+    }
+    out.set(login.trim().toLowerCase(), user)
+  }
+  return out
+}
