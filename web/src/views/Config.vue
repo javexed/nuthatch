@@ -5,6 +5,7 @@
 import type { ConfigChange, ConfigResult, ConfigState, ManagedHost } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
+import AddHost from '../components/AddHost.vue'
 import HostForm from '../components/HostForm.vue'
 import { useLive } from '../stores/live'
 import { api, useSession } from '../stores/session'
@@ -17,6 +18,8 @@ const state = ref<ConfigState | null>(null)
 const error = ref('')
 /** The host in the form: one being changed, 'new', or none. */
 const editing = ref<ManagedHost | 'new' | null>(null)
+/** A new host: looked at first, or in the full form (with what was found, if anything). */
+const adding = ref<{ step: 'look' } | { step: 'form'; start?: ManagedHost }>({ step: 'look' })
 const busy = ref(false)
 const notice = ref('')
 /** What the engine's own check said, when it refused, or on a check only. */
@@ -73,6 +76,12 @@ const check = (host: ManagedHost) => {
   return send({ kind: 'put', host, previous }, true, '')
 }
 
+function startAdding() {
+  adding.value = { step: 'look' }
+  report.value = null
+  editing.value = 'new'
+}
+
 async function remove(host: ManagedHost) {
   if (!window.confirm(`Take ${host.name} and its ${host.services.length} services out of the config? Their history stays in the log.`)) return
   await send({ kind: 'delete', name: host.name }, false, `${host.name} is taken out.`)
@@ -103,11 +112,22 @@ async function remove(host: ManagedHost) {
     </section>
 
     <template v-if="state">
+      <AddHost
+        v-if="editing === 'new' && adding.step === 'look'"
+        :backend="backend"
+        :state="state"
+        :busy="busy"
+        @check="check"
+        @save="save"
+        @form="(start) => (adding = { step: 'form', start })"
+        @cancel="editing = null"
+      />
       <HostForm
-        v-if="editing !== null"
+        v-else-if="editing !== null"
         :key="editing === 'new' ? ' new' : editing.name"
         :state="state"
         :host="editing === 'new' ? undefined : editing"
+        :start="editing === 'new' && adding.step === 'form' ? adding.start : undefined"
         :busy="busy"
         @check="check"
         @save="save"
@@ -115,7 +135,7 @@ async function remove(host: ManagedHost) {
       />
       <template v-else>
         <p>
-          <button type="button" :disabled="busy || state.templates.host.length === 0" @click="editing = 'new'">Add a host</button>
+          <button type="button" :disabled="busy || state.templates.host.length === 0" @click="startAdding">Add a host</button>
         </p>
         <p v-if="state.templates.host.length === 0" class="error">
           The engine's config has no host template (a host with a name and register 0) to build a host on.

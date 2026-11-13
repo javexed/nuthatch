@@ -1,0 +1,144 @@
+<script setup lang="ts">
+// Adding a host by looking first: a name, an address or a URL is typed,
+// the server looks at what answers there (from where the engine runs),
+// and the checks it suggests are ticked or not. The full form is a step
+// away, filled in from what was found, or empty.
+import type { ConfigState, Discovery, ManagedHost } from '@nuthatch/api'
+import { ApiError } from '@nuthatch/api'
+import { computed, ref } from 'vue'
+import { api } from '../stores/session'
+
+const props = defineProps<{ backend: string; state: ConfigState; busy: boolean }>()
+const emit = defineEmits<{ check: [host: ManagedHost]; save: [host: ManagedHost]; form: [host?: ManagedHost]; cancel: [] }>()
+
+const target = ref('')
+const looking = ref(false)
+const error = ref('')
+const found = ref<Discovery | null>(null)
+const name = ref('')
+const template = ref(props.state.templates.host[0] ?? '')
+const ticked = ref<boolean[]>([])
+
+async function look() {
+  if (target.value.trim() === '') return
+  looking.value = true
+  error.value = ''
+  found.value = null
+  try {
+    const seen = await api.discover(props.backend, target.value)
+    found.value = seen
+    name.value = props.state.hosts.some((h) => h.name === seen.name) ? '' : seen.name
+    ticked.value = seen.suggestions.map((s) => s.checked)
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+  } finally {
+    looking.value = false
+  }
+}
+
+const count = computed(() => ticked.value.filter(Boolean).length)
+
+function host(): ManagedHost {
+  const seen = found.value as Discovery
+  const service = props.state.templates.service[0] ?? ''
+  return {
+    name: name.value.trim(),
+    alias: seen.address !== name.value.trim() ? seen.address : undefined,
+    address: seen.address,
+    use: template.value,
+    check_command: seen.host_check,
+    hostgroups: [],
+    contacts: [],
+    contact_groups: [],
+    services: seen.suggestions
+      .filter((_, n) => ticked.value[n])
+      .map((s) => ({ description: s.description, use: service, check_command: s.check_command, servicegroups: [], contacts: [], contact_groups: [] })),
+  }
+}
+
+function days(n: number): string {
+  return n < 0 ? `expired ${-n} days ago` : `expires in ${n} days`
+}
+</script>
+
+<template>
+  <section class="add-host card" aria-label="Add a host">
+    <h2>Add a host</h2>
+    <form class="look" @submit.prevent="look">
+      <label>
+        Name, address or URL
+        <input
+          v-model="target"
+          name="target"
+          required
+          maxlength="300"
+          autocapitalize="none"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="nas.example.com, 192.0.2.20 or https://…"
+        />
+      </label>
+      <button type="submit" :disabled="looking || busy">{{ looking ? 'Looking…' : 'Look' }}</button>
+    </form>
+    <p class="by">
+      Looks up the name, pings it and tries some well-known ports, from where {{ backend }} runs. Takes a few seconds.
+    </p>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+    <template v-if="found">
+      <div class="found">
+        <p>
+          <strong>{{ found.address }}</strong>
+          <span v-if="found.addresses.length > 0 && found.addresses[0] !== found.address" class="by"> · {{ found.addresses.join(', ') }}</span>
+        </p>
+        <p v-if="found.ping === null" class="by">Ping could not be tried here.</p>
+        <p v-else-if="found.ping.ok" class="by">Answers ping<template v-if="found.ping.ms !== undefined"> ({{ found.ping.ms }} ms)</template>.</p>
+        <p v-else class="warning-text">
+          Does not answer ping<template v-if="found.host_check">: the host is checked on port {{ found.host_check.split('!')[1] }} instead</template>.
+        </p>
+        <p v-if="found.found.length === 0" class="warning-text">No well-known port answered.</p>
+      </div>
+
+      <div class="fields">
+        <label>Name <input v-model.trim="name" name="name" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" maxlength="63" autocapitalize="none" /></label>
+        <label>
+          Template
+          <select v-model="template" name="use" required>
+            <option v-for="t in state.templates.host" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </label>
+      </div>
+
+      <fieldset v-if="found.suggestions.length > 0" class="suggestions">
+        <legend>Checks</legend>
+        <label v-for="(s, n) in found.suggestions" :key="s.description" class="suggestion">
+          <input v-model="ticked[n]" type="checkbox" :name="`suggestion-${n}`" />
+          <span class="what">{{ s.description }}</span>
+          <span class="why">{{ s.why }}</span>
+        </label>
+      </fieldset>
+      <details v-if="found.found.some((f) => f.tls)" class="certs">
+        <summary>Certificates</summary>
+        <ul>
+          <li v-for="f in found.found.filter((f) => f.tls)" :key="f.port">
+            Port {{ f.port }}: {{ f.tls!.subject ?? 'no name' }}, from {{ f.tls!.issuer ?? 'unknown' }}, {{ days(f.tls!.days) }}{{ f.tls!.trusted ? '' : ', not trusted here' }}
+          </li>
+        </ul>
+      </details>
+      <p class="by">The host check comes from the template (usually ping). Every check runs every few minutes, as the service template says.</p>
+    </template>
+
+    <div class="buttons">
+      <button type="button" class="quiet" :disabled="busy" @click="emit('cancel')">Cancel</button>
+      <button type="button" class="plain" :disabled="busy" @click="emit('form', found && name ? host() : undefined)">
+        {{ found ? 'Change more in the full form' : 'Fill in the form myself' }}
+      </button>
+      <template v-if="found">
+        <button type="button" class="quiet" :disabled="busy || !name" @click="emit('check', host())">Check only</button>
+        <button type="button" :disabled="busy || !name || !template" @click="emit('save', host())">
+          Add {{ name || 'host' }}{{ count > 0 ? ` with ${count} check${count === 1 ? '' : 's'}` : '' }}
+        </button>
+      </template>
+    </div>
+  </section>
+</template>

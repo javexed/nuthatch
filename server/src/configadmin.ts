@@ -9,7 +9,8 @@
 //
 // Who can change a check command can make the engine run a program, so
 // all of this is for one role, config_edit, and commands themselves are
-// only chosen from those the engine has.
+// only chosen from those the engine has, or from the few nuthatch brings
+// (catalogue.ts), which it writes into its directory when a host needs one.
 
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -18,6 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import type { ConfigChange, ConfigResult, ConfigState, ManagedHost, ManagedService } from '@nuthatch/api'
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
+import { CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, catalogueFile } from './catalogue.ts'
 import { Refused } from './policy.ts'
 import { now } from './store.ts'
 
@@ -31,6 +33,8 @@ export interface ConfigSettings {
   /** A command that makes the engine read its config again; without it, RESTART_PROGRAM is sent. */
   reload?: string[]
   paths: PathMap
+  /** The plugins' directory for nuthatch's own commands: `$USER1$` unless given. */
+  plugins?: string
 }
 
 /** The files changed since the revision the change was made from. */
@@ -89,6 +93,7 @@ export function checkHost(given: unknown, choices: Choices, known: Templates): M
   if (typeof given !== 'object' || given === null) throw new Refused('a host is needed')
   const h = given as Record<string, unknown>
   if (typeof h.name !== 'string' || !NAME.test(h.name)) throw new Refused("a host's name is letters, digits, '.', '_' and '-', at most 63")
+  if (h.name === CATALOGUE_HOST) throw new Refused(`'${CATALOGUE_HOST}' is the name of nuthatch's own file; choose another`)
   if (typeof h.address !== 'string' || !ADDRESS.test(h.address)) throw new Refused("a host's address is a name or an IP address")
   if (typeof h.use !== 'string' || !known.host.includes(h.use)) throw new Refused('choose one of the host templates')
   const services: ManagedService[] = []
@@ -243,6 +248,7 @@ export class ConfigAdmin {
     const hosts: ManagedHost[] = []
     const unreadable: ConfigState['unreadable'] = []
     for (const [file, content] of files) {
+      if (file === CATALOGUE_FILE) continue
       try {
         hosts.push(readHostFile(content))
       } catch (err) {
@@ -259,7 +265,9 @@ export class ConfigAdmin {
       hosts: hosts.sort((a, b) => a.name.localeCompare(b.name)),
       unreadable,
       templates: { host: templates(main.files, 'host'), service: templates(main.files, 'service') },
-      choices: { commands: commands ?? [], contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [] },
+      catalogue: CATALOGUE_NAMES,
+      // nuthatch's own commands may be chosen too: written when needed.
+      choices: { commands: [...new Set([...(commands ?? []), ...CATALOGUE_NAMES])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [] },
     }
   }
 
@@ -310,13 +318,19 @@ export class ConfigAdmin {
         removes.push(`${before}.cfg`)
       }
       writes.set(`${host.name}.cfg`, hostFile(host))
+      // nuthatch's own commands, when the host uses one: written, or
+      // written anew when this version of nuthatch has them otherwise.
+      const used = [host.check_command, ...host.services.map((s) => s.check_command)].map((line) => line?.split('!')[0])
+      const catalogue = catalogueFile(this.settings.plugins ?? '$USER1$')
+      const current = this.files().get(CATALOGUE_FILE)
+      if (used.some((name) => name !== undefined && CATALOGUE_NAMES.includes(name)) && current !== catalogue) writes.set(CATALOGUE_FILE, catalogue)
     } else if (change.kind === 'delete' && typeof change.name === 'string' && state.hosts.some((h) => h.name === change.name)) {
       name = change.name
       removes.push(`${change.name}.cfg`)
     } else {
       throw new Refused('nuthatch keeps no such host')
     }
-    const text = writes.values().next().value ?? ''
+    const text = writes.get(`${name}.cfg`) ?? ''
 
     // The engine's verifier, on a copy.
     const before = this.files()

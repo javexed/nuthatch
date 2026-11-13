@@ -37,6 +37,7 @@ for (const engine of ENGINES) {
     await page.locator('select[name=backend]').selectOption(engine)
     await expect(page.getByText(`on ${engine}`)).toBeVisible()
     await page.getByRole('button', { name: 'Add a host' }).click()
+    await page.getByRole('button', { name: 'Fill in the form myself' }).click()
     await page.getByLabel('Name').first().fill(name)
     await page.getByLabel('Address').fill('192.0.2.90')
     await page.getByLabel('Alias').fill('Added in the browser')
@@ -84,6 +85,48 @@ for (const engine of ENGINES) {
     await fits(page)
   })
 }
+
+for (const engine of ENGINES) {
+  test(`a host is added by looking at it first, on ${engine}`, async ({ page }) => {
+    const name = `look-${engine}-${test.info().project.name}`
+    await login(page, 'admin')
+    await goTo(page, 'Config')
+    await page.locator('select[name=backend]').selectOption(engine)
+    await expect(page.getByText(`on ${engine}`)).toBeVisible()
+    await page.getByRole('button', { name: 'Add a host' }).click()
+    // The test's own nuthatch is a web server to find.
+    await page.getByLabel('Name, address or URL').fill('http://127.0.0.1:8092/')
+    await page.getByRole('button', { name: 'Look' }).click()
+    const http = page.locator('.suggestion').filter({ has: page.locator('.what', { hasText: /^HTTP$/ }) })
+    await expect(http.first()).toBeVisible({ timeout: 30_000 })
+    await expect(http.first().getByRole('checkbox')).toBeChecked()
+    await expect(page.locator('.suggestion .why').first()).toContainText('the address given')
+    await fits(page)
+    // Only the check of the address given.
+    for (const box of await page.locator('.suggestion input[type=checkbox]').all()) await box.setChecked(false)
+    await http.first().getByRole('checkbox').check()
+    await page.locator('.add-host').getByLabel('Name', { exact: true }).fill(name)
+
+    await page.getByRole('button', { name: /^Add look-.* with 1 check$/ }).click()
+    await expect(page.getByRole('status')).toContainText(`${name} is saved, and the engine has it.`, { timeout: 90_000 })
+    expect(await livestatus(engine, `GET services\nColumns: description check_command\nFilter: host_name = ${name}`)).toEqual([['HTTP', 'nuthatch_http!8092!/']])
+    // nuthatch wrote the command it brings, beside the host's file.
+    expect(readdirSync(join(dev, 'run', engine, 'managed')).sort()).toContain('nuthatch-commands.cfg')
+
+    page.once('dialog', (dialog) => void dialog.accept())
+    await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Take out' }).click()
+    await expect(page.getByRole('status')).toContainText(`${name} is taken out.`, { timeout: 90_000 })
+  })
+}
+
+test('looking at a name that is not there says so', async ({ page }) => {
+  await login(page, 'admin')
+  await goTo(page, 'Config')
+  await page.getByRole('button', { name: 'Add a host' }).click()
+  await page.getByLabel('Name, address or URL').fill('no-such-host.invalid')
+  await page.getByRole('button', { name: 'Look' }).click()
+  await expect(page.locator('.add-host [role=alert]')).toContainText('cannot be found')
+})
 
 test('the config is not for ops', async ({ page }) => {
   await login(page, 'ops')

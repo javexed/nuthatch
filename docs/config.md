@@ -33,6 +33,11 @@ In nuthatch's config, under the backend:
 - `paths = { "/in/the/engine" = "/as/nuthatch/sees/it" }`: for an engine
   in a container, whose paths are not nuthatch's.
 
+- `plugins = "/usr/lib/monitoring-plugins"`: where the engine's plugins
+  are, for the check commands nuthatch brings (below). Without it,
+  `$USER1$`, which most sites set to that directory in their resource
+  file.
+
 There must be a host template and a service template in the engine's
 config (a definition with a `name` and `register 0`): a host is built on
 one, which gives it its check period, its contacts and the rest.
@@ -89,3 +94,36 @@ and listed as such.
 service on each engine, have the engine refuse a broken change with the
 files untouched, rename and take out, and look for a comment or a
 downtime made beforehand to still be there.
+
+## Adding a host by looking at it first
+
+"Add a host" asks for a name, an address or a URL and looks at it from
+where the engine runs (a site's nuthatch looks for a backend of that
+site), so what it finds is what the engine can reach:
+
+- the name looked up, and one ping;
+- about forty well-known TCP ports tried, ten at a time, each given 1.5
+  seconds: SSH, the web ports, mail, DNS, file sharing, databases, MQTT,
+  LDAP, remote desktops and services often run at home (Proxmox, Plex,
+  Jellyfin, Home Assistant, Immich, Prometheus' node exporter);
+- on what answers: the first line a service says (SSH, SMTP, IMAP), a
+  web page's status and title (one GET, no redirect followed), and a TLS
+  certificate's name, issuer and expiry.
+
+Only that one address is touched. From what was found it suggests checks,
+ticked or not (a port that only redirects to https is not ticked, nor
+Telnet), which can be saved at once or taken into the full form. A host
+that does not answer ping is checked on its first open port instead. A
+URL gives a check of exactly that page, and of its certificate.
+
+The suggested checks use commands nuthatch brings, `nuthatch_tcp`,
+`nuthatch_http`, `nuthatch_https`, `nuthatch_cert` (warns 21 days and is
+critical 7 days before a certificate expires), `nuthatch_ssh`,
+`nuthatch_smtp`, `nuthatch_imap` and `nuthatch_imaps`, all on the
+[monitoring plugins](https://www.monitoring-plugins.org/). They are
+fixed in nuthatch (`server/src/catalogue.ts`), never made from what is
+typed, and written to `nuthatch-commands.cfg` in nuthatch's directory,
+with the rest of a change and checked by the engine like it, when a host
+first uses one. They can be chosen in the full form too.
+
+Looking is for the role `config_edit`, and written to the audit log.

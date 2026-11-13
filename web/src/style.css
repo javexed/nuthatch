@@ -248,7 +248,7 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .dialog textarea { width: 100%; resize: vertical; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 @media (max-width: 30rem) { .pair { grid-template-columns: 1fr; } }
-.buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
 .failed { margin: 0; padding-left: 1.1rem; color: var(--critical); }
 .facts .badge { margin-left: 0.4rem; }
 
@@ -288,6 +288,27 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .service-fields { border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.8rem; margin: 0; display: grid; gap: 0.6rem; min-width: 0; }
 .service-fields legend { color: var(--muted); font-size: 0.9rem; padding: 0 0.3rem; }
 .host-form > button.quiet { justify-self: start; }
+
+/* Adding a host by looking at it first (AddHost.vue). */
+.add-host { display: grid; gap: 0.8rem; }
+.add-host h2 { margin: 0; color: var(--text); }
+.add-host .look { display: flex; gap: 0.6rem; align-items: end; flex-wrap: wrap; }
+.add-host .look label { flex: 1 1 16rem; }
+.add-host .by { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.add-host .found p { margin: 0.15rem 0; }
+.warning-text { color: var(--warning); margin: 0.15rem 0; }
+.suggestions { border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.4rem 0.8rem; margin: 0; display: grid; min-width: 0; }
+.suggestions legend { color: var(--muted); font-size: 0.9rem; padding: 0 0.3rem; }
+.suggestion { display: grid; grid-template-columns: auto minmax(7rem, auto) 1fr; gap: 0.2rem 0.7rem; align-items: baseline; padding: 0.45rem 0; border-bottom: 1px solid var(--line); color: var(--text); font-size: 1rem; }
+.suggestion:last-child { border-bottom: 0; }
+.suggestion .what { font-weight: 600; }
+.suggestion .why { color: var(--muted); font-size: 0.88rem; overflow-wrap: anywhere; }
+@media (max-width: 40rem) {
+  .suggestion { grid-template-columns: auto 1fr; }
+  .suggestion .why { grid-column: 2; }
+}
+.certs { color: var(--muted); font-size: 0.9rem; }
+.certs ul { margin: 0.3rem 0; padding-left: 1.2rem; }
 .managed { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
 .managed li { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: space-between; align-items: center; margin: 0; }
 .managed .actions { margin: 0; }

@@ -15,6 +15,7 @@ import { parse } from 'smol-toml'
 import { type Peer, VERSION, buildApp, userName } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers } from './auth.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
+import { pluginsDir } from './catalogue.ts'
 import { ConfigAdmin } from './configadmin.ts'
 import { PathMap } from './nagioscfg.ts'
 import { Events } from './events.ts'
@@ -128,7 +129,10 @@ function main(): void {
           fail(`${path}: backend ${name}: config needs dir, main and verify = ["program", ..., "{main}"]`)
         }
         if (c.reload !== undefined && !strings(c.reload)) fail(`${path}: backend ${name}: config.reload is a command, as a list`)
-        admins.set(name, new ConfigAdmin(backend, { dir: c.dir, main: c.main, verify: c.verify, reload: c.reload, paths: new PathMap((c.paths ?? {}) as Record<string, string>) }))
+        admins.set(
+          name,
+          new ConfigAdmin(backend, { dir: c.dir, main: c.main, verify: c.verify, reload: c.reload, paths: new PathMap((c.paths ?? {}) as Record<string, string>), plugins: pluginsDir(c.plugins) }),
+        )
       }
     } catch (err) {
       fail(`${path}: backend ${name}: ${err instanceof Error ? err.message : String(err)}`)

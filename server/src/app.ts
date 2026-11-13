@@ -13,6 +13,7 @@ import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
 import { checkDraft, fromRow } from './dashboards.ts'
+import { discover } from './discover.ts'
 import type { Events } from './events.ts'
 import { ROLES, Refused, type Roles, type RolesConfig, TABLES, checkHeaders } from './policy.ts'
 import { Forbidden, combine, combineStats, rows, stats } from './query.ts'
@@ -600,6 +601,17 @@ export function buildApp(deps: Deps): Hono<Env> {
       if (!dryRun) deps.store.audit(user, backend, 'config refused', `${what}: ${err instanceof Error ? err.message : String(err)}`)
       throw err
     }
+  })
+
+  // Looking at a host before adding it: from where its engine runs, so a
+  // site's nuthatch looks for a backend of that site.
+  app.post('/api/v1/config/:backend/discover', async (c) => {
+    const far = await configSite(c)
+    const { target } = await body(c)
+    if (far) return c.json(await far.site.call(c.get('identity').user, 'POST', `${far.path}/discover`, { target }))
+    const { user } = await configOf(c)
+    deps.store.audit(user, c.req.param('backend'), 'looked at a host', String(target).slice(0, 200))
+    return c.json(await discover(target))
   })
 
   app.get('/api/v1/events', (c) =>

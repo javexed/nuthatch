@@ -3,7 +3,14 @@
 import type { ConfigState, ManagedHost, ManagedService } from '@nuthatch/api'
 import { reactive } from 'vue'
 
-const props = defineProps<{ state: ConfigState; host?: ManagedHost; busy: boolean }>()
+const props = defineProps<{
+  state: ConfigState
+  /** The host being changed; none for a new one. */
+  host?: ManagedHost
+  /** What a new host's form starts with, such as what looking at it found. */
+  start?: ManagedHost
+  busy: boolean
+}>()
 const emit = defineEmits<{ check: [host: ManagedHost]; save: [host: ManagedHost]; cancel: [] }>()
 
 interface Command {
@@ -18,9 +25,9 @@ const joined = (c: Command) => (c.name === '' ? undefined : c.args === '' ? c.na
 
 const blank = (): ManagedService => ({ description: '', use: props.state.templates.service[0] ?? '', servicegroups: [], contacts: [], contact_groups: [] })
 const form = reactive({
-  ...(JSON.parse(JSON.stringify(props.host ?? { name: '', address: '', use: props.state.templates.host[0] ?? '', hostgroups: [], contacts: [], contact_groups: [], services: [] })) as ManagedHost),
-  command: split(props.host?.check_command),
-  serviceCommands: (props.host?.services ?? []).map((s) => split(s.check_command)),
+  ...(JSON.parse(JSON.stringify(props.host ?? props.start ?? { name: '', address: '', use: props.state.templates.host[0] ?? '', hostgroups: [], contacts: [], contact_groups: [], services: [] })) as ManagedHost),
+  command: split((props.host ?? props.start)?.check_command),
+  serviceCommands: ((props.host ?? props.start)?.services ?? []).map((s) => split(s.check_command)),
 })
 
 function addService() {

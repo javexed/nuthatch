@@ -142,6 +142,48 @@ export interface ConfigState {
   templates: { host: string[]; service: string[] }
   /** What the engine has, to choose from. */
   choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[] }
+  /** The check commands nuthatch can add itself when a host uses one (its own, for suggested checks). */
+  catalogue?: string[]
+}
+
+/** A port found open when a host was looked at, and what answered there. */
+export interface FoundPort {
+  port: number
+  /** What usually answers on this port. */
+  service: string
+  kind: 'banner' | 'web' | 'tls' | 'open'
+  /** The first line the service said, for SSH, SMTP and the like. */
+  banner?: string
+  http?: { status: number; title?: string; location?: string }
+  tls?: { subject?: string; issuer?: string; expires: string; days: number; trusted: boolean }
+}
+
+/** A check suggested for a host that was looked at. */
+export interface Suggestion {
+  description: string
+  check_command: string
+  /** Whether it is ticked to begin with. */
+  checked: boolean
+  /** What was found that led to it. */
+  why: string
+}
+
+/** What looking at a host before adding it found. */
+export interface Discovery {
+  /** What was typed. */
+  input: string
+  /** A name for the host. */
+  name: string
+  /** Its address as it will be written: the name or address typed. */
+  address: string
+  /** What the name stands for. */
+  addresses: string[]
+  /** Whether it answered ping; null when ping could not be tried. */
+  ping: { ok: boolean; ms?: number } | null
+  found: FoundPort[]
+  /** A check for the host itself, when it does not answer ping. */
+  host_check?: string
+  suggestions: Suggestion[]
 }
 
 export type ConfigChange = { kind: 'put'; host: ManagedHost; /** Its name before, when it is not new. */ previous?: string } | { kind: 'delete'; name: string }

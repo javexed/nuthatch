@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { QueryAnswer, Role } from '@nuthatch/api'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import type { FoundPort, QueryAnswer, Role } from '@nuthatch/api'
 import bcrypt from 'bcryptjs'
 import * as unixcrypt from 'unixcrypt'
 import { describe, expect, it } from 'vitest'
@@ -10,7 +12,9 @@ import { buildApp } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
+import { CATALOGUE_NAMES, catalogueFile, pluginsDir } from './catalogue.ts'
 import { checkHost, hostFile, readHostFile } from './configadmin.ts'
+import { discover, hostName, parseTarget, suggest } from './discover.ts'
 import { Events } from './events.ts'
 import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagioscfg.ts'
 import { RolesConfig, access, checkColumns, checkHeaders } from './policy.ts'
@@ -491,6 +495,26 @@ describe('one nuthatch over the nuthatch of a site', () => {
     return { central, site, siteEngine, siteStore, store, post }
   }
 
+  it('passes looking at a host on to the site, which decides', async () => {
+    // The site looks from where its engine is; the central one only passes it on.
+    const asked: string[] = []
+    const { post, site } = pair({ config: true })
+    const original = site.request.bind(site)
+    site.request = ((input: string, init?: RequestInit) => {
+      asked.push(String(input))
+      return original(input, init)
+    }) as typeof site.request
+    const answer = await post('/api/v1/config/east/discover', 'ann', { target: 'nas.example.test' })
+    expect(asked).toContain('/api/v1/config/only/discover')
+    // The site decides by its own roles: ann may not change its config.
+    expect(((await answer.json()) as { error: string }).error).toContain('config_edit')
+    // A key that may only read gets nowhere with it.
+    const readOnly = pair({ readOnly: true, config: true })
+    const refused = await readOnly.post('/api/v1/config/east/discover', 'ann', { target: 'nas.example.test' })
+    expect(refused.status).toBeGreaterThanOrEqual(400)
+    expect(((await refused.json()) as { error: string }).error).toMatch(/may not change the config|may only read/)
+  })
+
   it('shows both, sorted as one, each under its name', async () => {
     const { post } = pair()
     const answer = (await (await post('/api/v1/query', 'ann', { table: 'hosts', columns: ['name', 'state'], sort: [{ column: 'name' }], offset: 1, limit: 2 })).json()) as QueryAnswer
@@ -573,5 +597,79 @@ describe('an app served from elsewhere', () => {
     const other = await app.request('/api/v1/session', { headers: { Origin: 'https://elsewhere.example.test' } })
     expect(other.headers.get('Access-Control-Allow-Origin')).toBeNull()
     rmSync(dir, { recursive: true })
+  })
+})
+
+describe('looking at a host before adding it', () => {
+  it('takes a name, an address or a URL, and nothing else', () => {
+    expect(parseTarget('nas.example.test')).toEqual({ host: 'nas.example.test' })
+    expect(parseTarget(' 192.0.2.7 ')).toEqual({ host: '192.0.2.7' })
+    expect(parseTarget('https://photos.example.test/api/ping')).toEqual({ host: 'photos.example.test', url: { https: true, port: 443, path: '/api/ping' } })
+    expect(parseTarget('http://192.0.2.7:8096/')).toEqual({ host: '192.0.2.7', url: { https: false, port: 8096, path: '/' } })
+    for (const bad of ['', 'two words', 'nas;rm', 'ftp://x.test/', 'https://u:p@x.test/', 'https://x.test/a!b', 'https://x.test/$USER1$', 42]) {
+      expect(() => parseTarget(bad)).toThrow()
+    }
+    expect(hostName('nas.example.test')).toBe('nas')
+    expect(hostName('192.0.2.7')).toBe('192.0.2.7')
+  })
+
+  it('suggests checks for what answered, ticking what is worth watching', () => {
+    const found: FoundPort[] = [
+      { port: 22, service: 'SSH', kind: 'banner', banner: 'SSH-2.0-OpenSSH_9.8' },
+      { port: 23, service: 'Telnet', kind: 'open' },
+      { port: 80, service: 'HTTP', kind: 'web', http: { status: 301, location: 'https://nas.example.test/' } },
+      { port: 443, service: 'HTTPS', kind: 'web', http: { status: 200, title: 'NAS' }, tls: { expires: '2027-01-01T00:00:00Z', days: 61, trusted: true } },
+      { port: 8443, service: 'Web 8443', kind: 'web', http: { status: 200 }, tls: { expires: '2027-01-01T00:00:00Z', days: 400, trusted: false, issuer: 'self' } },
+      { port: 5432, service: 'PostgreSQL', kind: 'open' },
+      { port: 3000, service: 'Web 3000', kind: 'web', http: { status: 200, title: 'Grafana: the dashboards' } },
+    ]
+    const { host_check, suggestions } = suggest({ host: 'nas.example.test' }, found, true)
+    expect(host_check).toBeUndefined()
+    const table = suggestions.map((s) => [s.description, s.check_command, s.checked])
+    expect(table).toEqual([
+      ['SSH', 'nuthatch_ssh!22', true],
+      ['Telnet', 'nuthatch_tcp!23', false],
+      ['HTTP', 'nuthatch_http!80!/', false],
+      ['HTTPS', 'nuthatch_https!443!/', true],
+      ['Certificate', 'nuthatch_cert!443', true],
+      ['Web 8443', 'nuthatch_https!8443!/', true],
+      ['Certificate 8443', 'nuthatch_cert!8443', false],
+      ['PostgreSQL', 'nuthatch_tcp!5432', true],
+      ['Grafana', 'nuthatch_http!3000!/', true],
+    ])
+    // Every suggestion uses one of nuthatch's own commands, as a description may be.
+    for (const s of suggestions) expect(CATALOGUE_NAMES).toContain(s.check_command.split('!')[0])
+    // A host that does not answer ping is checked on its first open port.
+    expect(suggest({ host: 'nas.example.test' }, found, false).host_check).toBe('nuthatch_tcp!22')
+    // A URL: a check of exactly that, and of its certificate.
+    const url = suggest(parseTarget('https://photos.example.test/api/ping'), [], true).suggestions
+    expect(url.map((s) => s.check_command)).toEqual(['nuthatch_https!443!/api/ping', 'nuthatch_cert!443'])
+    expect(url[0]?.description).toBe('HTTPS /api/ping')
+  })
+
+  it('finds a web server and its page title', async () => {
+    const server = createServer((_, response) => response.end('<html><title>Hello there</title></html>'))
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+    const { port } = server.address() as AddressInfo
+    try {
+      const seen = await discover(`http://127.0.0.1:${port}/`)
+      expect(seen.address).toBe('127.0.0.1')
+      expect(seen.found.find((f) => f.port === port)?.http).toMatchObject({ status: 200, title: 'Hello there' })
+      expect(seen.suggestions[0]).toMatchObject({ check_command: `nuthatch_http!${port}!/`, checked: true })
+    } finally {
+      server.close()
+    }
+  }, 20_000)
+
+  it("brings its own commands, written from nuthatch's list only", () => {
+    const text = catalogueFile('/usr/lib/monitoring-plugins')
+    const defined = parseObjects(text)
+    expect(defined.map((d) => d.attrs[0]?.[1])).toEqual(CATALOGUE_NAMES)
+    expect(text).toContain('/usr/lib/monitoring-plugins/check_ssh -H $HOSTADDRESS$ -p $ARG1$')
+    expect(pluginsDir(undefined)).toBe('$USER1$')
+    for (const bad of ['relative/path', '/x;y', '$USER1$/x', '/usr/lib/plugins/']) expect(() => pluginsDir(bad)).toThrow()
+    // No host may take the file's name.
+    const choices = { commands: ['nuthatch_ssh'], contacts: [], contactgroups: [], hostgroups: [], servicegroups: [] }
+    expect(() => checkHost({ name: 'nuthatch-commands', address: 'x.test', use: 'generic-host' }, choices, { host: ['generic-host'], service: [] })).toThrow(/nuthatch's own file/)
   })
 })

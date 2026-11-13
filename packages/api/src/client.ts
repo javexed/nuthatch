@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, DashboardDraft, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
 
 export class ApiError extends Error {
   readonly status: number
@@ -161,6 +161,11 @@ export class Client {
 
   deleteDashboard(id: number): Promise<void> {
     return this.call('DELETE', `/api/v1/dashboards/${id}`)
+  }
+
+  /** Looks at a host before it is added: its ports, and the checks suggested. */
+  discover(backend: string, target: string): Promise<Discovery> {
+    return this.call('POST', `/api/v1/config/${encodeURIComponent(backend)}/discover`, { target })
   }
 
   config(backend: string): Promise<ConfigState> {
