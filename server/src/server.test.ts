@@ -19,7 +19,7 @@ import { Events } from './events.ts'
 import { Graphs, thin } from './graphs.ts'
 import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagioscfg.ts'
 import { RolesConfig, access, checkColumns, checkHeaders } from './policy.ts'
-import { Pusher, messageOf, parseNotice } from './push.ts'
+import { Pusher, digestOf, messageOf, parseNotice } from './push.ts'
 import { compare, limits, merge, rows, stats } from './query.ts'
 import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
@@ -747,6 +747,21 @@ describe('notifications pushed to browsers', () => {
       expect(() => checkSubscription({ ...subscription, endpoint })).toThrow()
     }
     expect(() => checkSubscription({ endpoint: subscription.endpoint, keys: { p256dh: 'short', auth: subscription.keys.auth } })).toThrow(/keys/)
+  })
+
+  it('tell several notices that came together as one message', () => {
+    const notice = (host: string, service: string, state: string) => ({ contact: 'ann', host, service, state, output: 'x' })
+    const digest = digestOf('site a', [notice('sw1', '', 'DOWN'), notice('web1', 'http', 'CRITICAL'), notice('web2', '', 'UP')])
+    expect(digest).toEqual({
+      title: 'site a: 2 problems, 1 recovery',
+      body: 'sw1 is DOWN\nweb1 / http is CRITICAL\nweb2 is UP',
+      url: 'problems',
+      tag: 'site a/digest',
+    })
+    const many = digestOf('s', Array.from({ length: 9 }, (_, n) => notice(`h${n}`, '', 'DOWN')))
+    expect(many.title).toBe('s: 9 problems')
+    expect(many.body.split('\n')).toHaveLength(7)
+    expect(many.body.endsWith('and 3 more')).toBe(true)
   })
 
   it('reads the notifications of a log, and nothing else', () => {

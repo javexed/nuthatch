@@ -4,6 +4,10 @@ Where nuthatch is installed as an app (README, "As an app"), or just open
 in a browser that allows it, the engine's notifications can be pushed to
 the device: on the lock screen, with a tap leading to the host or service.
 
+Several notifications to one user that the engine logs within the same
+few seconds are pushed as one message, "2 problems, 1 recovery", with
+the first six named; a tap opens the problems.
+
 ## Who is notified of what
 
 The engine decides, as for every other notification: its contacts, their

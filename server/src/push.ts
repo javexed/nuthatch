@@ -58,6 +58,27 @@ export function messageOf(backend: string, notice: Notice): Message {
   }
 }
 
+/**
+ * Several notices that came together, as one message: a switch that goes
+ * down is not thirty messages on a phone.
+ */
+export function digestOf(backend: string, notices: Notice[]): Message {
+  const problems = notices.filter((n) => bad(n.state)).length
+  const rest = notices.length - problems
+  const parts = [
+    problems > 0 ? `${problems} problem${problems === 1 ? '' : 's'}` : '',
+    rest > 0 ? (rest === 1 ? '1 recovery' : `${rest} recoveries`) : '',
+  ].filter(Boolean)
+  const lines = notices.slice(0, 6).map((n) => `${n.service === '' ? n.host : `${n.host} / ${n.service}`} is ${n.state}`)
+  if (notices.length > 6) lines.push(`and ${notices.length - 6} more`)
+  return {
+    title: `${backend}: ${parts.join(', ')}`,
+    body: lines.join('\n').slice(0, 600),
+    url: 'problems',
+    tag: `${backend}/digest`,
+  }
+}
+
 const bad = (state: string) => !/^(OK|UP|RECOVERY)/.test(state) && !/\((OK|UP)\)/.test(state)
 
 export class Pusher {
@@ -96,6 +117,9 @@ export class Pusher {
   async pass(backend: Backend, since: number, seen: Set<string>): Promise<number> {
     const rows = await backend.query(`GET log\nColumns: time message\nFilter: time >= ${since}\nFilter: class = 3`)
     let latest = since
+    // What this pass found, by contact: one notice is told as it is,
+    // several as one message.
+    const found = new Map<string, Notice[]>()
     for (const [time, message] of rows as [number, string][]) {
       latest = Math.max(latest, time)
       const notice = parseNotice(String(message))
@@ -104,7 +128,11 @@ export class Pusher {
       const key = `${time}|${notice.contact}|${notice.host}|${notice.service}|${notice.state}`
       if (seen.has(key)) continue
       seen.add(key)
-      void this.toUser(notice.contact, messageOf(backend.name, notice), bad(notice.state))
+      found.set(notice.contact, [...(found.get(notice.contact) ?? []), notice])
+    }
+    for (const [contact, notices] of found) {
+      const message = notices.length === 1 ? messageOf(backend.name, notices[0] as Notice) : digestOf(backend.name, notices)
+      void this.toUser(contact, message, notices.some((n) => bad(n.state)))
     }
     // What is older than the newest second cannot come again.
     for (const key of seen) if (Number(key.split('|')[0]) < latest) seen.delete(key)
