@@ -74,7 +74,11 @@ the repository in `~/nuthatch`, the config in
 Served over HTTPS, nuthatch can be installed from the browser: Chrome's
 "Install app" or "Add to home screen", Safari's "Add to Home Screen".
 `web/public` holds the manifest, the icons and a service worker that
-keeps only the interface's own files, never monitoring data. The icons,
+keeps only the interface's own files, never monitoring data. An
+installed copy keeps itself up to date: each build writes
+`version.json`, and a page that comes back from the background finds a
+newer build and reloads (one in use says so instead, to lose nothing
+half typed). There is nothing to reinstall. The icons,
 here and in the Android app, are made from `docs/logo.svg` by
 `mobile/make-icons`.
 

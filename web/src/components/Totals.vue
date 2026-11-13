@@ -38,6 +38,15 @@ const values = computed(() => data.value?.groups[0]?.values ?? [])
 const tiles = computed(() => states(props.kind).map((state, n) => ({ ...state, n, all: values.value[2 * n] ?? 0, unhandled: values.value[2 * n + 1] ?? 0 })))
 const pending = computed(() => values.value[2 * states(props.kind).length] ?? 0)
 const errors = computed(() => Object.entries(data.value?.errors ?? {}))
+/** The share of each state, for the bar over the tiles. */
+const everything = computed(() => tiles.value.reduce((sum, tile) => sum + tile.all, 0) + pending.value)
+const shares = computed(() =>
+  everything.value === 0
+    ? []
+    : [...tiles.value.map((tile) => ({ tone: tile.tone, n: tile.all })), { tone: 'pending', n: pending.value }]
+        .filter((part) => part.n > 0)
+        .map((part) => ({ ...part, width: `${(100 * part.n) / everything.value}%` })),
+)
 
 function link(state: number, unhandled = false) {
   const group = props.hostgroup ? (props.kind === 'host' ? { group: props.hostgroup } : { hostgroup: props.hostgroup }) : {}
@@ -49,6 +58,9 @@ function link(state: number, unhandled = false) {
   <div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-for="[name, why] in errors" :key="name" class="error" role="alert"><strong>{{ name }}</strong>: {{ why }}</p>
+    <div v-if="shares.length > 0" class="bar-of" aria-hidden="true">
+      <span v-for="part in shares" :key="part.tone" :class="part.tone" :style="{ width: part.width }"></span>
+    </div>
     <ul class="totals">
       <li v-for="tile in tiles" :key="tile.label" :class="['tile', tile.tone, { none: tile.all === 0 }]">
         <RouterLink :to="link(tile.n)"><strong>{{ tile.all }}</strong> {{ tile.label }}</RouterLink>

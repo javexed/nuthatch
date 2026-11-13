@@ -46,9 +46,70 @@ p { margin: 0.5rem 0; }
 .bar .pages a { padding: 0.35rem 0.6rem; border-radius: 0.4rem; text-decoration: none; color: var(--muted); white-space: nowrap; }
 .bar .pages a.router-link-active { color: var(--text); background: var(--bg); font-weight: 600; }
 .bar .who { color: var(--muted); margin-left: auto; }
+
+/* On a narrow screen the pages move to the bar at the bottom
+   (BottomBar.vue), and the top keeps only the name. */
+.tabbar, .sheet { display: none; }
 @media (max-width: 40rem) {
-  .bar .pages { order: 3; flex-basis: 100%; }
+  .bar { padding: 0.5rem 1rem; padding-top: calc(0.5rem + env(safe-area-inset-top)); }
+  .bar .pages, .bar .who, .bar .logout { display: none; }
+  main.with-tabbar { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+  .tabbar {
+    display: flex; position: fixed; z-index: 10; left: 0; right: 0; bottom: 0;
+    background: var(--card); border-top: 1px solid var(--line);
+    padding: 0.25rem 0.25rem calc(0.25rem + env(safe-area-inset-bottom));
+  }
+  .tab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+    padding: 0.35rem 0; min-height: 3.2rem; border: 0; border-radius: 0.5rem; background: none;
+    color: var(--muted); text-decoration: none; font: inherit; font-size: 0.72rem; cursor: pointer;
+  }
+  .tab.router-link-active { color: var(--accent); font-weight: 600; }
+  .tab .icon { position: relative; display: block; height: 24px; }
+  .tab .badge {
+    position: absolute; top: -0.35rem; left: 1rem; min-width: 1.15rem; height: 1.15rem; padding: 0 0.3rem;
+    border-radius: 0.6rem; background: var(--critical); color: #fff; font-size: 0.7rem; font-weight: 700;
+    line-height: 1.15rem; text-align: center;
+  }
+  .sheet[open] {
+    display: block; margin: auto 0 0; width: 100%; max-width: 100%; max-height: 80vh;
+    border: 0; border-radius: 1rem 1rem 0 0; padding: 0; background: var(--card); color: var(--text);
+  }
+  .sheet::backdrop { background: rgb(0 0 0 / 45%); }
+  .sheet-body { display: grid; gap: 0.8rem; padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom)); }
+  .sheet nav { display: grid; }
+  .sheet nav a { padding: 0.85rem 0.5rem; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; font-size: 1.05rem; }
+  .sheet nav a.router-link-active { color: var(--accent); font-weight: 600; }
+  .sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--muted); }
+
+  /* Totals: smaller tiles, and the states with none left out. */
+  .totals { grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); gap: 0.5rem; }
+  .tile { padding: 0.5rem 0.6rem; }
+  .tile strong { font-size: 1.3rem; }
+  .tile.none { display: none; }
 }
+
+/* A newer build is on the server (lib/update.ts). */
+.update {
+  display: flex; align-items: center; justify-content: center; gap: 0.8rem; flex-wrap: wrap;
+  padding: 0.5rem 1rem; background: var(--accent); color: var(--card); font-weight: 500;
+}
+.update button { background: var(--card); color: var(--accent); border-color: transparent; }
+
+/* The overview's first line: whether anything needs someone. */
+.banner {
+  display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1rem; padding: 0.85rem 1rem;
+  border-radius: 0.6rem; border: 1px solid var(--line); background: var(--card);
+  color: var(--text); text-decoration: none; font-weight: 600;
+}
+.banner.good { border-left: 0.4rem solid var(--ok); }
+.banner.bad { border-left: 0.4rem solid var(--critical); }
+.dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--pending); flex: none; }
+.banner.good .dot, .dot.good { background: var(--ok); }
+.banner.bad .dot, .dot.bad { background: var(--critical); }
+.backends-line { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; color: var(--muted); font-size: 0.9rem; padding: 0 0.25rem; }
+.backends-line strong { color: var(--text); }
+.backends-line .dot { margin-right: 0.35rem; vertical-align: 0.05rem; }
 
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 0.6rem; padding: 1rem; margin-bottom: 1rem; }
 .login { max-width: 22rem; margin: 12vh auto 0; display: grid; gap: 0.9rem; }
@@ -216,6 +277,8 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .bar-of .warning { background: var(--warning); }
 .bar-of .critical { background: var(--critical); }
 .bar-of .unknown { background: var(--unknown); }
+.bar-of .pending { background: var(--pending); }
+.card .bar-of { margin-bottom: 0.7rem; }
 
 /* Changing the config. */
 .host-form { display: grid; gap: 0.8rem; }

@@ -1,6 +1,6 @@
 // Phase 1: what people see and do, on both engines at once.
 import { type Page, expect, test } from '@playwright/test'
-import { ENGINES, fits, listed, livestatus, login } from './helpers'
+import { ENGINES, fits, goTo, listed, livestatus, login, logout, openMore } from './helpers'
 
 const total = async (page: Page, region: string) => {
   const tiles = await page.getByRole('region', { name: region }).locator('.tile strong').allInnerTexts()
@@ -19,7 +19,7 @@ test('the overview counts what the engines count, for admin and for ops', async 
     await expect.poll(() => total(page, 'Hosts')).toBe(hosts)
     await expect.poll(() => total(page, 'Services')).toBe(services)
     await fits(page)
-    await page.getByRole('button', { name: 'Log out' }).click()
+    await logout(page)
   }
 })
 
@@ -90,13 +90,13 @@ test('the service list filters, sorts over both engines, and pages', async ({ pa
 
 test('problems lists what is wrong, and groups lead to their members', async ({ page }) => {
   await login(page, 'admin')
-  await page.getByRole('link', { name: 'Problems' }).click()
+  await page.getByRole('link', { name: /^Problems/ }).click()
   // nas1/disk is always WARNING in the demo site.
   const services = page.locator('table.rows').last()
   await expect.poll(async () => (await listed(page, services)).filter((row) => row.startsWith('nas1|disk|'))).toHaveLength(2)
   await fits(page)
 
-  await page.getByRole('link', { name: 'Groups' }).click()
+  await goTo(page, 'Groups')
   await expect(page.locator('.groups > li')).toHaveCount(14)
   await fits(page)
   await page.locator('.groups > li', { hasText: 'naemon' }).getByRole('link', { name: 'Web', exact: true }).click()
@@ -106,7 +106,7 @@ test('problems lists what is wrong, and groups lead to their members', async ({ 
 
 test('ops sees only the group it sees all of', async ({ page }) => {
   await login(page, 'ops')
-  await page.getByRole('link', { name: 'Groups' }).click()
+  await goTo(page, 'Groups')
   await expect(page.locator('.groups > li')).toHaveCount(2)
   await expect(page.locator('.groups > li').first()).toContainText('Web')
 })
@@ -181,11 +181,28 @@ test('viewer looks and cannot touch; ops acts on its own', async ({ page }) => {
   await expect(page.locator('.headline .badge')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Check now' })).toHaveCount(0)
   await expect(page.getByLabel('Tick all')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Log out' }).click()
+  await logout(page)
 
   await login(page, 'ops')
   await page.goto('/host/checkd/web1')
   await page.getByRole('button', { name: 'Check now' }).click()
   await expect(page.getByRole('status')).toHaveText('Asked for a check.')
   await expect(page.locator('table.rows tbody tr')).toHaveCount(4)
+})
+
+test('on a phone: the bar at the bottom, with the open problems counted', async ({ page }, info) => {
+  test.skip(info.project.name !== 'phone', 'the bottom bar is for narrow screens')
+  await login(page, 'admin')
+  await expect(page.getByRole('navigation', { name: 'Pages', exact: true })).toBeHidden()
+  await expect(page.getByRole('navigation', { name: 'Main pages' })).toBeVisible()
+  // The demo site always has problems; the badge and the overview agree.
+  const badge = page.locator('.tabbar .badge')
+  await expect(badge).toHaveText(/^[1-9]\d*\+?$/)
+  await expect(page.locator('.banner')).toContainText(`${await badge.innerText()} problem`)
+  await openMore(page)
+  await expect(page.getByRole('link', { name: 'History' })).toBeVisible()
+  await page.getByRole('link', { name: 'History' }).click()
+  await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
+  await expect(page.locator('dialog[open]')).toHaveCount(0)
+  await fits(page)
 })

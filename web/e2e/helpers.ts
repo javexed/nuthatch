@@ -62,3 +62,22 @@ export async function nextSecond(): Promise<number> {
   await sleep(1000 - (Date.now() % 1000) + 20)
   return seconds()
 }
+
+/** On a narrow screen, opens the bottom bar's More sheet; elsewhere nothing. */
+export async function openMore(page: Page) {
+  const more = page.getByRole('button', { name: 'More' })
+  if (await more.isVisible()) await more.click()
+}
+
+/** Goes to a page from the menu: the top bar, or More on a narrow screen. */
+export async function goTo(page: Page, name: string) {
+  const link = page.getByRole('link', { name, exact: true })
+  if (!(await link.isVisible())) await openMore(page)
+  await link.click()
+}
+
+export async function logout(page: Page) {
+  const button = page.getByRole('button', { name: 'Log out' })
+  if (!(await button.isVisible())) await openMore(page)
+  await button.click()
+}

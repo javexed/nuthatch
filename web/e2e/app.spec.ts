@@ -2,7 +2,7 @@
 // shell serves it, against a nuthatch server elsewhere: it asks for the
 // server, logs in for a token, and acts with it.
 import { expect, test } from '@playwright/test'
-import { fits, livestatus, password } from './helpers'
+import { fits, livestatus, logout, password } from './helpers'
 
 const APP = 'http://127.0.0.1:8097'
 const SERVER = 'http://127.0.0.1:8092'
@@ -46,7 +46,7 @@ test('the app logs in at a server for a token and acknowledges a problem', async
   await expect(page.locator('.headline')).not.toContainText('acknowledged')
 
   // Logging out deletes the token at the server and on the device.
-  await page.getByRole('button', { name: 'Log out' }).click()
+  await logout(page)
   await expect(page).toHaveURL(/#\/login/)
   await expect(page.getByLabel('Server')).toHaveValue(SERVER)
   expect(await page.evaluate(() => localStorage.getItem('nuthatch.app'))).toBeNull()

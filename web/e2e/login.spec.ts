@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { fits, login } from './helpers'
+import { fits, login, logout } from './helpers'
 
 test('a wrong password says so and stays', async ({ page }) => {
   await login(page, 'admin', 'wrong')
@@ -10,7 +10,7 @@ test('a wrong password says so and stays', async ({ page }) => {
 
 test('logging out ends the session', async ({ page }) => {
   await login(page, 'admin')
-  await page.getByRole('button', { name: 'Log out' }).click()
+  await logout(page)
   await expect(page).toHaveURL(/\/login/)
   await page.goto('/hosts')
   await expect(page).toHaveURL(/\/login\?to=\/hosts/)

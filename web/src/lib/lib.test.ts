@@ -5,6 +5,7 @@ import { EMPTY, fromQuery, literal, toHeaders, toQuery } from './filters.ts'
 import { ago, duration, fromInput, toInput } from './format.ts'
 import { fraction, parsePerfdata } from './perfdata.ts'
 import { stateOf } from './states.ts'
+import { decide, latestBuild } from './update.ts'
 
 describe('formatting', () => {
   it('writes durations with their two largest units', () => {
@@ -121,5 +122,22 @@ describe('availability', () => {
     expect(head).toBe('backend,host,service,from,to,ok_seconds,ok_percent,warning_seconds,warning_percent,critical_seconds,critical_percent,unknown_seconds,unknown_percent,unmonitored_seconds')
     expect(line).toBe('a,web1,"\'=cmd,""x""",100,1100,900,90.000,60,6.000,40,4.000,0,0.000,500')
     expect(toCsv('host', { from: 1, to: 2 }, []).trim().split(',')).toContain('unreachable_percent')
+  })
+})
+
+describe('updates', () => {
+  it('reloads for a newer build only when nothing would be lost', () => {
+    expect(decide('b2', 'b1', true)).toBe('reload')
+    expect(decide('b2', 'b1', false)).toBe('tell')
+    expect(decide('b1', 'b1', true)).toBe('none')
+    expect(decide(null, 'b1', true)).toBe('none')
+  })
+  it('reads the build from version.json, and nothing from anything else', async () => {
+    const answer = (body: string, status = 200) => (async () => new Response(body, { status })) as unknown as typeof fetch
+    expect(await latestBuild(answer('{"build":"abc"}'))).toBe('abc')
+    expect(await latestBuild(answer('<!doctype html>'))).toBeNull()
+    expect(await latestBuild(answer('{"build":1}'))).toBeNull()
+    expect(await latestBuild(answer('{}', 404))).toBeNull()
+    expect(await latestBuild((async () => { throw new Error('offline') }) as unknown as typeof fetch)).toBeNull()
   })
 })

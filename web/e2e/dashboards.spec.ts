@@ -1,7 +1,7 @@
 // Phase 4: a dashboard is made and shared; it shows each user what is
 // theirs to see, and follows what happens.
 import { type Page, expect, test } from '@playwright/test'
-import { ENGINES, fits, livestatus, login, send } from './helpers'
+import { ENGINES, fits, goTo, livestatus, login, logout, send } from './helpers'
 
 const sum = async (page: Page, box: string) => {
   const numbers = await page.getByRole('region', { name: box }).locator('.tile strong').allInnerTexts()
@@ -19,7 +19,7 @@ test('a shared dashboard shows each user their own, and follows a result', async
   }
 
   await login(page, 'admin')
-  await page.getByRole('link', { name: 'Dashboards' }).click()
+  await goTo(page, 'Dashboards')
   await page.getByLabel('A new dashboard').fill(title)
   await page.getByRole('button', { name: 'Make it' }).click()
   await expect(page.getByRole('heading', { name: 'Change the dashboard' })).toBeVisible()
@@ -54,11 +54,11 @@ test('a shared dashboard shows each user their own, and follows a result', async
   await expect(page.getByRole('region', { name: 'Unhandled service problems' })).toContainText('passive1')
   await expect(page.getByRole('region', { name: 'Alerts' })).toContainText('broken for the dashboard')
   const url = page.url()
-  await page.getByRole('button', { name: 'Log out' }).click()
+  await logout(page)
 
   // The same dashboard, as ops.
   await login(page, 'ops')
-  await page.getByRole('link', { name: 'Dashboards' }).click()
+  await goTo(page, 'Dashboards')
   await expect(page.locator('.managed li', { hasText: title })).toContainText('by admin')
   await page.goto(url)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
@@ -68,7 +68,7 @@ test('a shared dashboard shows each user their own, and follows a result', async
   await expect(page.getByRole('region', { name: 'Unhandled service problems' })).not.toContainText('passive1')
   await expect(page.getByRole('button', { name: 'Change' })).toHaveCount(0)
   await fits(page)
-  await page.getByRole('button', { name: 'Log out' }).click()
+  await logout(page)
 
   // Its owner deletes it.
   await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine')
@@ -89,7 +89,7 @@ test('a dashboard that is not shared is its owner\'s alone', async ({ page }) =>
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   const url = page.url()
-  await page.getByRole('button', { name: 'Log out' }).click()
+  await logout(page)
   await login(page, 'ops')
   await page.goto(url)
   await expect(page.getByText('There is no such dashboard, or it is not shared.')).toBeVisible()

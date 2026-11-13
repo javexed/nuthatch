@@ -5,7 +5,7 @@ import { readdirSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { ENGINES, fits, livestatus, login, send, sleep } from './helpers'
+import { ENGINES, fits, goTo, livestatus, login, openMore, send, sleep } from './helpers'
 
 const dev = join(dirname(fileURLToPath(import.meta.url)), '../../dev')
 test.setTimeout(180_000)
@@ -32,7 +32,7 @@ for (const engine of ENGINES) {
     await send(engine, `SCHEDULE_HOST_DOWNTIME;lab2;${start};${start + 600};1;0;0;admin;${kept}`)
 
     await login(page, 'admin')
-    await page.getByRole('link', { name: 'Config' }).click()
+    await goTo(page, 'Config')
     await expect(page.getByRole('heading', { name: 'Config' })).toBeVisible()
     await page.locator('select[name=backend]').selectOption(engine)
     await expect(page.getByText(`on ${engine}`)).toBeVisible()
@@ -87,6 +87,7 @@ for (const engine of ENGINES) {
 
 test('the config is not for ops', async ({ page }) => {
   await login(page, 'ops')
+  await openMore(page)
   await expect(page.getByRole('link', { name: 'Config' })).toHaveCount(0)
   await page.goto('/config')
   await expect(page.getByText('you have not the role')).toBeVisible()
