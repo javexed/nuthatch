@@ -11,6 +11,9 @@
 // through the queries, which decide what this user may see. Results that
 // change no state (a new output, a new last check) send nothing; the
 // browser reads those on a timer of its own.
+//
+// A new line in the log counts as a change too (a notification, a
+// command someone sent), so that a page showing the log shows it at once.
 
 import type { Backend } from './backend.ts'
 
@@ -28,7 +31,17 @@ const ENTRIES = 'Stats: max id\nStats: id >= 0'
 
 /** What a backend looks like now, as text to compare with last time. */
 async function fingerprint(backend: Backend): Promise<string> {
-  const requests = ['GET status\nColumns: program_start', `GET hosts\n${OBJECTS}`, `GET services\n${OBJECTS}`, `GET comments\n${ENTRIES}`, `GET downtimes\n${ENTRIES}`]
+  // The log's lines since the hour began: a number that only grows, but
+  // for once an hour.
+  const hour = Math.floor(Date.now() / 3_600_000) * 3600
+  const requests = [
+    'GET status\nColumns: program_start',
+    `GET hosts\n${OBJECTS}`,
+    `GET services\n${OBJECTS}`,
+    `GET comments\n${ENTRIES}`,
+    `GET downtimes\n${ENTRIES}`,
+    `GET log\nFilter: time >= ${hour}\nStats: time >= 0`,
+  ]
   let out = ''
   for (const request of requests) out += JSON.stringify(await backend.query(request))
   return out

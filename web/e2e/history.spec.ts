@@ -121,3 +121,23 @@ test('ops gets no history of what is not its own', async ({ page }) => {
   await expect(page.getByText('Lines about the program itself')).toBeVisible()
   await fits(page)
 })
+
+for (const engine of ENGINES) {
+  test(`a line that is logged shows at once, on ${engine}`, async ({ page }) => {
+    await login(page, 'admin')
+    await page.goto(`/history?lines=notifications&backend=${engine}`)
+    await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
+    // Let the page settle on what is there already.
+    await sleep(3000)
+    // A notification changes no state: only the log tells of it.
+    const mark = `live tail ${engine} ${Date.now()}`
+    await send(engine, `SEND_CUSTOM_HOST_NOTIFICATION;web1;0;admin;${mark}`)
+    // It comes without the page being asked, at the top, marked as just come.
+    const line = page.locator('.events li.fresh').first()
+    await expect(line).toBeVisible({ timeout: 15_000 })
+    await expect(line).toContainText('web1')
+    await expect(line).toContainText('to ')
+    expect(await page.locator('.events li').first().evaluate((li) => li.classList.contains('fresh'))).toBe(true)
+    await fits(page)
+  })
+}

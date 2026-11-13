@@ -14,6 +14,9 @@ const session = useSession()
 
 // "Now" is fixed while the page is narrowed, so that pages do not shift.
 const now = ref(Date.now() / 1000)
+// A range that ends "now" stays open: lines that come while the page is
+// shown are added at the top.
+const OPEN_END = Date.now() / 1000 + 10 * 365 * 86400
 const chosen = computed(() => spanOf(route.query, now.value))
 const lines = computed<Lines>(() => (route.query.lines === 'notifications' || route.query.lines === 'all' ? route.query.lines : 'alerts'))
 const offset = computed(() => Math.max(0, Number(route.query.offset) || 0))
@@ -70,7 +73,7 @@ const custom = (span: Span) => go({ range: undefined, from: String(span.from), t
   </div>
   <EventLog
     :from="chosen.span.from"
-    :to="chosen.span.to"
+    :to="chosen.id === 'custom' ? chosen.span.to : OPEN_END"
     :lines="lines"
     :search="text('q') ?? ''"
     :backend="text('backend')"

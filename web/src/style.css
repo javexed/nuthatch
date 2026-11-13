@@ -347,8 +347,9 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .checking { color: var(--accent); white-space: nowrap; }
 @keyframes flash { from { background-color: color-mix(in srgb, var(--accent) 28%, transparent); } to { background-color: transparent; } }
 tr.flash > td { animation: flash 1.6s ease-out; }
+.events li.fresh { animation: flash 2.5s ease-out; }
 .card.flash { animation: flash 1.6s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   .spinner, .bar .connection.lost .dot { animation-duration: 3s; }
-  tr.flash > td, .card.flash { animation: none; }
+  tr.flash > td, .card.flash, .events li.fresh { animation: none; }
 }

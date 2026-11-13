@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Lines of the engines' logs, the newest first: alerts, notifications
 // and, for those who may see them, everything else.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { dateTime } from '../lib/format'
 import { literal } from '../lib/filters'
 import { stateOf } from '../lib/states'
@@ -54,6 +54,35 @@ const { data, error, loading } = useLoader(() => {
 const rows = computed(() => (data.value?.rows ?? []) as (Record<(typeof COLUMNS)[number], unknown> & { backend: string })[])
 const errors = computed(() => Object.entries(data.value?.errors ?? {}))
 
+// Each line has a key of its own (the same line twice in a second gets a
+// number), so that a new one can be told from those already shown.
+const keyed = computed(() => {
+  const times = new Map<string, number>()
+  return rows.value.map((row) => {
+    const base = `${row.backend}|${String(row.time)}|${String(row.message)}`
+    const n = times.get(base) ?? 0
+    times.set(base, n + 1)
+    return { row, key: `${base}|${n}` }
+  })
+})
+/** Lines that came while the page was open: shown for a moment. */
+const fresh = ref(new Set<string>())
+let asked = true
+watch(() => [props.from, props.to, props.lines, props.search, props.backend, props.host, props.service, props.offset], () => (asked = true))
+watch(keyed, (now, before) => {
+  // Another range or page was asked for: all of it is new, none of it news.
+  if (asked) {
+    asked = before.length === 0 && now.length === 0
+    return
+  }
+  if (props.offset !== 0) return
+  const had = new Set(before.map((line) => line.key))
+  const came = now.filter((line) => !had.has(line.key)).map((line) => line.key)
+  if (came.length === 0 || came.length === now.length) return
+  fresh.value = new Set([...fresh.value, ...came])
+  setTimeout(() => (fresh.value = new Set([...fresh.value].filter((key) => !came.includes(key)))), 2500)
+})
+
 /** What a line says, without the time and the kind it starts with. */
 function rest(row: { message: unknown; type: unknown }): string {
   const message = String(row.message).replace(/^\[\d+\] /, '')
@@ -71,7 +100,7 @@ const title = (text: unknown) => String(text).toLowerCase().replace(/^./, (c) =>
     <p v-for="[name, why] in errors" :key="name" class="error" role="alert"><strong>{{ name }}</strong>: {{ why }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <ol v-if="rows.length > 0" class="events">
-      <li v-for="(row, n) in rows" :key="`${row.backend} ${row.time} ${n}`">
+      <li v-for="{ row, key } in keyed" :key="key" :class="{ fresh: fresh.has(key) }">
         <time>{{ dateTime(Number(row.time)) }}</time>
         <span class="what">
           <span v-if="isState(row) && row.host_name" :class="['badge', stateOf(kindOf(row), row.state).tone]">{{ stateOf(kindOf(row), row.state).label }}</span>
