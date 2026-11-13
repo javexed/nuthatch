@@ -20,11 +20,12 @@ import { ConfigAdmin } from './configadmin.ts'
 import { PathMap } from './nagioscfg.ts'
 import { Events } from './events.ts'
 import { RolesConfig } from './policy.ts'
+import { Pusher } from './push.ts'
 import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'roles', 'backend', 'peer', 'app_origins']
+const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'push', 'roles', 'backend', 'peer', 'app_origins']
 
 function fail(message: string): never {
   console.error(message)
@@ -182,9 +183,22 @@ function main(): void {
   const storePath = text(config, 'store') ?? fail(`${path}: give store, the file nuthatch keeps sessions and its audit log in`)
   const webRoot = text(config, 'web_root')
 
+  const store = new Store(storePath)
+  // [push]: notifications to browsers, through their push services.
+  let pusher: Pusher | undefined
+  if (config.push !== undefined) {
+    const { subject, ...rest } = (typeof config.push === 'object' && config.push !== null ? config.push : {}) as Record<string, unknown>
+    if (Object.keys(rest).length > 0) fail(`${path}: [push] has no setting ${Object.keys(rest).join(', ')}`)
+    if (typeof subject !== 'string' || !/^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/.test(subject)) {
+      fail(`${path}: [push] needs subject = "mailto:..." or "https://...": whom a push service may reach about this server`)
+    }
+    pusher = new Pusher(store, subject, backends)
+  }
+
   const app = buildApp({
     backends,
-    store: new Store(storePath),
+    store,
+    pusher,
     events: new Events(backends),
     roles,
     limiter: new Limiter(),

@@ -17,6 +17,7 @@ export const router = createRouter({
     { path: '/dashboards', name: 'dashboards', component: () => import('./views/Dashboards.vue') },
     { path: '/dashboard/:id', name: 'dashboard', component: () => import('./views/DashboardView.vue'), props: true },
     { path: '/config', name: 'config', component: () => import('./views/Config.vue') },
+    { path: '/device', name: 'device', component: () => import('./views/Device.vue') },
     { path: '/host/:backend/:host', name: 'host', component: () => import('./views/Detail.vue'), props: true },
     { path: '/service/:backend/:host/:service', name: 'service', component: () => import('./views/Detail.vue'), props: true },
     { path: '/:rest(.*)*', redirect: '/' },

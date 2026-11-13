@@ -33,3 +33,39 @@ self.addEventListener('fetch', (event) => {
     }),
   )
 })
+
+// A notification pushed by the server (server/src/push.ts): shown, and a
+// tap opens the host or service it is about.
+self.addEventListener('push', (event) => {
+  let message = {}
+  try {
+    message = event.data ? event.data.json() : {}
+  } catch {
+    // Not ours.
+  }
+  const title = typeof message.title === 'string' ? message.title : 'nuthatch'
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: typeof message.body === 'string' ? message.body : '',
+      tag: typeof message.tag === 'string' ? message.tag : undefined,
+      renotify: typeof message.tag === 'string',
+      icon: 'icon-192.png',
+      badge: 'icon-192.png',
+      data: { url: typeof message.url === 'string' ? message.url : '' },
+    }),
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  // Only ever a page of this interface.
+  const target = new URL(String(event.notification.data?.url ?? '').replace(/^\/+/, ''), self.registration.scope)
+  if (target.origin !== self.location.origin) return
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => w.url.startsWith(self.registration.scope))
+      if (open) return open.focus().then((w) => (w && 'navigate' in w ? w.navigate(target.href) : undefined))
+      return self.clients.openWindow(target.href)
+    }),
+  )
+})

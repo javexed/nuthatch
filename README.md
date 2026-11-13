@@ -151,6 +151,8 @@ here and in the Android app, are made from `docs/logo.svg` by
 - `[[peer]]`, and `nuthatch = "https://..."` under a backend: see
   [docs/sites.md](docs/sites.md).
 - `app_origins`: see [mobile/README.md](mobile/README.md).
+- `[push]`: notifications on phones and desktops, see
+  [docs/notifications.md](docs/notifications.md).
 
 ## Dependencies
 

@@ -48,6 +48,7 @@ const MORE = computed(() => [
   { name: 'history', label: 'History' },
   { name: 'availability', label: 'Availability' },
   ...(session.session && session.session.config_backends.length > 0 ? [{ name: 'config', label: 'Config' }] : []),
+  { name: 'device', label: 'This device' },
 ])
 const logo = `${import.meta.env.BASE_URL}favicon.svg`
 </script>
@@ -59,7 +60,7 @@ const logo = `${import.meta.env.BASE_URL}favicon.svg`
       <RouterLink v-for="page in PAGES" :key="page.name" :to="{ name: page.name }">{{ page.label }}</RouterLink>
       <RouterLink v-if="session.session.config_backends.length > 0" :to="{ name: 'config' }">Config</RouterLink>
     </nav>
-    <span class="who">{{ session.session.user }}</span>
+    <RouterLink :to="{ name: 'device' }" class="who" title="This device: notifications">{{ session.session.user }}</RouterLink>
     <button v-if="!session.session.by_tailnet" type="button" class="plain logout" @click="logout">Log out</button>
   </header>
   <div v-if="updateReady" class="update" role="status">

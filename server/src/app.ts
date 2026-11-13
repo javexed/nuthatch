@@ -15,7 +15,9 @@ import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
 import { checkDraft, fromRow } from './dashboards.ts'
 import { discover } from './discover.ts'
 import type { Events } from './events.ts'
+import type { Pusher } from './push.ts'
 import { ROLES, Refused, type Roles, type RolesConfig, TABLES, checkHeaders } from './policy.ts'
+import { checkSubscription } from './webpush.ts'
 import { Forbidden, combine, combineStats, rows, stats } from './query.ts'
 import { RemoteError, type RemoteSite } from './remote.ts'
 import { type Store, now } from './store.ts'
@@ -41,6 +43,8 @@ export interface Deps {
    * behind it (main.ts sees to that).
    */
   tailscaleUsers?: Map<string, string>
+  /** Notifications pushed to browsers; without it, nobody can subscribe. */
+  pusher?: Pusher
   /** Mark the session's cookie `Secure`: a proxy in front does TLS. */
   cookieSecure: boolean
   /** The built interface. */
@@ -601,6 +605,51 @@ export function buildApp(deps: Deps): Hono<Env> {
       if (!dryRun) deps.store.audit(user, backend, 'config refused', `${what}: ${err instanceof Error ? err.message : String(err)}`)
       throw err
     }
+  })
+
+  // Notifications pushed to this user's browsers.
+  app.get('/api/v1/push', (c) => {
+    const { user } = c.get('identity')
+    if (!deps.pusher) return c.json({ enabled: false, devices: [] })
+    return c.json({
+      enabled: true,
+      key: deps.pusher.keys.publicKey,
+      devices: deps.store.pushOf(user).map((row) => ({ name: row.name, created: row.created, endpoint: row.endpoint })),
+    })
+  })
+
+  app.post('/api/v1/push', async (c) => {
+    const { user } = c.get('identity')
+    if (!deps.pusher) throw new Refused('notifications are not set up on this server ([push] in its config)')
+    const sent = await body(c)
+    let subscription
+    try {
+      subscription = checkSubscription(sent.subscription)
+    } catch (err) {
+      throw new Refused(err instanceof Error ? err.message : String(err))
+    }
+    // eslint-disable-next-line no-control-regex
+    const name = (typeof sent.name === 'string' ? sent.name : '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 64) || 'a browser'
+    if (deps.store.pushOf(user).length >= 20 && !deps.store.pushOf(user).some((row) => row.endpoint === subscription.endpoint)) {
+      throw new Refused('twenty browsers are subscribed already; take one out first')
+    }
+    deps.store.addPush(user, subscription, name)
+    deps.store.audit(user, '', 'push subscribed', name)
+    return c.json({})
+  })
+
+  app.post('/api/v1/push/remove', async (c) => {
+    const { user } = c.get('identity')
+    const { endpoint } = await body(c)
+    if (typeof endpoint !== 'string' || !deps.store.removePush(endpoint, user)) throw new Refused('no such subscription')
+    return c.json({})
+  })
+
+  app.post('/api/v1/push/test', async (c) => {
+    const { user } = c.get('identity')
+    if (!deps.pusher) throw new Refused('notifications are not set up on this server')
+    const counts = await deps.pusher.toUser(user, { title: 'nuthatch', body: 'Notifications reach this device.', url: '', tag: 'nuthatch-test' }, false)
+    return c.json(counts)
   })
 
   // Looking at a host before adding it: from where its engine runs, so a

@@ -218,3 +218,12 @@ export interface Dashboard {
 
 /** A dashboard to make or to change. */
 export type DashboardDraft = Pick<Dashboard, 'title' | 'shared' | 'widgets'>
+
+/** Notifications pushed to this user's browsers. */
+export interface PushState {
+  /** Whether the server is set up to push at all. */
+  enabled: boolean
+  /** The server's public key, which a browser subscribes with. */
+  key?: string
+  devices: { name: string; created: number; endpoint: string }[]
+}

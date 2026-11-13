@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, Token } from './types.ts'
 
 export class ApiError extends Error {
   readonly status: number
@@ -161,6 +161,24 @@ export class Client {
 
   deleteDashboard(id: number): Promise<void> {
     return this.call('DELETE', `/api/v1/dashboards/${id}`)
+  }
+
+  push(): Promise<PushState> {
+    return this.call('GET', '/api/v1/push')
+  }
+
+  /** Subscribes a browser, as its PushSubscription's toJSON() gives it. */
+  subscribePush(subscription: unknown, name: string): Promise<void> {
+    return this.call('POST', '/api/v1/push', { subscription, name })
+  }
+
+  removePush(endpoint: string): Promise<void> {
+    return this.call('POST', '/api/v1/push/remove', { endpoint })
+  }
+
+  /** Sends a test notification to all of this user's browsers. */
+  testPush(): Promise<{ sent: number; gone: number; failed: number }> {
+    return this.call('POST', '/api/v1/push/test', {})
   }
 
   /** Looks at a host before it is added: its ports, and the checks suggested. */

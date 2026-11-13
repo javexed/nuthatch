@@ -10,6 +10,10 @@ htpasswd = "dev/run/htpasswd"
 
 # admin may do everything. Everyone in the contact group admins sees all
 # hosts and services; viewer, who is in it, may change nothing.
+# Notifications pushed to browsers (docs/notifications.md).
+[push]
+subject = "mailto:ops@example.test"
+
 [roles]
 authorized_contactgroup_for_all_hosts = ["admins"]
 authorized_for_all_host_commands = ["admin"]

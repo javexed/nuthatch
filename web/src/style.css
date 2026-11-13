@@ -327,3 +327,12 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .new-dashboard { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin-top: 1rem; }
 .dashboard-form { display: grid; gap: 0.8rem; }
 .add-box { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; }
+
+/* This device (Device.vue). */
+.bar a.who { text-decoration: none; }
+.bar a.who:hover { text-decoration: underline; }
+.device { display: grid; gap: 0.6rem; }
+.device p { margin: 0; }
+.devices { list-style: none; margin: 0; padding: 0; display: grid; }
+.devices li { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+.devices li:last-child { border-bottom: 0; }

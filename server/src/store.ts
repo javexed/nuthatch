@@ -47,6 +47,15 @@ export interface DashboardRow {
   updated: number
 }
 
+export interface PushRow {
+  endpoint: string
+  user: string
+  p256dh: string
+  auth: string
+  name: string
+  created: number
+}
+
 export interface AuditRow {
   time: number
   user: string
@@ -78,7 +87,11 @@ export class Store {
       CREATE INDEX IF NOT EXISTS audit_time ON audit (time);
       CREATE TABLE IF NOT EXISTS dashboards (
         id INTEGER PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
-        shared INTEGER NOT NULL, widgets TEXT NOT NULL, updated INTEGER NOT NULL);`)
+        shared INTEGER NOT NULL, widgets TEXT NOT NULL, updated INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS push (
+        endpoint TEXT PRIMARY KEY, user TEXT NOT NULL, p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS push_user ON push (user);`)
   }
 
   /** Starts a session. The answer is the cookie's secret and the session. */
@@ -140,6 +153,32 @@ export class Store {
     this.db
       .prepare('INSERT INTO prefs (user, key, value) VALUES (?, ?, ?) ON CONFLICT (user, key) DO UPDATE SET value = excluded.value')
       .run(user, key, value)
+  }
+
+  /** A browser to push notifications to; one that was another user's becomes this one's. */
+  addPush(user: string, sub: { endpoint: string; p256dh: string; auth: string }, name: string): void {
+    this.db
+      .prepare(
+        'INSERT INTO push (endpoint, user, p256dh, auth, name, created) VALUES (?, ?, ?, ?, ?, ?) ' +
+          'ON CONFLICT (endpoint) DO UPDATE SET user = excluded.user, p256dh = excluded.p256dh, auth = excluded.auth, name = excluded.name',
+      )
+      .run(sub.endpoint, user, sub.p256dh, sub.auth, name, now())
+  }
+
+  /** Forgets a browser: a user's own, or, without a user, whoever's. */
+  removePush(endpoint: string, user?: string): boolean {
+    return user === undefined
+      ? this.db.prepare('DELETE FROM push WHERE endpoint = ?').run(endpoint).changes > 0
+      : this.db.prepare('DELETE FROM push WHERE endpoint = ? AND user = ?').run(endpoint, user).changes > 0
+  }
+
+  pushOf(user: string): PushRow[] {
+    return this.db.prepare('SELECT endpoint, user, p256dh, auth, name, created FROM push WHERE user = ? ORDER BY created').all(user) as unknown as PushRow[]
+  }
+
+  /** Whether anyone is to be pushed to at all. */
+  anyPush(): boolean {
+    return this.db.prepare('SELECT 1 FROM push LIMIT 1').get() !== undefined
   }
 
   /** A user's own dashboards and the shared ones, by title. */

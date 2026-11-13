@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createDecipheriv, createECDH, createHash, hkdfSync, randomBytes, verify as cryptoVerify } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,9 +18,11 @@ import { discover, hostName, parseTarget, suggest } from './discover.ts'
 import { Events } from './events.ts'
 import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagioscfg.ts'
 import { RolesConfig, access, checkColumns, checkHeaders } from './policy.ts'
+import { Pusher, messageOf, parseNotice } from './push.ts'
 import { compare, limits, merge, rows, stats } from './query.ts'
 import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
+import { checkSubscription, encrypt, newServerKeys, publicKeyOf, vapid } from './webpush.ts'
 
 const roles = (...held: Role[]) => new Set<Role>(held)
 
@@ -671,5 +673,146 @@ describe('looking at a host before adding it', () => {
     // No host may take the file's name.
     const choices = { commands: ['nuthatch_ssh'], contacts: [], contactgroups: [], hostgroups: [], servicegroups: [] }
     expect(() => checkHost({ name: 'nuthatch-commands', address: 'x.test', use: 'generic-host' }, choices, { host: ['generic-host'], service: [] })).toThrow(/nuthatch's own file/)
+  })
+})
+
+describe('notifications pushed to browsers', () => {
+  /** A browser's side of a subscription, and how it opens a message. */
+  function browser(endpoint = 'https://fcm.googleapis.com/fcm/send/abc') {
+    const ecdh = createECDH('prime256v1')
+    ecdh.generateKeys()
+    const auth = randomBytes(16)
+    const subscription = { endpoint, keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: auth.toString('base64url') } }
+    const open = (body: Buffer): string => {
+      const salt = body.subarray(0, 16)
+      const idLength = body.readUInt8(20)
+      const theirs = body.subarray(21, 21 + idLength)
+      const ikm = Buffer.from(hkdfSync('sha256', ecdh.computeSecret(theirs), auth, Buffer.concat([Buffer.from('WebPush: info\0'), ecdh.getPublicKey(), theirs]), 32))
+      const key = Buffer.from(hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16))
+      const nonce = Buffer.from(hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12))
+      const sealed = body.subarray(21 + idLength)
+      const decipher = createDecipheriv('aes-128-gcm', key, nonce)
+      decipher.setAuthTag(sealed.subarray(sealed.length - 16))
+      const plain = Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - 16)), decipher.final()])
+      expect(plain[plain.length - 1]).toBe(2)
+      return plain.subarray(0, plain.length - 1).toString()
+    }
+    return { subscription, open }
+  }
+
+  it('encrypts so that only the browser reads it, and signs as this server', () => {
+    const { subscription, open } = browser()
+    const checked = checkSubscription(subscription)
+    const body = encrypt(checked, 'web1 is DOWN — ünïcode')
+    expect(body.readUInt32BE(16)).toBe(4096)
+    expect(open(body)).toBe('web1 is DOWN — ünïcode')
+    expect(body.includes(Buffer.from('web1'))).toBe(false)
+
+    const keys = newServerKeys()
+    expect(Buffer.from(keys.publicKey, 'base64url')).toHaveLength(65)
+    const header = vapid(checked.endpoint, keys, 'mailto:ops@example.test', 1_700_000_000_000)
+    const [, token = '', key = ''] = header.match(/^vapid t=([^,]+), k=(.+)$/) ?? []
+    expect(key).toBe(keys.publicKey)
+    const [head = '', claims = '', signature = ''] = token.split('.')
+    expect(JSON.parse(Buffer.from(claims, 'base64url').toString())).toEqual({ aud: 'https://fcm.googleapis.com', exp: 1_700_000_000 + 12 * 3600, sub: 'mailto:ops@example.test' })
+    expect(cryptoVerify('sha256', Buffer.from(`${head}.${claims}`), { key: publicKeyOf(keys), dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url'))).toBe(true)
+  })
+
+  it('sends only to the push services of browsers', () => {
+    const { subscription } = browser()
+    for (const endpoint of ['https://web.push.apple.com/abc', 'https://updates.push.services.mozilla.com/wpush/v2/abc', 'https://db5p.notify.windows.com/w/?token=abc']) {
+      expect(checkSubscription({ ...subscription, endpoint }).endpoint).toBe(endpoint)
+    }
+    for (const endpoint of ['http://fcm.googleapis.com/x', 'https://fcm.googleapis.com.example.test/x', 'https://127.0.0.1/x', 'https://fcm.googleapis.com:8443/x', 'https://u@fcm.googleapis.com/x', 'nonsense']) {
+      expect(() => checkSubscription({ ...subscription, endpoint })).toThrow()
+    }
+    expect(() => checkSubscription({ endpoint: subscription.endpoint, keys: { p256dh: 'short', auth: subscription.keys.auth } })).toThrow(/keys/)
+  })
+
+  it('reads the notifications of a log, and nothing else', () => {
+    expect(parseNotice('SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-by-mail;Connection refused; really')).toEqual({ contact: 'ann', host: 'web1', service: 'http', state: 'CRITICAL', output: 'Connection refused' })
+    expect(parseNotice('HOST NOTIFICATION: ann;web1;DOWN;notify-host;PING CRITICAL')).toEqual({ contact: 'ann', host: 'web1', service: '', state: 'DOWN', output: 'PING CRITICAL' })
+    expect(parseNotice('SERVICE NOTIFICATION: ann;web1;http;ACKNOWLEDGEMENT (CRITICAL);n;out;bob;on it')?.state).toBe('ACKNOWLEDGEMENT (CRITICAL)')
+    expect(parseNotice('SERVICE ALERT: web1;http;CRITICAL;HARD;3;x')).toBeNull()
+    expect(parseNotice('HOST NOTIFICATION: ;web1;DOWN;n;x')).toBeNull()
+    expect(messageOf('site a', { contact: 'ann', host: 'web1', service: 'disk /', state: 'WARNING', output: 'x' })).toEqual({
+      title: 'web1 / disk / is WARNING',
+      body: 'x',
+      url: 'service/site%20a/web1/disk%20%2F',
+      tag: 'site a/web1/disk /',
+    })
+  })
+
+  it('passes on what the engine told a contact, once, to that user alone', async () => {
+    const ann = browser('https://fcm.googleapis.com/fcm/send/ann')
+    const bob = browser('https://fcm.googleapis.com/fcm/send/bob')
+    const gone = browser('https://fcm.googleapis.com/fcm/send/gone')
+    const store = new Store(':memory:')
+    store.addPush('ann', checkSubscription(ann.subscription), 'phone')
+    store.addPush('ann', checkSubscription(gone.subscription), 'old phone')
+    store.addPush('bob', checkSubscription(bob.subscription), 'laptop')
+    const got: { to: string; text: string; urgency: string | null }[] = []
+    const service = (async (input: string | URL | Request, init?: RequestInit) => {
+      const to = String(input).split('/').pop() ?? ''
+      if (to === 'gone') return new Response('', { status: 410 })
+      const open = to === 'ann' ? ann.open : bob.open
+      got.push({ to, text: open(Buffer.from(init?.body as Uint8Array)), urgency: new Headers(init?.headers).get('Urgency') })
+      return new Response('', { status: 201 })
+    }) as typeof fetch
+    let log: [number, string][] = [
+      [100, 'SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-desktop;refused'],
+      [100, 'SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-mail;refused'],
+      [100, 'HOST NOTIFICATION: nobody;web1;DOWN;n;x'],
+    ]
+    const backend = fake('site', (request) => (request.startsWith('GET log') ? log : []))
+    const pusher = new Pusher(store, 'mailto:ops@example.test', [backend], 0, service)
+    // The keys are kept, so browsers stay subscribed over a restart.
+    expect(new Pusher(store, 'mailto:ops@example.test', [], 0, service).keys).toEqual(pusher.keys)
+
+    const seen = new Set<string>()
+    let since = await pusher.pass(backend, 90, seen)
+    await new Promise((done) => setTimeout(done, 50))
+    expect(since).toBe(100)
+    expect(backend.asked.at(-1)).toContain('Filter: time >= 90')
+    expect(got).toHaveLength(1)
+    expect(got[0]).toMatchObject({ to: 'ann', urgency: 'high' })
+    expect(JSON.parse(got[0]?.text ?? '{}')).toEqual({ title: 'web1 / http is CRITICAL', body: 'refused', url: 'service/site/web1/http', tag: 'site/web1/http' })
+    // The browser that is gone is forgotten.
+    expect(store.pushOf('ann').map((row) => row.name)).toEqual(['phone'])
+
+    // Asked again, the same second comes back and is not sent twice; what is new is.
+    log = [...log, [103, 'SERVICE NOTIFICATION: bob;web1;http;OK;n;fine again']]
+    since = await pusher.pass(backend, since, seen)
+    await new Promise((done) => setTimeout(done, 50))
+    expect(since).toBe(103)
+    expect(got.map((g) => [g.to, g.urgency])).toEqual([['ann', 'high'], ['bob', 'normal']])
+    expect(seen.size).toBe(1)
+  })
+
+  it('lets a user subscribe a browser, and take it out', async () => {
+    const store = new Store(':memory:')
+    const sent: string[] = []
+    const pusher = new Pusher(store, 'mailto:ops@example.test', [], 0, (async (input: string | URL | Request) => {
+      sent.push(String(input))
+      return new Response('', { status: 201 })
+    }) as typeof fetch)
+    const make = (withPusher: boolean) =>
+      buildApp({ backends: [], store, events: new Events([]), roles: new RolesConfig({}), limiter: new Limiter(), cookieSecure: false, pusher: withPusher ? pusher : undefined })
+    const headers = { Authorization: `Bearer ${store.newToken('ann', 't').token}`, 'Content-Type': 'application/json' }
+    const call = (app: ReturnType<typeof make>, method: string, path: string, body?: unknown) => app.request(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+    const { subscription } = browser()
+
+    expect(await (await call(make(false), 'GET', '/api/v1/push')).json()).toEqual({ enabled: false, devices: [] })
+    expect((await call(make(false), 'POST', '/api/v1/push', { subscription })).status).toBe(400)
+
+    const app = make(true)
+    expect((await call(app, 'POST', '/api/v1/push', { subscription: { ...subscription, endpoint: 'https://evil.example.test/x' } })).status).toBe(400)
+    expect((await call(app, 'POST', '/api/v1/push', { subscription, name: 'my phone' })).status).toBe(200)
+    const state = (await (await call(app, 'GET', '/api/v1/push')).json()) as { enabled: boolean; key: string; devices: { name: string; endpoint: string }[] }
+    expect(state).toMatchObject({ enabled: true, key: pusher.keys.publicKey, devices: [{ name: 'my phone', endpoint: subscription.endpoint }] })
+    expect(await (await call(app, 'POST', '/api/v1/push/test')).json()).toEqual({ sent: 1, gone: 0, failed: 0 })
+    expect(sent).toEqual([subscription.endpoint])
+    expect((await call(app, 'POST', '/api/v1/push/remove', { endpoint: subscription.endpoint })).status).toBe(200)
+    expect(store.pushOf('ann')).toHaveLength(0)
   })
 })
