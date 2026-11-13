@@ -30,11 +30,12 @@ const PAGES = [
   { name: 'history', label: 'History' },
   { name: 'availability', label: 'Availability' },
 ]
+const logo = `${import.meta.env.BASE_URL}favicon.svg`
 </script>
 
 <template>
   <header v-if="session.session" class="bar">
-    <RouterLink to="/" class="name">nuthatch</RouterLink>
+    <RouterLink to="/" class="name"><img :src="logo" alt="" width="28" height="28" />nuthatch</RouterLink>
     <nav class="pages" aria-label="Pages">
       <RouterLink v-for="page in PAGES" :key="page.name" :to="{ name: page.name }">{{ page.label }}</RouterLink>
       <RouterLink v-if="session.session.config_backends.length > 0" :to="{ name: 'config' }">Config</RouterLink>

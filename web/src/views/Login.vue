@@ -27,11 +27,12 @@ async function submit() {
     busy.value = false
   }
 }
+const logo = `${import.meta.env.BASE_URL}favicon.svg`
 </script>
 
 <template>
   <form class="login card" @submit.prevent="submit">
-    <h1>nuthatch</h1>
+    <h1><img :src="logo" alt="" width="72" height="72" />nuthatch</h1>
     <label v-if="APP">
       Server
       <input v-model="server" name="server" inputmode="url" autocapitalize="none" autocomplete="url" placeholder="monitoring.example.org" required />

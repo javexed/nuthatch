@@ -40,7 +40,8 @@ p { margin: 0.5rem 0; }
 
 /* The bar on top: on a narrow screen the pages go on a line of their own. */
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; padding: 0.6rem 1rem; background: var(--card); border-bottom: 1px solid var(--line); }
-.bar .name { font-weight: 700; color: var(--text); text-decoration: none; }
+.bar .name { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700; color: var(--text); text-decoration: none; }
+.bar .name img { display: block; }
 .bar .pages { display: flex; gap: 0.25rem; flex: 1; overflow-x: auto; }
 .bar .pages a { padding: 0.35rem 0.6rem; border-radius: 0.4rem; text-decoration: none; color: var(--muted); white-space: nowrap; }
 .bar .pages a.router-link-active { color: var(--text); background: var(--bg); font-weight: 600; }
@@ -51,7 +52,7 @@ p { margin: 0.5rem 0; }
 
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 0.6rem; padding: 1rem; margin-bottom: 1rem; }
 .login { max-width: 22rem; margin: 12vh auto 0; display: grid; gap: 0.9rem; }
-.login h1 { margin: 0; }
+.login h1 { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
 label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.9rem; }
 label.check { display: flex; gap: 0.5rem; align-items: baseline; color: var(--text); }
 input, textarea { font: inherit; padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius: 0.4rem; background: var(--bg); color: var(--text); max-width: 100%; }

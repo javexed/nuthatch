@@ -1,0 +1,18 @@
+# nuthatch as a systemd user service, without root.
+# Config in ~/.config/nuthatch; runs from the repository in ~/nuthatch
+# (pnpm install && pnpm build there to update it).
+[Unit]
+Description=nuthatch web interface (user service)
+After=checkd.service
+Wants=checkd.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nuthatch
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/src/main.ts %h/.config/nuthatch/nuthatch.toml
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

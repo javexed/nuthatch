@@ -1,0 +1,68 @@
+#!/bin/sh
+# Makes every icon and splash screen from docs/logo.svg: the web app's
+# (web/public) and the Android app's launcher icons and splash screens.
+# Run again after changing the logo. Needs rsvg-convert and ImageMagick.
+set -eu
+top=$(cd "$(dirname "$0")/.." && pwd)
+logo=$top/docs/logo.svg
+bg='#f3efe6'          # the icons' background, a warm off-white
+res=$top/mobile/android/app/src/main/res
+public=$top/web/public
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# render SIZE OUT: the logo alone, transparent, SIZE pixels square.
+render() { rsvg-convert -w "$1" -h "$1" "$logo" -o "$2"; }
+
+# on_square SIZE SHARE OUT [round]: the logo at SHARE of SIZE, centred on
+# the background, square or (round) a circle.
+on_square() {
+    inner=$(( $1 * $2 / 100 ))
+    render "$inner" "$tmp/inner.png"
+    magick -size "$1x$1" "xc:$bg" "$tmp/inner.png" -gravity center -composite "$tmp/sq.png"
+    if [ "${4:-}" = round ]; then
+        magick "$tmp/sq.png" \( -size "$1x$1" xc:none -fill white -draw "circle $(( $1 / 2 )),$(( $1 / 2 )) $(( $1 / 2 )),0" \) \
+            -compose DstIn -composite "$3"
+    else
+        cp "$tmp/sq.png" "$3"
+    fi
+}
+
+# Web: the SVG itself for browsers, PNGs for home screens.
+mkdir -p "$public"
+cp "$logo" "$public/favicon.svg"
+on_square 180 82 "$public/apple-touch-icon.png"
+on_square 192 82 "$public/icon-192.png"
+on_square 512 82 "$public/icon-512.png"
+# Maskable: the platform crops to a shape, so the logo keeps to the
+# middle 60 per cent.
+on_square 512 60 "$public/icon-maskable-512.png"
+
+# Android launcher icons: legacy square and round, and the adaptive
+# icon's foreground (108 dp, of which the middle 66 dp is always shown).
+for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+    dens=${d%:*}; size=${d#*:}
+    on_square "$size" 80 "$res/mipmap-$dens/ic_launcher.png"
+    on_square "$size" 80 "$res/mipmap-$dens/ic_launcher_round.png" round
+    fg=$(( size * 108 / 48 ))
+    inner=$(( fg * 58 / 100 ))
+    render "$inner" "$tmp/fg.png"
+    magick -size "${fg}x${fg}" xc:none "$tmp/fg.png" -gravity center -composite "$res/mipmap-$dens/ic_launcher_foreground.png"
+done
+cat > "$res/values/ic_launcher_background.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">$bg</color>
+</resources>
+EOF
+
+# Splash screens: the logo at 40 per cent of the shorter side, centred,
+# at each size the project already has.
+for f in "$res"/drawable*/splash.png; do
+    geom=$(magick identify -format '%w %h' "$f")
+    w=${geom% *}; h=${geom#* }
+    short=$(( w < h ? w : h ))
+    render $(( short * 40 / 100 )) "$tmp/splash.png"
+    magick -size "${w}x${h}" "xc:$bg" "$tmp/splash.png" -gravity center -composite "$f"
+done
+echo "icons made from $logo"

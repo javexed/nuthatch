@@ -59,8 +59,24 @@ Then open <http://127.0.0.1:8080>.
 `contrib/systemd/nuthatch.service`: the repository at `/opt/nuthatch`
 after `pnpm install && pnpm build`, Node 22 or later, a user `nuthatch`
 that may read the engine's Livestatus socket, and the config at
-`/etc/nuthatch/nuthatch.toml`. It passes `systemd-analyze verify`; not
-yet tried on a machine of its own.
+`/etc/nuthatch/nuthatch.toml`. It passes `systemd-analyze verify`.
+
+Without root, beside a checkd that runs as a user service:
+`contrib/systemd/nuthatch-user.service` in `~/.config/systemd/user/`,
+the repository in `~/nuthatch`, the config in
+`~/.config/nuthatch/nuthatch.toml`, listening on `127.0.0.1` with
+`behind_proxy = true`. To reach it over a tailnet with HTTPS:
+
+    tailscale serve --bg --https=10443 http://127.0.0.1:7780
+
+## As an app on a phone or desktop (PWA)
+
+Served over HTTPS, nuthatch can be installed from the browser: Chrome's
+"Install app" or "Add to home screen", Safari's "Add to Home Screen".
+`web/public` holds the manifest, the icons and a service worker that
+keeps only the interface's own files, never monitoring data. The icons,
+here and in the Android app, are made from `docs/logo.svg` by
+`mobile/make-icons`.
 
 ## The config file
 
