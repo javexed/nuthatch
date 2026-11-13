@@ -517,6 +517,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 502)
     }
     deps.store.audit(user, backend.name, 'command', peer ? `${checked.line} (through ${peer.name})` : checked.line)
+    if (/^SCHEDULE_(FORCED_)?(HOST|SVC|HOST_SVC)_CHECKS?$/.test(sent.command)) deps.events.expectCheck(backend.name)
     return c.json({ sent: checked.line })
   })
 

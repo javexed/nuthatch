@@ -71,6 +71,16 @@ the repository in `~/nuthatch`, the config in
 
 or, to sign in by Tailscale, on a socket (below).
 
+## As it happens
+
+A page shows a change of state when the engine has it: nuthatch asks the
+engine to answer when something changes (Livestatus `WaitTrigger`), which
+Naemon and checkd both do, and tells the open pages, which then ask for
+what they show. After someone asked for a check, its result is shown the
+same way even when it changes nothing. An engine that does not wait is
+asked every two seconds, as is each one anyway, for what it does not
+count as a change of state.
+
 ## On a phone
 
 On a narrow screen the pages are in a bar at the bottom. On a touch

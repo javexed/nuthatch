@@ -896,3 +896,78 @@ describe('a short history for graphs', () => {
     expect(await (await get(make(false), 'ann', 'db1')).json()).toEqual({ enabled: false, series: [] })
   })
 })
+
+describe('events', () => {
+  /** A backend whose one sum is `state.n`, and whose waits end when `wake` is called. */
+  function waiting(supported = true) {
+    const state = { n: 0 }
+    const waits: string[] = []
+    let wake: (() => void) | undefined
+    const backend: Backend = {
+      ...fake('site', () => [[state.n]]),
+      wait: (trigger, ms) => {
+        waits.push(trigger)
+        if (!supported) return Promise.resolve('unsupported')
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => resolve('quiet'), ms)
+          wake = () => {
+            clearTimeout(timer)
+            resolve('woken')
+          }
+        })
+      },
+    }
+    return { backend, state, waits, wake: () => wake?.() }
+  }
+  const until = async (met: () => boolean) => {
+    for (let n = 0; n < 200 && !met(); n++) await new Promise((r) => setTimeout(r, 10))
+    expect(met()).toBe(true)
+  }
+
+  it('tell of a change as soon as the engine says there is one', async () => {
+    const { backend, state, waits, wake } = waiting()
+    // Asked every minute: only a wake can bring the news in time.
+    const events = new Events([backend], 60_000)
+    const got: string[] = []
+    const stop = events.listen((event) => got.push(event))
+    // The first round only learns what the backend looks like.
+    await until(() => waits.length === 1)
+    wake()
+    await until(() => waits.length === 2)
+    state.n = 1
+    wake()
+    await until(() => got.length === 1)
+    expect(got).toEqual(['changed'])
+    expect(waits.every((w) => w === 'state')).toBe(true)
+    stop()
+  })
+
+  it('tell of a result that changes nothing, after a check was asked for', async () => {
+    const { backend, waits, wake } = waiting()
+    const events = new Events([backend], 60_000)
+    const got: string[] = []
+    const stop = events.listen((event) => got.push(event))
+    await until(() => waits.length === 1)
+    events.expectCheck('site')
+    wake()
+    await until(() => waits.length === 2)
+    expect(got).toEqual([])
+    expect(waits[1]).toBe('check')
+    wake()
+    await until(() => got.length === 1)
+    stop()
+  })
+
+  it('ask at their pace an engine that does not wait', async () => {
+    const { backend, state, waits } = waiting(false)
+    const events = new Events([backend], 30)
+    const got: string[] = []
+    const stop = events.listen((event) => got.push(event))
+    await until(() => waits.length >= 2)
+    state.n = 1
+    await until(() => got.length === 1)
+    // Not in a loop as fast as it can go.
+    expect(waits.length).toBeLessThan(40)
+    stop()
+  })
+})

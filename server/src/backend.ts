@@ -17,7 +17,19 @@ export interface Backend {
    * asked counts as one that does not.
    */
   enforcesAuth(): Promise<boolean>
+  /**
+   * Comes back when a state changed (`state`) or a check's result came in
+   * (`check`), or after `ms`: `woken` or `quiet`. `unsupported` at once
+   * from an engine that does not wait. Absent where nothing can be waited
+   * for.
+   */
+  wait?(trigger: 'state' | 'check', ms: number): Promise<Waited>
 }
+
+export type Waited = 'woken' | 'quiet' | 'unsupported'
+
+/** How long the question of whether an engine waits takes one that does. */
+const WAIT_PROBE = 300
 
 const PROBE_EVERY = 60_000
 
@@ -25,6 +37,7 @@ export class LivestatusBackend implements Backend {
   readonly name: string
   private readonly path: string
   private probed: { answer: boolean; at: number } | null = null
+  private waits: { answer: boolean; at: number } | null = null
 
   constructor(name: string, address: string) {
     this.name = name
@@ -53,6 +66,28 @@ export class LivestatusBackend implements Backend {
     } catch {
       return false
     }
+  }
+
+  /**
+   * Livestatus can hold an answer back until something happens
+   * (`WaitTrigger`, `WaitTimeout`). Whether this engine does is seen by
+   * waiting for what never happens while it runs: one that answers
+   * before the time is up does not wait.
+   */
+  private async canWait(): Promise<boolean> {
+    if (this.waits && Date.now() - this.waits.at < PROBE_EVERY) return this.waits.answer
+    const started = Date.now()
+    await this.query(`GET status\nColumns: program_start\nWaitTrigger: program\nWaitTimeout: ${WAIT_PROBE}`)
+    const answer = Date.now() - started >= WAIT_PROBE - 50
+    this.waits = { answer, at: Date.now() }
+    return answer
+  }
+
+  async wait(trigger: 'state' | 'check', ms: number): Promise<Waited> {
+    if (!(await this.canWait())) return 'unsupported'
+    const started = Date.now()
+    await this.query(`GET status\nColumns: program_start\nWaitTrigger: ${trigger}\nWaitTimeout: ${Math.round(ms)}`)
+    return Date.now() - started < ms - 50 ? 'woken' : 'quiet'
   }
 
   async enforcesAuth(): Promise<boolean> {
