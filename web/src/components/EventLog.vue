@@ -122,7 +122,7 @@ const title = (text: unknown) => String(text).toLowerCase().replace(/^./, (c) =>
         <span class="text">{{ row.plugin_output || (row.host_name ? '' : rest(row)) }}</span>
       </li>
     </ol>
-    <p v-else-if="!loading && !error" class="none">Nothing in this time.</p>
+    <p v-else-if="!loading && !error" class="none">None</p>
     <Pager v-if="data && data.total !== null && (data.total > pageSize || offset > 0)" :offset="offset" :limit="pageSize" :total="data.total" @go="emit('go', $event)" />
   </div>
 </template>

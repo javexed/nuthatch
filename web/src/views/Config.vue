@@ -40,7 +40,7 @@ async function load() {
     state.value = await api.config(backend.value)
     error.value = ''
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    error.value = err instanceof ApiError ? err.message : 'Server unreachable'
   }
 }
 watch(backend, () => {
@@ -103,7 +103,7 @@ async function send(change: ConfigChange, dryRun: boolean, done: string): Promis
     return true
   } catch (err) {
     notice.value = ''
-    const message = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    const message = err instanceof ApiError ? err.message : 'Server unreachable'
     const output = err instanceof ApiError && typeof err.detail.output === 'string' ? err.detail.output : ''
     report.value = { title: `Not changed: ${message}.`, output }
     if (err instanceof ApiError && err.status === 409) await load()
@@ -131,7 +131,7 @@ async function lookAgain(host: ManagedHost) {
   try {
     again.value[host.name] = { looking: false, changes: compare(host, await api.discover(backend.value, host.address, portsOf(host))) }
   } catch (err) {
-    again.value[host.name] = { looking: false, error: err instanceof ApiError ? err.message : 'The server cannot be reached.' }
+    again.value[host.name] = { looking: false, error: err instanceof ApiError ? err.message : 'Server unreachable' }
   }
 }
 
@@ -157,9 +157,7 @@ async function remove(host: ManagedHost) {
 
 <template>
   <h1>Config</h1>
-  <p v-if="backends.length === 0" class="none">
-    No backend's config can be changed here, or you have not the role for it (config_edit).
-  </p>
+  <p v-if="backends.length === 0" class="none">Not available</p>
   <template v-else>
     <label v-if="backends.length > 1" class="backend-choice">
       Backend
@@ -201,14 +199,11 @@ async function remove(host: ManagedHost) {
         @cancel="group = null"
       />
       <section v-else-if="choosingHost" class="card choose-host" aria-label="Which host">
-        <h2>New service: on which host?</h2>
-        <p v-if="state.hosts.length === 0" class="none">
-          nuthatch keeps no host on {{ backend }} yet, and a service is added to a host it keeps. Add a host first.
-        </p>
+        <h2>New service on</h2>
+        <p v-if="state.hosts.length === 0" class="none">No hosts yet</p>
         <div v-else class="chips">
           <button v-for="h in state.hosts" :key="h.name" type="button" class="chip" @click="addServiceTo(h)">{{ h.name }}</button>
         </div>
-        <p class="by">The engine's other hosts are in its own files, which nuthatch does not change.</p>
         <div class="buttons"><button type="button" class="quiet" @click="choosingHost = false">Cancel</button></div>
       </section>
       <HostForm
@@ -229,22 +224,18 @@ async function remove(host: ManagedHost) {
         <p v-if="state.templates.host.length === 0" class="error">
           The engine's config has no host template (a host with a name and register 0) to build a host on.
         </p>
-        <p class="notice">
-          These are the hosts nuthatch keeps the config of on {{ backend }}. The engine's other hosts are in its own files.
-        </p>
+        <h2>Hosts</h2>
         <ul v-if="state.hosts.length > 0" class="managed">
           <li v-for="host in state.hosts" :key="host.name" class="card">
             <div>
               <strong>{{ host.name }}</strong> <span class="by">{{ host.address }} · {{ host.use }}</span>
-              <p v-if="host.services.length > 0" class="by">Services: {{ host.services.map((s) => s.description).join(', ') }}</p>
+              <p v-if="host.services.length > 0" class="by">{{ host.services.map((s) => s.description).join(', ') }}</p>
               <div v-if="again[host.name] && !again[host.name]!.looking" class="again" aria-live="polite">
                 <p v-if="again[host.name]!.error" class="error">{{ again[host.name]!.error }}</p>
                 <template v-else-if="again[host.name]!.changes">
-                  <p v-if="again[host.name]!.changes!.gained.length === 0 && again[host.name]!.changes!.lost.length === 0">
-                    Nothing has changed: what answers there is what is checked.
-                  </p>
+                  <p v-if="again[host.name]!.changes!.gained.length === 0 && again[host.name]!.changes!.lost.length === 0">No change</p>
                   <template v-if="again[host.name]!.changes!.gained.length > 0">
-                    <p><strong>Answers now, and is not checked:</strong></p>
+                    <p><strong>New</strong></p>
                     <ul>
                       <li v-for="s in again[host.name]!.changes!.gained" :key="s.check_command">{{ s.description }} <span class="by">{{ s.why }}</span></li>
                     </ul>
@@ -253,7 +244,7 @@ async function remove(host: ManagedHost) {
                     </button>
                   </template>
                   <template v-if="again[host.name]!.changes!.lost.length > 0">
-                    <p><strong>Checked, and nothing answers there now:</strong></p>
+                    <p><strong>Gone</strong></p>
                     <ul>
                       <li v-for="l in again[host.name]!.changes!.lost" :key="l.description">{{ l.description }} <span class="by">port {{ l.port }}</span></li>
                     </ul>
@@ -270,7 +261,7 @@ async function remove(host: ManagedHost) {
             </div>
           </li>
         </ul>
-        <p v-else class="none">None yet.</p>
+        <p v-else class="none">None</p>
         <h2 class="groups-head">Groups</h2>
         <p>
           <button type="button" class="quiet" :disabled="busy" @click="group = { new: 'hostgroup' }">Add a host group</button>
@@ -280,7 +271,7 @@ async function remove(host: ManagedHost) {
           <li v-for="g in state.groups" :key="`${g.type} ${g.name}`" class="card">
             <div>
               <strong>{{ g.name }}</strong> <span class="by">{{ g.type === 'hostgroup' ? 'host group' : 'service group' }}{{ g.alias ? ` · ${g.alias}` : '' }}</span>
-              <p class="by">{{ g.members.length === 0 ? 'No members.' : `Members: ${g.members.join(', ')}` }}</p>
+              <p v-if="g.members.length > 0" class="by">{{ g.members.join(', ') }}</p>
             </div>
             <div class="actions">
               <button type="button" class="quiet" :disabled="busy" @click="group = g">Change</button>

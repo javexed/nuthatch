@@ -17,6 +17,6 @@ const canAdd = computed(() => session.has('config_edit') && (session.session?.co
       <button v-if="!session.has('read_only')" type="button" class="quiet" @click="many = true">Downtime for many…</button>
     </div>
   </div>
-  <StatusList kind="host" controls empty="No host matches." />
+  <StatusList kind="host" controls empty="None" />
   <ManyDowntime v-if="many" kind="host" @close="many = false" />
 </template>

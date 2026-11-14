@@ -39,22 +39,14 @@ async function copy(text: string) {
 </script>
 
 <template>
-  <section v-if="info?.takes" class="card push-info" aria-label="Takes pushes">
-    <h2>Takes pushes</h2>
-    <p>
-      This service is not checked: a job tells it the result by calling an address.
-      <template v-if="info.every">It goes CRITICAL when nothing comes for {{ span(info.every) }}.</template>
-      <template v-else>Nothing is expected at any set time.</template>
-    </p>
-    <p class="by">Last result: {{ info.last ? dateTime(info.last) : 'none yet' }}</p>
-    <button v-if="!shown" type="button" class="quiet" @click="shown = true">Show the address to call</button>
+  <section v-if="info?.takes" class="card push-info" aria-label="Push">
+    <h2>Push</h2>
+    <p v-if="info.every" class="by">CRITICAL after {{ span(info.every) }} without a push</p>
+    <p class="by">Last: {{ info.last ? dateTime(info.last) : 'never' }}</p>
+    <button v-if="!shown" type="button" class="quiet" @click="shown = true">Show address</button>
     <template v-else>
       <pre class="call"><code>curl -fsS {{ info.url ?? `http://&lt;where checkd listens&gt;${info.path}` }}</code></pre>
-      <p class="by">
-        Whoever has this address can set this one service to any state. Add <code>?state=warning</code> or
-        <code>critical</code>, and <code>&amp;output=…</code>, to say more than "done".
-        <template v-if="!info.url"> The server does not know where checkd's HTTP API is reached (<code>push_url</code> of the backend).</template>
-      </p>
+      <p class="by">Add <code>?state=warning</code> or <code>critical</code>, and <code>&amp;output=…</code>.</p>
       <button v-if="info.url" type="button" class="quiet" @click="copy(`curl -fsS ${info.url}`)">{{ copied ? 'Copied' : 'Copy' }}</button>
     </template>
   </section>

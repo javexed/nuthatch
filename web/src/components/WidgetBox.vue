@@ -45,7 +45,7 @@ const farAhead = since + 365 * 86400
       :page-size="widget.limit ?? 10"
       sort="-last_state_change"
       stacked
-      empty="No problems."
+      empty="None"
     />
     <ObjectCard v-else-if="widget.type === 'object'" :backend="widget.backend" :host="widget.host" :service="widget.service" />
     <EventLog v-else-if="widget.type === 'log'" :from="since - (widget.hours ?? 24) * 3600" :to="farAhead" :lines="widget.lines" :page-size="widget.limit ?? 10" />

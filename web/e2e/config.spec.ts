@@ -5,7 +5,7 @@ import { readdirSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { ENGINES, fits, goTo, livestatus, login, openMore, send, sleep } from './helpers'
+import { ENGINES, fits, goTo, livestatus, login, openMore, send, sleep, chooseBackend } from './helpers'
 
 const dev = join(dirname(fileURLToPath(import.meta.url)), '../../dev')
 test.setTimeout(180_000)
@@ -34,8 +34,7 @@ for (const engine of ENGINES) {
     await login(page, 'admin')
     await goTo(page, 'Config')
     await expect(page.getByRole('heading', { name: 'Config' })).toBeVisible()
-    await page.locator('select[name=backend]').selectOption(engine)
-    await expect(page.getByText(`on ${engine}`)).toBeVisible()
+    await chooseBackend(page, engine)
     await page.getByRole('button', { name: 'Add a host', exact: true }).click()
     await page.getByRole('button', { name: 'Fill in the form myself' }).click()
     await page.getByLabel('Name').first().fill(name)
@@ -56,7 +55,7 @@ for (const engine of ENGINES) {
 
     await page.getByRole('button', { name: 'Save and apply' }).click()
     await expect(page.getByRole('status')).toContainText(`${name} is saved, and the engine has it.`, { timeout: 90_000 })
-    await expect(page.locator('.managed li', { hasText: name })).toContainText('Services: probe')
+    await expect(page.locator('.managed li', { hasText: name })).toContainText('probe')
     expect(await livestatus(engine, `GET services\nColumns: host_name description host_groups\nFilter: host_name = ${name}`)).toEqual([[name, 'probe', ['web']]])
     expect((await livestatus(engine, `GET downtimes\nFilter: comment = ${kept}\nStats: id >= 0`))[0]?.[0]).toBe(1)
     await page.goto(`/host/${engine}/${name}`)
@@ -66,7 +65,7 @@ for (const engine of ENGINES) {
     // A change the engine refuses: the name of a host it has elsewhere.
     await page.goto('/config')
     await expect(page.getByRole('heading', { name: 'Config' })).toBeVisible()
-    await page.locator('select[name=backend]').selectOption(engine)
+    await chooseBackend(page, engine)
     await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Change' }).click()
     await page.getByLabel('Name').first().fill('web1')
     await page.getByRole('button', { name: 'Save and apply' }).click()
@@ -91,8 +90,7 @@ for (const engine of ENGINES) {
     const name = `look-${engine}-${test.info().project.name}`
     await login(page, 'admin')
     await goTo(page, 'Config')
-    await page.locator('select[name=backend]').selectOption(engine)
-    await expect(page.getByText(`on ${engine}`)).toBeVisible()
+    await chooseBackend(page, engine)
     await page.getByRole('button', { name: 'Add a host', exact: true }).click()
     // The test's own nuthatch is a web server to find.
     await page.getByLabel('Name, address or URL').fill('http://127.0.0.1:8092/')
@@ -117,9 +115,9 @@ for (const engine of ENGINES) {
     const item = page.locator('.managed li', { hasText: name })
     await item.getByRole('button', { name: 'Look again' }).click()
     const again = item.locator('.again')
-    await expect(again).toContainText(/Nothing has changed|Answers now, and is not checked/, { timeout: 30_000 })
+    await expect(again).toContainText(/No change|New/, { timeout: 30_000 })
     await expect(again.locator('li', { hasText: /^HTTP / })).toHaveCount(0)
-    await expect(again).not.toContainText('nothing answers there now')
+    await expect(again).not.toContainText('Gone')
     await fits(page)
 
     page.once('dialog', (dialog) => void dialog.accept())
@@ -142,5 +140,5 @@ test('the config is not for ops', async ({ page }) => {
   await openMore(page)
   await expect(page.getByRole('link', { name: 'Config' })).toHaveCount(0)
   await page.goto('/config')
-  await expect(page.getByText('you have not the role')).toBeVisible()
+  await expect(page.getByText('Not available')).toBeVisible()
 })

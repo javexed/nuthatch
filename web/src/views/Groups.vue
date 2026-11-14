@@ -52,9 +52,7 @@ function servicesLink(row: Record<string, unknown>, state?: number) {
   </nav>
   <p v-for="[name, why] in errors" :key="name" class="error" role="alert"><strong>{{ name }}</strong>: {{ why }}</p>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
-  <p v-if="!loading && !error && rows.length === 0" class="none">
-    No groups. A group is shown to those who may see every one of its members.
-  </p>
+  <p v-if="!loading && !error && rows.length === 0" class="none">None</p>
   <ul class="groups">
     <li v-for="row in rows" :key="`${row.backend} ${row.name}`" class="card">
       <h2>

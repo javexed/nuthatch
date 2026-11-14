@@ -6,11 +6,9 @@ import EventLog, { type Lines } from '../components/EventLog.vue'
 import RangePicker from '../components/RangePicker.vue'
 import type { Span } from '../lib/availability'
 import { spanOf } from '../lib/range'
-import { useSession } from '../stores/session'
 
 const route = useRoute()
 const router = useRouter()
-const session = useSession()
 
 // "Now" is fixed while the page is narrowed, so that pages do not shift.
 const now = ref(Date.now() / 1000)
@@ -66,9 +64,6 @@ const custom = (span: Span) => go({ range: undefined, from: String(span.from), t
       <span>Host <strong>{{ text('host') }}</strong></span>
       <span v-if="text('service')">Service <strong>{{ text('service') }}</strong></span>
       <button type="button" class="plain" @click="go({ host: undefined, service: undefined, backend: undefined })">Show all</button>
-    </p>
-    <p v-if="lines === 'all' && !session.has('all_hosts')" class="notice">
-      Lines about the program itself are shown to those who may see all hosts.
     </p>
   </div>
   <EventLog

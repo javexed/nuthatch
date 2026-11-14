@@ -81,3 +81,14 @@ export async function logout(page: Page) {
   if (!(await button.isVisible())) await openMore(page)
   await button.click()
 }
+
+/** Chooses a backend on the Config page and waits for its config. */
+export async function chooseBackend(page: Page, engine: string) {
+  const select = page.locator('select[name=backend]')
+  if ((await select.inputValue()) !== engine) {
+    const loaded = page.waitForResponse((r) => r.url().endsWith(`/api/v1/config/${engine}`) && r.request().method() === 'GET')
+    await select.selectOption(engine)
+    await loaded
+  }
+  await expect(page.getByRole('button', { name: 'Add a host', exact: true })).toBeEnabled()
+}

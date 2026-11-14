@@ -39,6 +39,6 @@ const link = computed(() =>
       <p class="output">{{ data.row.plugin_output }}</p>
       <p v-if="data.row.last_state_change" class="by">for {{ duration(Date.now() / 1000 - Number(data.row.last_state_change)) }}</p>
     </template>
-    <p v-else-if="!loading" class="none">{{ kind === 'host' ? host : `${host} / ${service}` }} is not there, or not one of yours.</p>
+    <p v-else-if="!loading" class="none">Not found</p>
   </div>
 </template>

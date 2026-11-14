@@ -69,7 +69,7 @@ async function submit() {
     try {
       for (const command of commandsFor(target)) await api.command(command)
     } catch (err) {
-      failed.value.push({ name: targetName(target), why: err instanceof ApiError ? err.message : 'The server cannot be reached.' })
+      failed.value.push({ name: targetName(target), why: err instanceof ApiError ? err.message : 'Server unreachable' })
     }
   }
   busy.value = false

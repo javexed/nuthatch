@@ -101,7 +101,7 @@ async function send(command: Command, done: string): Promise<boolean> {
     notice.value = done
   } catch (err) {
     sent = false
-    notice.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    notice.value = err instanceof ApiError ? err.message : 'Server unreachable'
   }
   live.nudge()
   return sent
@@ -118,7 +118,7 @@ async function send(command: Command, done: string): Promise<boolean> {
   </nav>
   <h1>{{ service ?? host }} <span class="backend">{{ backend }}</span></h1>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
-  <p v-else-if="!loading && !object" class="none">There is no such {{ kind }} here, or it is not one of yours.</p>
+  <p v-else-if="!loading && !object" class="none">Not found</p>
 
   <template v-if="object">
     <section :class="['card', { flash }]">
@@ -244,7 +244,7 @@ async function send(command: Command, done: string): Promise<boolean> {
 
     <section v-if="kind === 'host'">
       <h2>Services</h2>
-      <StatusList kind="service" :backend="backend" :base="{ host }" empty="This host has no services, or none of yours." />
+      <StatusList kind="service" :backend="backend" :base="{ host }" empty="None" />
     </section>
     <CommandDialog v-if="dialog" :action="dialog" :targets="[target]" @close="dialog = null" />
   </template>

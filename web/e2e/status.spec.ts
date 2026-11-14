@@ -42,7 +42,7 @@ test("ops' lists are what the engines give ops, and no more", async ({ page }) =
 
   // A host that is not ops' own is not there for ops, by its address either.
   await page.goto('/host/naemon/db1')
-  await expect(page.getByText('not one of yours')).toBeVisible()
+  await expect(page.getByText('Not found', { exact: true })).toBeVisible()
 })
 
 test('the service list filters, sorts over both engines, and pages', async ({ page }) => {

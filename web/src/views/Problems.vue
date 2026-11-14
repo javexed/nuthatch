@@ -9,9 +9,9 @@ const unhandled = ref(true)
 
 <template>
   <h1>Problems</h1>
-  <label class="check"><input v-model="unhandled" type="checkbox" /> Only those nobody has acknowledged or put in a downtime</label>
+  <label class="check"><input v-model="unhandled" type="checkbox" /> Unhandled only</label>
   <h2>Hosts</h2>
-  <StatusList kind="host" :base="{ states: [1, 2], unhandled }" sort="-last_state_change" empty="No host has a problem." />
+  <StatusList kind="host" :base="{ states: [1, 2], unhandled }" sort="-last_state_change" empty="None" />
   <h2>Services</h2>
-  <StatusList kind="service" :base="{ states: [1, 2, 3], unhandled }" sort="-last_state_change" empty="No service has a problem." />
+  <StatusList kind="service" :base="{ states: [1, 2, 3], unhandled }" sort="-last_state_change" empty="None" />
 </template>

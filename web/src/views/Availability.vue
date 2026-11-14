@@ -95,7 +95,7 @@ const share = (seconds: number, row: { seconds: number[] }) => {
   </p>
   <p v-for="[name, why] in errors" :key="name" class="error" role="alert"><strong>{{ name }}</strong>: {{ why }}</p>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
-  <p v-if="loading" class="none">Working it out…</p>
+  <p v-if="loading" class="none">…</p>
 
   <table v-if="rows.length > 0" class="rows availability">
     <thead>
@@ -127,5 +127,5 @@ const share = (seconds: number, row: { seconds: number[] }) => {
       </tr>
     </tbody>
   </table>
-  <p v-else-if="!loading && !error" class="none">No history in this time.</p>
+  <p v-else-if="!loading && !error" class="none">None</p>
 </template>

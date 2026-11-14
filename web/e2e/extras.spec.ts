@@ -6,7 +6,7 @@ import { readdirSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { ENGINES, fits, goTo, livestatus, login, send, sleep } from './helpers'
+import { ENGINES, fits, goTo, livestatus, login, send, sleep, chooseBackend } from './helpers'
 
 const dev = join(dirname(fileURLToPath(import.meta.url)), '../../dev')
 test.setTimeout(180_000)
@@ -25,8 +25,7 @@ test('a service that takes pushes and one that stands for others, on checkd', as
   const name = `extras-${test.info().project.name}`
   await login(page, 'admin')
   await goTo(page, 'Config')
-  await page.locator('select[name=backend]').selectOption('checkd')
-  await expect(page.getByText('on checkd')).toBeVisible()
+  await chooseBackend(page, 'checkd')
   await page.getByRole('button', { name: 'Add a host', exact: true }).click()
   await page.getByRole('button', { name: 'Fill in the form myself' }).click()
   await page.getByLabel('Name').first().fill(name)
@@ -35,15 +34,15 @@ test('a service that takes pushes and one that stands for others, on checkd', as
   await page.getByRole('button', { name: 'Add a service' }).click()
   const pushed = page.getByRole('group', { name: 'Service 1' })
   await pushed.getByLabel('Name').fill('backup')
-  await pushed.getByLabel('How its state is found').selectOption('push')
-  await pushed.getByLabel('Alarm when nothing came').fill('25')
+  await pushed.getByRole('combobox', { name: 'Kind' }).selectOption('push')
+  await pushed.getByLabel('Alarm after').fill('25')
 
   await page.getByRole('button', { name: 'Add a service' }).click()
   const all = page.getByRole('group', { name: 'Service 2' })
   await all.getByLabel('Name').fill('web servers')
-  await all.getByLabel('How its state is found').selectOption('aggregate')
+  await all.getByRole('combobox', { name: 'Kind' }).selectOption('aggregate')
   await all.getByLabel('Members').fill('web1\nweb2\ndb1')
-  await all.getByLabel('How many must be OK').fill('2')
+  await all.getByLabel('Minimum OK').fill('2')
   await fits(page)
 
   await page.getByRole('button', { name: 'Save and apply' }).click()
@@ -56,9 +55,9 @@ test('a service that takes pushes and one that stands for others, on checkd', as
 
   // The service's page says how it is told, and the address works.
   await page.goto(`/service/checkd/${name}/backup`)
-  const section = page.getByRole('region', { name: 'Takes pushes' })
-  await expect(section).toContainText('It goes CRITICAL when nothing comes for 25 hours.')
-  await section.getByRole('button', { name: 'Show the address to call' }).click()
+  const section = page.getByRole('region', { name: 'Push' })
+  await expect(section).toContainText('CRITICAL after 25 hours without a push')
+  await section.getByRole('button', { name: 'Show address' }).click()
   const call = (await section.locator('pre.call').innerText()).trim()
   expect(call).toMatch(/^curl -fsS http:\/\/127\.0\.0\.1:6560\/api\/v1\/push\/[0-9a-f]{32}$/)
   await fits(page)
@@ -72,10 +71,9 @@ test('a service that takes pushes and one that stands for others, on checkd', as
 
   // It opens again as what it is, and keeps its address.
   await page.goto('/config')
-  await page.locator('select[name=backend]').selectOption('checkd')
+  await chooseBackend(page, 'checkd')
   await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Change' }).click()
-  await expect(page.getByRole('group', { name: 'Service 1' }).getByLabel('How its state is found')).toHaveValue('push')
-  await expect(page.getByRole('group', { name: 'Service 1' })).toContainText('It keeps the address it has.')
+  await expect(page.getByRole('group', { name: 'Service 1' }).getByRole('combobox', { name: 'Kind' })).toHaveValue('push')
   await expect(page.getByRole('group', { name: 'Service 2' }).getByLabel('Members')).toHaveValue('web1\nweb2\ndb1')
   await page.getByRole('button', { name: 'Cancel' }).click()
   page.once('dialog', (dialog) => void dialog.accept())
@@ -86,13 +84,12 @@ test('a service that takes pushes and one that stands for others, on checkd', as
 test('Naemon has neither of the two kinds of service', async ({ page }) => {
   await login(page, 'admin')
   await goTo(page, 'Config')
-  await page.locator('select[name=backend]').selectOption('naemon')
-  await expect(page.getByText('on naemon')).toBeVisible()
+  await chooseBackend(page, 'naemon')
   await page.getByRole('button', { name: 'Add a host', exact: true }).click()
   await page.getByRole('button', { name: 'Fill in the form myself' }).click()
   await page.getByRole('button', { name: 'Add a service' }).click()
   await expect(page.getByRole('group', { name: 'Service 1' }).getByLabel('Check command')).toBeVisible()
-  await expect(page.getByLabel('How its state is found')).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: 'Kind' })).toHaveCount(0)
 })
 
 for (const engine of ENGINES) {
@@ -131,14 +128,13 @@ test('New on the Hosts, Services and Groups pages', async ({ page }) => {
   // A service: on a host nuthatch keeps, or says there is none.
   await goTo(page, 'Services')
   await page.getByRole('link', { name: 'New service' }).click()
-  await expect(page.getByRole('heading', { name: 'New service: on which host?' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'New service on' })).toBeVisible()
   // A host group, from the Groups page; then made on checkd, with two of its hosts.
   await page.goto('/hostgroups')
   await page.getByRole('link', { name: 'New host group' }).click()
   await expect(page.getByRole('heading', { name: 'New host group' })).toBeVisible()
   await page.getByRole('button', { name: 'Cancel' }).click()
-  await page.locator('select[name=backend]').selectOption('checkd')
-  await expect(page.getByText('on checkd')).toBeVisible()
+  await chooseBackend(page, 'checkd')
   await page.getByRole('button', { name: 'Add a host group' }).click()
   await page.getByLabel('Name').fill(group)
   await page.getByLabel('Alias').fill('Made from the Groups page')
@@ -147,7 +143,7 @@ test('New on the Hosts, Services and Groups pages', async ({ page }) => {
   await page.getByRole('button', { name: 'Save and apply' }).click()
   await expect(page.getByRole('status')).toContainText(`${group} is saved, and the engine has it.`, { timeout: 90_000 })
   expect(await livestatus('checkd', `GET hostgroups\nColumns: members\nFilter: name = ${group}`)).toEqual([[['web1', 'web2']]])
-  await expect(page.locator('.managed li', { hasText: group })).toContainText('Members: web1, web2')
+  await expect(page.locator('.managed li', { hasText: group })).toContainText('web1, web2')
   page.once('dialog', (dialog) => void dialog.accept())
   await page.locator('.managed li', { hasText: group }).getByRole('button', { name: 'Take out' }).click()
   await expect(page.getByRole('status')).toContainText(`${group} is taken out.`, { timeout: 90_000 })

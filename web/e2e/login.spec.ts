@@ -21,7 +21,6 @@ test('this device: where notifications are turned on', async ({ page }) => {
   await goTo(page, test.info().project.name === 'phone' ? 'This device' : 'admin')
   await expect(page.getByRole('heading', { name: 'This device' })).toBeVisible()
   const box = page.getByRole('region', { name: 'Notifications' })
-  await expect(box).toContainText('as the contact admin')
-  await expect(box).toContainText('No device yet.')
+  await expect(box).toContainText('None')
   await fits(page)
 })

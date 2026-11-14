@@ -43,11 +43,10 @@ if (kind.value === 'servicegroup') form.typed = form.members.join('\n')
         </select>
       </label>
       <label v-else class="wide">
-        Services, one to a line, as host/service
+        Services (host/service, one per line)
         <textarea v-model="form.typed" name="members" rows="6" autocapitalize="none" spellcheck="false" placeholder="web1/http&#10;web2/http"></textarea>
       </label>
     </div>
-    <p class="by">The group is written to nuthatch's own directory of the engine's config. A host or service may be in it whatever file it is defined in.</p>
     <div class="buttons">
       <button type="button" class="quiet" :disabled="busy" @click="emit('cancel')">Cancel</button>
       <button type="button" class="quiet" :disabled="busy" @click="emit('check', result())">Check only</button>

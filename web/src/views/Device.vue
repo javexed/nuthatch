@@ -20,7 +20,7 @@ const blocked = ref(supported && Notification.permission === 'denied')
 const here = computed(() => state.value?.devices.some((d) => d.endpoint === mine.value) ?? false)
 
 function fail(err: unknown) {
-  error.value = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'The server cannot be reached.'
+  error.value = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Server unreachable'
 }
 
 async function load() {
@@ -100,16 +100,12 @@ async function test() {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <template v-if="state">
-      <p v-if="!state.enabled" class="none">Notifications are not set up on this server (<code>[notifications]</code> in its config).</p>
+      <p v-if="!state.enabled" class="none">Off on this server</p>
       <template v-else>
-        <p>
-          What the engine notifies you of, as the contact <strong>{{ session.session?.user }}</strong>, is also sent to the devices listed here: problems,
-          recoveries and the rest, as your contact is set up there.
-        </p>
         <p v-if="!supported" class="warning-text">
-          This browser cannot receive them. On an iPhone or iPad, add nuthatch to the Home Screen first and open it from there.
+          Not supported here. On iPhone, add to Home Screen first.
         </p>
-        <p v-else-if="blocked" class="warning-text">Notifications from this site are blocked in this browser's settings.</p>
+        <p v-else-if="blocked" class="warning-text">Blocked in browser settings</p>
         <p v-else-if="!here"><button type="button" :disabled="busy" @click="turnOn">Notify this device</button></p>
         <ul v-if="state.devices.length > 0" class="devices">
           <li v-for="device in state.devices" :key="device.endpoint">
@@ -120,7 +116,7 @@ async function test() {
             <button type="button" class="plain" :disabled="busy" @click="turnOff(device.endpoint)">Take out</button>
           </li>
         </ul>
-        <p v-else class="none">No device yet.</p>
+        <p v-else class="none">None</p>
         <p v-if="state.devices.length > 0"><button type="button" class="quiet" :disabled="busy" @click="test">Send a test</button></p>
       </template>
     </template>

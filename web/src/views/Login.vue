@@ -21,7 +21,7 @@ async function submit() {
     const to = typeof route.query.to === 'string' && route.query.to.startsWith('/') ? route.query.to : '/'
     await router.push(to)
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : APP ? 'The server cannot be reached, or does not let this app in.' : 'The server cannot be reached.'
+    error.value = err instanceof ApiError ? err.message : APP ? 'The server cannot be reached, or does not let this app in.' : 'Server unreachable'
     password.value = ''
   } finally {
     busy.value = false

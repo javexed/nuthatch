@@ -17,7 +17,7 @@ async function make() {
     const made = await api.newDashboard({ title: title.value.trim(), shared: false, widgets: [{ type: 'totals', of: 'hosts' }, { type: 'totals', of: 'services' }] })
     await router.push({ name: 'dashboard', params: { id: made.id }, query: { edit: '1' } })
   } catch (err) {
-    problem.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    problem.value = err instanceof ApiError ? err.message : 'Server unreachable'
   }
 }
 </script>
@@ -37,7 +37,7 @@ async function make() {
       </div>
     </li>
   </ul>
-  <p v-else-if="!loading && !error" class="none">None yet.</p>
+  <p v-else-if="!loading && !error" class="none">None</p>
   <form class="new-dashboard" @submit.prevent="make">
     <label>A new dashboard <input v-model="title" name="title" required maxlength="200" placeholder="its title" /></label>
     <button type="submit">Make it</button>

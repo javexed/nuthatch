@@ -112,13 +112,12 @@ for (const engine of ENGINES) {
 test('ops gets no history of what is not its own', async ({ page }) => {
   await login(page, 'ops')
   await page.goto('/availability?q=passive1')
-  await expect(page.getByText('No history in this time.')).toBeVisible()
+  await expect(page.locator('.none', { hasText: 'None' }).first()).toBeVisible()
   await page.goto('/history?range=1h&host=passive1')
-  await expect(page.getByText('Nothing in this time.')).toBeVisible()
+  await expect(page.locator('.none', { hasText: 'None' }).first()).toBeVisible()
   await page.goto('/availability?range=1h')
   await expect(page.locator('table.availability tbody tr')).toHaveCount(4)
   await page.goto('/history?range=1h&lines=all')
-  await expect(page.getByText('Lines about the program itself')).toBeVisible()
   await fits(page)
 })
 

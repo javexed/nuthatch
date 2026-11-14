@@ -59,7 +59,7 @@ async function send(dryRun: boolean) {
       live.nudge()
     }
   } catch (err) {
-    problem.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    problem.value = err instanceof ApiError ? err.message : 'Server unreachable'
   } finally {
     busy.value = false
   }
@@ -84,7 +84,6 @@ async function send(dryRun: boolean) {
         Services on them
         <input v-model="services" name="services" required maxlength="63" autocapitalize="none" spellcheck="false" placeholder="backup, disk *, or * for all" />
       </label>
-      <p class="by">* stands for any run of characters, ? for any one.</p>
       <div class="pair">
         <label>Start <input v-model="start" name="start" type="datetime-local" required /></label>
         <label>End <input v-model="end" name="end" type="datetime-local" required /></label>

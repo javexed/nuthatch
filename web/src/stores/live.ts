@@ -110,7 +110,7 @@ export function useLoader<T>(load: () => Promise<T>, sources: WatchSource[] = []
       error.value = ''
     } catch (err) {
       if (mine !== latest) return
-      error.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+      error.value = err instanceof ApiError ? err.message : 'Server unreachable'
     } finally {
       if (mine === latest) loading.value = false
     }

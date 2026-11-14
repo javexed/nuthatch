@@ -30,7 +30,7 @@ interface Extra {
   /** Hours within which a push is expected; empty for no alarm. */
   hours: number | ''
   token: string
-  /** Members, one to a line. */
+  /** Members (one per line). */
   members: string
   min: string
 }
@@ -125,7 +125,7 @@ function result(): ManagedHost {
       </label>
       <label>Notes <input v-model="form.notes" name="notes" maxlength="400" /></label>
       <label v-if="state.extras && (state.choices.timeperiods ?? []).length > 0">
-        In a downtime whenever this timeperiod holds
+        Downtime during
         <select v-model="form.downtime_period" name="downtime-period">
           <option :value="undefined">never</option>
           <option v-for="name in state.choices.timeperiods" :key="name" :value="name">{{ name }}</option>
@@ -145,11 +145,11 @@ function result(): ManagedHost {
           </select>
         </label>
         <label v-if="state.extras">
-          How its state is found
+          Kind
           <select v-model="form.extras[n]!.kind" :name="`service-${n}-kind`">
-            <option value="command">by running a command</option>
-            <option value="push">a job elsewhere tells it</option>
-            <option value="aggregate">from other hosts and services</option>
+            <option value="command">command</option>
+            <option value="push">pushed</option>
+            <option value="aggregate">aggregate</option>
           </select>
         </label>
         <template v-if="form.extras[n]!.kind === 'command'">
@@ -167,17 +167,13 @@ function result(): ManagedHost {
         </template>
         <template v-else-if="form.extras[n]!.kind === 'push'">
           <label>
-            Alarm when nothing came for this many hours
-            <input v-model="form.extras[n]!.hours" :name="`service-${n}-hours`" type="number" min="0.02" max="8784" step="any" placeholder="no alarm" />
+            Alarm after (hours)
+            <input v-model="form.extras[n]!.hours" :name="`service-${n}-hours`" type="number" min="0.02" max="8784" step="any" placeholder="never" />
           </label>
-          <p class="by wide">
-            {{ form.extras[n]!.token ? 'It keeps the address it has.' : 'Its address is made when it is saved.' }}
-            The address to call is on the service's own page.
-          </p>
         </template>
         <template v-else>
           <label class="wide">
-            Members, one to a line
+            Members (one per line)
             <textarea
               v-model="form.extras[n]!.members"
               :name="`service-${n}-members`"
@@ -189,13 +185,12 @@ function result(): ManagedHost {
             ></textarea>
           </label>
           <label>
-            How many must be OK
+            Minimum OK
             <input v-model.trim="form.extras[n]!.min" :name="`service-${n}-min`" pattern="\d{1,4}%?" maxlength="5" placeholder="all" />
           </label>
-          <p class="by wide">A host (web1, web*, @group for a host group), or host/service. As bad as the worst member; with a number or a percentage, OK while that many are.</p>
         </template>
  <label v-if="state.extras && (state.choices.timeperiods ?? []).length > 0">
-          In a downtime whenever this timeperiod holds
+          Downtime during
           <select v-model="service.downtime_period" :name="`service-${n}-downtime-period`">
             <option :value="undefined">never</option>
             <option v-for="name in state.choices.timeperiods" :key="name" :value="name">{{ name }}</option>

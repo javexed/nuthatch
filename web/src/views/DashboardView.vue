@@ -26,7 +26,7 @@ async function load() {
     error.value = ''
     if (route.query.edit === '1' && mine.value) edit()
   } catch (err) {
-    error.value = err instanceof ApiError ? (err.status === 404 ? 'There is no such dashboard, or it is not shared.' : err.message) : 'The server cannot be reached.'
+    error.value = err instanceof ApiError ? (err.status === 404 ? 'Not found' : err.message) : 'Server unreachable'
   }
 }
 watch(() => props.id, () => void load(), { immediate: true })
@@ -66,7 +66,7 @@ async function save() {
     error.value = ''
     void router.replace({ query: {} })
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    error.value = err instanceof ApiError ? err.message : 'Server unreachable'
   } finally {
     saving.value = false
   }
@@ -98,7 +98,7 @@ const label = (type: Widget['type']) => KINDS.find((k) => k.type === type)?.labe
     <div class="dashboard">
       <WidgetBox v-for="(widget, n) in dashboard.widgets" :key="`${n} ${JSON.stringify(widget)}`" :widget="widget" :class="{ wide: widget.type === 'totals' }" />
     </div>
-    <p v-if="dashboard.widgets.length === 0" class="none">This dashboard has no boxes yet.</p>
+    <p v-if="dashboard.widgets.length === 0" class="none">Empty</p>
   </template>
 
   <form v-if="draft" class="dashboard-form" @submit.prevent="save">

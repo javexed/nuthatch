@@ -49,7 +49,7 @@ async function look() {
     name.value = props.state.hosts.some((h) => h.name === seen.name) ? '' : seen.name
     ticked.value = seen.suggestions.map((s) => s.checked)
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'The server cannot be reached.'
+    error.value = err instanceof ApiError ? err.message : 'Server unreachable'
   } finally {
     looking.value = false
   }
@@ -99,12 +99,8 @@ function days(n: number): string {
       </label>
       <button type="submit" :disabled="looking || busy">{{ looking ? 'Looking…' : 'Look' }}</button>
     </form>
-    <p class="by">
-      Looks up the name, pings it and tries some well-known ports, from where {{ backend }} runs. Takes a few seconds.
-    </p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <div v-if="machines.length > 0 && !found && !looking" class="tailnet" role="group" aria-label="On your tailnet, not monitored yet">
-      <p class="by">On your tailnet, not monitored yet:</p>
       <div class="chips">
         <button
           v-for="machine in shownMachines"
@@ -127,12 +123,12 @@ function days(n: number): string {
           <strong>{{ found.address }}</strong>
           <span v-if="found.addresses.length > 0 && found.addresses[0] !== found.address" class="by"> · {{ found.addresses.join(', ') }}</span>
         </p>
-        <p v-if="found.ping === null" class="by">Ping could not be tried here.</p>
-        <p v-else-if="found.ping.ok" class="by">Answers ping<template v-if="found.ping.ms !== undefined"> ({{ found.ping.ms }} ms)</template>.</p>
+        <p v-if="found.ping === null" class="by">Ping unavailable</p>
+        <p v-else-if="found.ping.ok" class="by">Ping<template v-if="found.ping.ms !== undefined"> {{ found.ping.ms }} ms</template></p>
         <p v-else class="warning-text">
-          Does not answer ping<template v-if="found.host_check">: the host is checked on port {{ found.host_check.split('!')[1] }} instead</template>.
+          No ping<template v-if="found.host_check">; checked on port {{ found.host_check.split('!')[1] }}</template>
         </p>
-        <p v-if="found.found.length === 0" class="warning-text">No well-known port answered.</p>
+        <p v-if="found.found.length === 0" class="warning-text">No open ports</p>
       </div>
 
       <div class="fields">
@@ -161,13 +157,12 @@ function days(n: number): string {
           </li>
         </ul>
       </details>
-      <p class="by">The host check comes from the template (usually ping). Every check runs every few minutes, as the service template says.</p>
     </template>
 
     <div class="buttons">
       <button type="button" class="quiet" :disabled="busy" @click="emit('cancel')">Cancel</button>
       <button type="button" class="plain" :disabled="busy" @click="emit('form', found && name ? host() : undefined)">
-        {{ found ? 'Change more in the full form' : 'Fill in the form myself' }}
+        {{ found ? 'Full form' : 'Fill in the form myself' }}
       </button>
       <template v-if="found">
         <button type="button" class="quiet" :disabled="busy || !name" @click="emit('check', host())">Check only</button>
