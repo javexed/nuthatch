@@ -1,12 +1,15 @@
 <script setup lang="ts">
-// A dashboard: panels on a grid. In edit mode a panel is moved by its
-// header, resized by its corner, and set up in the side panel.
-import type { Dashboard, Layout, PanelSettings, Widget } from '@nuthatch/api'
-import { ApiError } from '@nuthatch/api'
-import { computed, onUnmounted, ref, watch } from 'vue'
+// A dashboard: panels on a grid. Whoever may change it changes it in
+// place: panels move by their grip, resize by their corner, come in from
+// the tray, and every change is kept at once, with undo. One range for
+// the whole dashboard; a host chosen at the top for panels about it.
+import type { Dashboard, DashboardBody, Layout, PanelSettings, Range, Scope, Series, Widget } from '@nuthatch/api'
+import { ApiError, RANGES } from '@nuthatch/api'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import FindTarget from '../components/FindTarget.vue'
 import WidgetBox from '../components/WidgetBox.vue'
-import { hostGroups, hostsOf, metricsOf, servicesOf, useList } from '../lib/choices'
+import { hostGroups, useList } from '../lib/choices'
 import { type Box, COLUMNS, SIZES, clamp, move, place } from '../lib/layout'
 import { api, useSession } from '../stores/session'
 
@@ -16,28 +19,172 @@ const router = useRouter()
 const session = useSession()
 
 const dashboard = ref<Dashboard | null>(null)
+const body = ref<DashboardBody | null>(null)
 const error = ref('')
-const draft = ref<{ title: string; shared: boolean; widgets: Widget[] } | null>(null)
-const saving = ref(false)
 const selected = ref<number | null>(null)
 const mine = computed(() => dashboard.value?.owner === session.session?.user)
 const mayEdit = computed(() => mine.value || dashboard.value?.shared === true)
-const backends = computed(() => session.session?.backends.map((b) => b.name) ?? [])
+const narrow = ref(false)
+const wall = ref(false)
+const arranging = computed(() => mayEdit.value && !wall.value && !narrow.value)
 
 const KINDS: { type: Widget['type']; label: string; make: () => PanelSettings }[] = [
-  { type: 'stat', label: 'Number', make: () => ({ type: 'stat', backend: backends.value[0] ?? '', host: '' }) },
-  { type: 'graph', label: 'Graph', make: () => ({ type: 'graph', backend: backends.value[0] ?? '', host: '', hours: 24 }) },
-  { type: 'problems', label: 'Problems', make: () => ({ type: 'problems', of: 'services', unhandled: true, limit: 10 }) },
-  { type: 'totals', label: 'Totals', make: () => ({ type: 'totals', of: 'services' }) },
-  { type: 'object', label: 'Host or service', make: () => ({ type: 'object', backend: backends.value[0] ?? '', host: '' }) },
-  { type: 'log', label: 'Log', make: () => ({ type: 'log', lines: 'alerts', hours: 24, limit: 10 }) },
+  { type: 'status', label: 'Status', make: () => ({ type: 'status' }) },
+  { type: 'problems', label: 'Problems', make: () => ({ type: 'problems', of: 'services', show: 'problems' }) },
+  { type: 'metric', label: 'Metric', make: () => ({ type: 'metric', series: [] }) },
+  { type: 'log', label: 'Log', make: () => ({ type: 'log', lines: 'alerts' }) },
+  { type: 'availability', label: 'Availability', make: () => ({ type: 'availability' }) },
+  { type: 'note', label: 'Note', make: () => ({ type: 'note', text: '' }) },
 ]
+const tray = ref(false)
+const menu = ref(false)
 
-// A panel being dragged in from the tray: where it would land, with the
-// others moved out of its way.
+// Kept at once, with undo: every change after a short calm is one step.
+const kept = ref('')
+const history: string[] = []
+let lastSeen = ''
+let undoing = false
+let calm: ReturnType<typeof setTimeout> | undefined
+let saving: ReturnType<typeof setTimeout> | undefined
+const canUndo = ref(false)
+
+async function load() {
+  try {
+    const d = await api.dashboard(Number(props.id))
+    dashboard.value = d
+    body.value = { title: d.title, shared: d.shared, range: d.range, ...(d.choose_host ? { choose_host: d.choose_host } : {}), widgets: d.widgets }
+    kept.value = lastSeen = JSON.stringify(body.value)
+    history.length = 0
+    canUndo.value = false
+    selected.value = null
+    error.value = ''
+  } catch (err) {
+    error.value = err instanceof ApiError ? (err.status === 404 ? 'Not found' : err.message) : 'Server unreachable'
+  }
+}
+watch(() => props.id, () => void load(), { immediate: true })
+
+watch(
+  body,
+  (now) => {
+    if (!now || !mayEdit.value) return
+    const text = JSON.stringify(now)
+    clearTimeout(calm)
+    calm = setTimeout(() => {
+      if (text === lastSeen) return
+      if (!undoing) history.push(lastSeen)
+      if (history.length > 100) history.shift()
+      canUndo.value = history.length > 0
+      undoing = false
+      lastSeen = text
+    }, 400)
+    clearTimeout(saving)
+    saving = setTimeout(() => void keep(), 700)
+  },
+  { deep: true },
+)
+
+async function keep() {
+  if (!body.value || !dashboard.value || dragging || fromTray) return
+  const text = JSON.stringify(body.value)
+  if (text === kept.value || !body.value.title.trim()) return
+  try {
+    const saved = await api.saveDashboard(dashboard.value.id, JSON.parse(text) as DashboardBody)
+    dashboard.value = saved
+    kept.value = text
+    error.value = ''
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Server unreachable'
+  }
+}
+
+/** Closes the step under way: a deliberate change is a step of its own, at
+ * once, however quickly the next one comes. Typing waits for a calm. */
+function mark() {
+  if (!body.value) return
+  const now = JSON.stringify(body.value)
+  if (now === lastSeen) return
+  history.push(lastSeen)
+  if (history.length > 100) history.shift()
+  canUndo.value = true
+  lastSeen = now
+}
+
+function undo() {
+  mark()
+  const before = history.pop()
+  if (before === undefined || !body.value) return
+  undoing = true
+  canUndo.value = history.length > 0
+  selected.value = null
+  body.value = JSON.parse(before) as DashboardBody
+}
+function keys(event: KeyboardEvent) {
+  const typing = event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
+  if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey && !typing && arranging.value) {
+    event.preventDefault()
+    undo()
+  }
+}
+const narrowQuery = window.matchMedia('(max-width: 700px)')
+const onNarrow = () => (narrow.value = narrowQuery.matches)
+onMounted(() => {
+  onNarrow()
+  narrowQuery.addEventListener('change', onNarrow)
+  window.addEventListener('keydown', keys)
+})
+onUnmounted(() => {
+  narrowQuery.removeEventListener('change', onNarrow)
+  window.removeEventListener('keydown', keys)
+  void keep()
+})
+
+// The range: everyone may look at another; whoever may change the
+// dashboard changes it for all.
+const lookRange = ref<Range | null>(null)
+const range = computed<Range>(() => lookRange.value ?? body.value?.range ?? '24h')
+function setRange(r: Range) {
+  mark()
+  if (mayEdit.value && body.value) body.value.range = r
+  else lookRange.value = r
+}
+const seconds = computed(() => RANGES[range.value])
+
+// The host chosen at the top, in the page's address.
+const hostList = useList(
+  () => [JSON.stringify(body.value?.choose_host)],
+  () => {
+    const pick = body.value?.choose_host
+    if (!pick) return null
+    const clean = (t: string) => t.replace(/[\r\n]/g, ' ')
+    return api
+      .query({ table: 'hosts', columns: ['name'], headers: pick.hostgroup ? [`Filter: groups >= ${clean(pick.hostgroup)}`] : [], sort: [{ column: 'name' }], limit: 2000 })
+      .then((a) => a.rows.map((r) => ({ backend: r.backend, host: String(r.name) })))
+  },
+)
+const chosen = computed(() => {
+  const list = hostList.value
+  if (!body.value?.choose_host || !list || list.length === 0) return null
+  const host = typeof route.query.host === 'string' ? route.query.host : ''
+  const backend = typeof route.query.backend === 'string' ? route.query.backend : ''
+  return list.find((h) => h.host === host && (!backend || h.backend === backend)) ?? list[0] ?? null
+})
+const chosenKey = computed(() => (chosen.value ? `${chosen.value.backend}\n${chosen.value.host}` : ''))
+function choose(key: string) {
+  const [backend, host] = key.split('\n')
+  void router.replace({ query: { ...route.query, host, backend } })
+}
+function toggleChooser(on: boolean) {
+  if (!body.value) return
+  mark()
+  if (on) body.value.choose_host = {}
+  else delete body.value.choose_host
+}
+
+// A panel dragged in from the tray: where it would land, the others moved out of its way.
 const incoming = ref<{ type: Widget['type']; layout: Layout } | null>(null)
 const shown = computed(() => {
-  const widgets = draft.value?.widgets ?? dashboard.value?.widgets ?? []
+  const widgets = body.value?.widgets ?? []
   const coming = incoming.value
   if (!coming) return widgets
   const boxes = move([...widgets.map((w) => w.layout), coming.layout], widgets.length, coming.layout)
@@ -46,45 +193,45 @@ const shown = computed(() => {
 const ghost = computed(() => {
   const coming = incoming.value
   if (!coming) return null
-  const widgets = draft.value?.widgets ?? []
+  const widgets = body.value?.widgets ?? []
   return move([...widgets.map((w) => w.layout), coming.layout], widgets.length, coming.layout)[widgets.length]!
 })
 /** On a narrow screen the panels are one column, top to bottom. */
 const order = computed(() => shown.value.map((w, n) => ({ w, n })).sort((a, b) => a.w.layout.y - b.w.layout.y || a.w.layout.x - b.w.layout.x))
 const cell = (l: Layout) => ({ gridColumn: `${l.x + 1} / span ${l.w}`, gridRow: `${l.y + 1} / span ${l.h}` })
 
-async function load() {
-  try {
-    dashboard.value = await api.dashboard(Number(props.id))
-    error.value = ''
-    if (route.query.edit === '1' && mayEdit.value) edit()
-  } catch (err) {
-    error.value = err instanceof ApiError ? (err.status === 404 ? 'Not found' : err.message) : 'Server unreachable'
-  }
+/** A new panel: where it was dropped, or the first free place. Its settings
+ * open when it needs to be told what to show. */
+function add(settings: PanelSettings, at?: Layout, size?: [number, number]) {
+  if (!body.value) return
+  mark()
+  const [w, h] = size ?? SIZES[settings.type]
+  const boxes = body.value.widgets.map((x) => x.layout)
+  const layout = at ?? place(boxes, w, h)
+  const moved = move([...boxes, layout], boxes.length, layout)
+  body.value.widgets.forEach((x, i) => (x.layout = moved[i]!))
+  body.value.widgets.push({ ...settings, layout: moved[boxes.length]! } as Widget)
+  const needs = settings.type === 'metric' || settings.type === 'note' || settings.type === 'status' || settings.type === 'availability'
+  selected.value = needs ? body.value.widgets.length - 1 : null
 }
-watch(() => props.id, () => void load(), { immediate: true })
-
-function edit() {
-  if (!dashboard.value) return
-  draft.value = JSON.parse(JSON.stringify({ title: dashboard.value.title, shared: dashboard.value.shared, widgets: dashboard.value.widgets })) as typeof draft.value
+function addKind(type: Widget['type'], at?: Layout) {
+  const kind = KINDS.find((k) => k.type === type)
+  if (kind) add(kind.make(), at)
+}
+function duplicate(n: number) {
+  const w = body.value?.widgets[n]
+  if (!w) return
+  const { layout, ...settings } = JSON.parse(JSON.stringify(w)) as Widget
+  add(settings as PanelSettings, undefined, [layout.w, layout.h])
+  selected.value = null
+}
+function removePanel(n: number) {
+  mark()
+  body.value?.widgets.splice(n, 1)
   selected.value = null
 }
 
-/** A new panel: where it was dropped, or the first free place. */
-function add(type: Widget['type'], at?: Layout) {
-  const kind = KINDS.find((k) => k.type === type)
-  if (!kind || !draft.value) return
-  const [w, h] = SIZES[kind.type]
-  const boxes = draft.value.widgets.map((x) => x.layout)
-  const layout = at ?? place(boxes, w, h)
-  const moved = move([...boxes, layout], boxes.length, layout)
-  draft.value.widgets.forEach((x, i) => (x.layout = moved[i]!))
-  draft.value.widgets.push({ ...kind.make(), layout: moved[boxes.length]! })
-  selected.value = draft.value.widgets.length - 1
-}
-
-// Dragging in from the tray. A press that does not move is a click: the
-// panel goes to the first free place.
+// Dragging in from the tray. A press that does not move is a click.
 let fromTray: { type: Widget['type']; x: number; y: number; moved: boolean } | null = null
 function grabKind(event: PointerEvent, type: Widget['type']) {
   if (event.button !== 0) return
@@ -113,60 +260,40 @@ function dropKind() {
   fromTray = null
   const at = incoming.value?.layout
   incoming.value = null
-  if (!moved) add(type)
-  else if (at) add(type, at)
+  if (!moved) addKind(type)
+  else if (at) addKind(type, at)
 }
 function cancelKind() {
   fromTray = null
   incoming.value = null
 }
 
-function removePanel(n: number) {
-  draft.value?.widgets.splice(n, 1)
-  selected.value = null
-}
-
 // Moving and resizing, by pointer: mouse, pen or finger.
 const grid = ref<HTMLElement>()
 let dragging: { n: number; how: 'move' | 'size'; x: number; y: number; start: Layout; base: Box[]; col: number; row: number } | null = null
 function grab(event: PointerEvent, n: number, how: 'move' | 'size') {
-  if (!draft.value || !grid.value) return
+  if (!body.value || !grid.value) return
   const rect = grid.value.getBoundingClientRect()
-  const gap = 12
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  const base = draft.value.widgets.map((w) => ({ ...w.layout }))
-  dragging = { n, how, x: event.clientX, y: event.clientY, start: { ...base[n]! }, base, col: (rect.width + gap) / COLUMNS, row: 70 + gap }
+  mark()
+  const base = body.value.widgets.map((w) => ({ ...w.layout }))
+  dragging = { n, how, x: event.clientX, y: event.clientY, start: { ...base[n]! }, base, col: (rect.width + 12) / COLUMNS, row: 70 + 12 }
   event.preventDefault()
 }
 function drag(event: PointerEvent) {
-  if (!dragging || !draft.value) return
+  if (!dragging || !body.value) return
   const dx = Math.round((event.clientX - dragging.x) / dragging.col)
   const dy = Math.round((event.clientY - dragging.y) / dragging.row)
   const s = dragging.start
   const to = dragging.how === 'move' ? { ...s, x: s.x + dx, y: s.y + dy } : { ...s, w: s.w + dx, h: s.h + dy }
   const boxes = move(dragging.base, dragging.n, to)
-  draft.value.widgets.forEach((w, i) => (w.layout = boxes[i]!))
+  body.value.widgets.forEach((w, i) => (w.layout = boxes[i]!))
 }
 function drop() {
+  if (!dragging) return
   dragging = null
-}
-
-async function save() {
-  if (!draft.value || !dashboard.value) return
-  saving.value = true
-  try {
-    // A field left empty is a setting not made.
-    const widgets = draft.value.widgets.map((w) => Object.fromEntries(Object.entries(w).filter(([, value]) => value !== '' && value !== null)) as Widget)
-    dashboard.value = await api.saveDashboard(dashboard.value.id, { ...draft.value, widgets })
-    draft.value = null
-    selected.value = null
-    error.value = ''
-    void router.replace({ query: {} })
-  } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Server unreachable'
-  } finally {
-    saving.value = false
-  }
+  mark()
+  void keep()
 }
 
 async function remove() {
@@ -175,88 +302,126 @@ async function remove() {
   await router.push({ name: 'dashboards' })
 }
 
-// Wall: full screen, nothing but the panels.
-const wall = ref(false)
+/** The dashboard as a file, to keep or to give. */
+function exportIt() {
+  if (!body.value) return
+  const { shared: _shared, ...rest } = body.value
+  const blob = new Blob([JSON.stringify(rest, null, 2)], { type: 'application/json' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `${body.value.title.replace(/[^A-Za-z0-9._-]+/g, '-') || 'dashboard'}.json`
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+// Wall: full screen, nothing but the panels; with `rotate`, the next
+// dashboard of the list every so many seconds.
+let rotating: ReturnType<typeof setTimeout> | undefined
 function toWall() {
   wall.value = true
+  selected.value = null
   document.body.classList.add('wall')
   void document.documentElement.requestFullscreen?.().catch(() => undefined)
 }
 function fromWall() {
   wall.value = false
   document.body.classList.remove('wall')
+  clearTimeout(rotating)
+  if (route.query.rotate || route.query.wall) void router.replace({ query: {} })
 }
 const left = () => {
-  if (!document.fullscreenElement) fromWall()
+  if (!document.fullscreenElement && wall.value && !route.query.rotate) fromWall()
 }
 document.addEventListener('fullscreenchange', left)
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', left)
-  fromWall()
+  document.body.classList.remove('wall')
+  clearTimeout(rotating)
 })
+watch(
+  () => [props.id, route.query.wall, route.query.rotate],
+  () => {
+    if (route.query.wall === '1' && !wall.value) toWall()
+    clearTimeout(rotating)
+    const ids = typeof route.query.rotate === 'string' ? route.query.rotate.split(',').filter((x) => /^\d+$/.test(x)) : []
+    if (ids.length < 2) return
+    const every = Math.min(3600, Math.max(5, Number(route.query.every) || 30))
+    const next = ids[(ids.indexOf(props.id) + 1) % ids.length]!
+    rotating = setTimeout(() => void router.replace({ name: 'dashboard', params: { id: next }, query: route.query }), every * 1000)
+  },
+  { immediate: true },
+)
 
-const panel = computed(() => (selected.value === null ? null : (draft.value?.widgets[selected.value] ?? null)))
-
-// What the panel's settings are chosen from.
-const objectish = (w: Widget | null) => (w && (w.type === 'object' || w.type === 'stat' || w.type === 'graph') ? w : null)
-const hostList = useList(
-  () => [objectish(panel.value)?.backend],
-  () => {
-    const w = objectish(panel.value)
-    return w?.backend ? hostsOf(w.backend) : null
-  },
-)
-const serviceList = useList(
-  () => [objectish(panel.value)?.backend, objectish(panel.value)?.host],
-  () => {
-    const w = objectish(panel.value)
-    return w?.backend && w.host && hostList.value?.includes(w.host) ? servicesOf(w.backend, w.host) : null
-  },
-)
-const metricList = useList(
-  () => [panel.value?.type, objectish(panel.value)?.backend, objectish(panel.value)?.host, objectish(panel.value)?.service, serviceList.value],
-  () => {
-    const w = panel.value
-    if (!w || (w.type !== 'stat' && w.type !== 'graph') || !w.backend || !w.host) return null
-    if (w.service ? !serviceList.value?.includes(w.service) : !hostList.value?.includes(w.host)) return null
-    return metricsOf(w.backend, w.host, w.service || undefined)
-  },
-)
+const panel = computed(() => (selected.value === null ? null : (body.value?.widgets[selected.value] ?? null)))
 const groupList = useList(
-  () => [panel.value?.type],
-  () => (panel.value?.type === 'totals' || panel.value?.type === 'problems' ? hostGroups() : null),
+  () => [panel.value?.type, !!body.value?.choose_host],
+  () => (panel.value?.type === 'problems' || body.value?.choose_host ? hostGroups() : null),
 )
-/** A name typed that is not in its list, once the list is there. */
-const unknown = (list: string[] | null, value: string | undefined) => !!value && list !== null && !list.includes(value)
+function setScope(scope: Scope) {
+  const w = panel.value
+  if (!w || (w.type !== 'status' && w.type !== 'availability')) return
+  mark()
+  delete w.of
+  delete w.hostgroup
+  Object.assign(w, scope)
+}
+function addSeries(s: Series) {
+  mark()
+  const w = panel.value
+  if (w?.type === 'metric' && w.series.length < 8) w.series.push(s)
+}
+function toChosen() {
+  mark()
+  const w = panel.value
+  if (w?.type === 'metric') w.series = w.series.map((s) => ({ ...s, backend: '$host', host: '$host' }))
+}
+const scopeText = (w: Scope) => (w.of ? (w.of.host === '$host' ? 'The chosen host' : [w.of.host, w.of.service].filter(Boolean).join(' · ')) : (w.hostgroup ?? 'All hosts'))
+const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, s.service, s.label].filter(Boolean).join(' · ')
+const rangeNames = Object.keys(RANGES) as Range[]
 </script>
 
 <template>
   <nav v-if="!wall" class="crumbs" aria-label="Where this is"><RouterLink :to="{ name: 'dashboards' }">Dashboards</RouterLink></nav>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-  <template v-if="dashboard">
-    <div v-if="!draft" class="page-head">
-      <h1>
-        {{ dashboard.title }}
-        <span v-if="!mine" class="backend">{{ dashboard.owner }}</span>
-        <span v-else-if="dashboard.shared" class="backend">shared</span>
+  <template v-if="dashboard && body">
+    <div class="page-head dash-head">
+      <input v-if="arranging" v-model="body.title" class="title-edit" name="title" required maxlength="200" aria-label="Title" />
+      <h1 v-else>
+        {{ body.title }}
+        <span v-if="!mine && !wall" class="backend">{{ dashboard.owner }}</span>
       </h1>
+      <div class="chips" role="group" aria-label="Range">
+        <button v-for="r in rangeNames" :key="r" type="button" :class="['chip', { on: range === r }]" :aria-pressed="range === r" @click="setRange(r)">{{ r }}</button>
+      </div>
+      <label v-if="body.choose_host && hostList" class="field chooser">
+        Host
+        <select :value="chosenKey" name="chosen-host" @change="choose(($event.target as HTMLSelectElement).value)">
+          <option v-for="h in hostList" :key="`${h.backend}\n${h.host}`" :value="`${h.backend}\n${h.host}`">{{ h.host }}</option>
+        </select>
+      </label>
       <div v-if="!wall" class="head-actions">
-        <button v-if="mayEdit" type="button" class="quiet" @click="edit">Edit</button>
+        <button v-if="arranging" type="button" class="quiet" :aria-pressed="tray" @click="tray = !tray">+ Panel</button>
+        <button v-if="arranging" type="button" class="quiet" :disabled="!canUndo" @click="undo">Undo</button>
         <button type="button" class="quiet" @click="toWall">Wall</button>
-        <button v-if="mine" type="button" class="plain" @click="remove">Delete</button>
+        <span v-if="mayEdit" class="more">
+          <button type="button" class="quiet" aria-label="More" :aria-expanded="menu" @click="menu = !menu">⋯</button>
+          <div v-if="menu" class="card more-menu">
+            <label v-if="mine" class="check"><input v-model="body.shared" type="checkbox" name="shared" /> Shared</label>
+            <label class="check"><input :checked="!!body.choose_host" type="checkbox" name="choose-host" @change="toggleChooser(($event.target as HTMLInputElement).checked)" /> Choose a host</label>
+            <label v-if="body.choose_host" class="field">
+              Of host group
+              <input v-model="body.choose_host.hostgroup" name="choose-hostgroup" list="dash-groups" autocomplete="off" />
+            </label>
+            <button type="button" class="plain" @click="exportIt">Export</button>
+            <button v-if="mine" type="button" class="plain" @click="remove">Delete</button>
+          </div>
+        </span>
       </div>
       <button v-else type="button" class="plain wall-exit" @click="fromWall">Exit</button>
     </div>
-    <form v-else class="dash-edit" @submit.prevent="save">
-      <input v-model="draft.title" name="title" required maxlength="200" aria-label="Title" class="title" />
-      <label v-if="mine" class="check"><input v-model="draft.shared" type="checkbox" name="shared" /> Shared</label>
-      <span class="grow"></span>
-      <button type="button" class="quiet" :disabled="saving" @click="draft = null">Cancel</button>
-      <button type="submit" :disabled="saving">Save</button>
-    </form>
 
-    <div v-if="draft" class="dash-tray" role="toolbar" aria-label="Add a panel">
+    <div v-if="arranging && tray" class="dash-tray" role="toolbar" aria-label="Add a panel">
       <button
         v-for="kind in KINDS"
         :key="kind.type"
@@ -266,28 +431,31 @@ const unknown = (list: string[] | null, value: string | undefined) => !!value &&
         @pointermove="dragKind"
         @pointerup="dropKind"
         @pointercancel="cancelKind"
-        @keydown.enter.prevent="add(kind.type)"
-        @keydown.space.prevent="add(kind.type)"
+        @keydown.enter.prevent="addKind(kind.type)"
+        @keydown.space.prevent="addKind(kind.type)"
       >
         + {{ kind.label }}
       </button>
     </div>
 
     <div class="dash-body">
-      <div ref="grid" :class="['dash-grid', { editing: draft }]" @pointermove="drag" @pointerup="drop" @pointercancel="drop">
+      <div ref="grid" :class="['dash-grid', { editing: arranging }]" @pointermove="drag" @pointerup="drop" @pointercancel="drop">
         <WidgetBox
           v-for="{ w, n } in order"
-          :key="`${n} ${draft ? '' : JSON.stringify(w)}`"
+          :key="n"
           :widget="w"
+          :seconds="seconds"
+          :chosen-host="chosen"
           :style="cell(w.layout)"
           :class="['panel', { chosen: selected === n }]"
         >
-          <template v-if="draft" #handle>
+          <template v-if="arranging" #handle>
             <span class="grip" title="Move" @pointerdown="grab($event, n, 'move')">⠿</span>
           </template>
-          <template v-if="draft" #tools>
+          <template v-if="arranging" #tools>
             <span class="tools">
               <button type="button" class="plain" aria-label="Settings" @click="selected = selected === n ? null : n">⚙</button>
+              <button type="button" class="plain" aria-label="Duplicate" @click="duplicate(n)">⧉</button>
               <button type="button" class="plain" aria-label="Remove" @click="removePanel(n)">✕</button>
             </span>
             <span class="corner" title="Resize" @pointerdown="grab($event, n, 'size')"></span>
@@ -295,69 +463,51 @@ const unknown = (list: string[] | null, value: string | undefined) => !!value &&
         </WidgetBox>
         <div v-if="ghost" class="drop-ghost" :style="cell(ghost)" aria-hidden="true"></div>
       </div>
-      <aside v-if="draft && panel" class="card dash-settings" aria-label="Panel settings">
+      <aside v-if="arranging && panel" class="card dash-settings" aria-label="Panel settings">
         <label>Title <input v-model="panel.title" name="panel-title" maxlength="200" /></label>
-        <template v-if="panel.type === 'totals' || panel.type === 'problems'">
+        <template v-if="panel.type === 'status' || panel.type === 'availability'">
+          <p class="by">{{ scopeText(panel) }}</p>
+          <FindTarget mode="scope" label="Show" :chooser="!!body.choose_host" @scope="setScope" />
+        </template>
+        <template v-else-if="panel.type === 'metric'">
+          <ul class="series-list">
+            <li v-for="(s, i) in panel.series" :key="i">
+              <span>{{ seriesText(s) }}</span>
+              <button type="button" class="plain" :aria-label="`Remove ${seriesText(s)}`" @click="mark(); panel.series.splice(i, 1)">✕</button>
+            </li>
+          </ul>
+          <FindTarget v-if="panel.series.length < 8" mode="series" label="Add" @series="addSeries" />
+          <label v-if="body.choose_host && panel.series.some((s) => s.host !== '$host')" class="check">
+            <input type="checkbox" @change="toChosen" /> For the chosen host
+          </label>
+        </template>
+        <template v-else-if="panel.type === 'problems'">
+          <fieldset class="field inline">
+            <legend>Of</legend>
+            <label><input v-model="panel.of" type="radio" value="services" /> services</label>
+            <label><input v-model="panel.of" type="radio" value="hosts" /> hosts</label>
+          </fieldset>
           <label>
-            Of
-            <select v-model="panel.of" name="panel-of">
-              <option value="hosts">hosts</option>
-              <option value="services">services</option>
+            Show
+            <select v-model="panel.show" name="panel-show">
+              <option value="problems">Problems</option>
+              <option value="acknowledged">Acknowledged</option>
+              <option value="downtimes">In a downtime</option>
+              <option value="recovered">Recovered</option>
             </select>
           </label>
-          <label>
-            Host group
-            <input v-model="panel.hostgroup" name="panel-hostgroup" list="dash-groups" maxlength="200" autocomplete="off" :aria-invalid="unknown(groupList, panel.hostgroup)" />
-          </label>
-          <datalist id="dash-groups"><option v-for="g in groupList ?? []" :key="g" :value="g" /></datalist>
+          <label>Host group <input v-model="panel.hostgroup" name="panel-hostgroup" list="dash-groups" maxlength="200" autocomplete="off" /></label>
         </template>
-        <template v-if="panel.type === 'problems'">
-          <label>Rows <input v-model.number="panel.limit" name="panel-limit" type="number" min="1" max="100" /></label>
-          <label class="check"><input v-model="panel.unhandled" type="checkbox" /> Unhandled only</label>
-        </template>
-        <template v-if="panel.type === 'object' || panel.type === 'stat' || panel.type === 'graph'">
-          <label v-if="backends.length > 1">
-            Backend
-            <select v-model="panel.backend" name="panel-backend" required>
-              <option v-for="name in backends" :key="name" :value="name">{{ name }}</option>
-            </select>
-          </label>
-          <label>
-            Host
-            <input v-model="panel.host" name="panel-host" list="dash-hosts" required maxlength="200" autocapitalize="none" autocomplete="off" :aria-invalid="unknown(hostList, panel.host)" />
-          </label>
-          <datalist id="dash-hosts"><option v-for="h in hostList ?? []" :key="h" :value="h" /></datalist>
-          <label>
-            Service
-            <input v-model="panel.service" name="panel-service" list="dash-services" maxlength="200" autocomplete="off" :aria-invalid="unknown(serviceList, panel.service)" />
-          </label>
-          <datalist id="dash-services"><option v-for="d in serviceList ?? []" :key="d" :value="d" /></datalist>
-        </template>
-        <template v-if="panel.type === 'stat' || panel.type === 'graph'">
-          <label>
-            Metric
-            <select v-model="panel.label" name="panel-label">
-              <option :value="undefined">First</option>
-              <option v-if="panel.label && !metricList?.some((m) => m.label === (panel as { label?: string }).label)" :value="panel.label">{{ panel.label }}</option>
-              <option v-for="m in metricList ?? []" :key="m.label" :value="m.label">{{ m.label }} · {{ m.now }}</option>
-            </select>
-          </label>
-          <label>Hours <input v-model.number="panel.hours" name="panel-hours" type="number" min="1" max="744" /></label>
-        </template>
-        <template v-if="panel.type === 'log'">
-          <label>
-            Lines
-            <select v-model="panel.lines" name="panel-lines">
-              <option value="alerts">alerts</option>
-              <option value="notifications">notifications</option>
-            </select>
-          </label>
-          <label>Hours <input v-model.number="panel.hours" name="panel-hours" type="number" min="1" max="744" /></label>
-          <label>Rows <input v-model.number="panel.limit" name="panel-limit" type="number" min="1" max="100" /></label>
-        </template>
+        <fieldset v-else-if="panel.type === 'log'" class="field inline">
+          <legend>Lines</legend>
+          <label><input v-model="panel.lines" type="radio" value="alerts" /> alerts</label>
+          <label><input v-model="panel.lines" type="radio" value="notifications" /> notifications</label>
+        </fieldset>
+        <label v-else-if="panel.type === 'note'">Text <textarea v-model="panel.text" name="panel-text" rows="6" maxlength="4000"></textarea></label>
         <button type="button" class="quiet" @click="selected = null">Done</button>
       </aside>
+      <datalist id="dash-groups"><option v-for="g in groupList ?? []" :key="g" :value="g" /></datalist>
     </div>
-    <p v-if="shown.length === 0 && !draft" class="none">Empty</p>
+    <p v-if="body.widgets.length === 0 && !arranging" class="none">Empty</p>
   </template>
 </template>

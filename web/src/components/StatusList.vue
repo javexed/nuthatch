@@ -33,8 +33,10 @@ const props = withDefaults(
     empty?: string
     /** Rows as blocks, as on a narrow screen: for a narrow box. */
     stacked?: boolean
+    /** Rows can be ticked for actions on several at once. */
+    tickable?: boolean
   }>(),
-  { controls: false, pageSize: 50, empty: 'Nothing here.', stacked: false },
+  { controls: false, pageSize: 50, empty: 'Nothing here.', stacked: false, tickable: true },
 )
 
 const route = useRoute()
@@ -53,6 +55,7 @@ type Column = (typeof COLUMNS)[Kind][number]
 const nameColumn = computed(() => (props.kind === 'host' ? 'name' : 'host_name'))
 const many = computed(() => props.backend === undefined && (session.session?.backends.length ?? 0) > 1)
 const canCommand = computed(() => !session.has('read_only'))
+const canTick = computed(() => canCommand.value && props.tickable)
 
 // What the controls say: in the address, or kept here.
 const own = ref<ListFilter>({ ...EMPTY })
@@ -292,7 +295,7 @@ const now = () => Date.now() / 1000
     <p v-for="[name, why] in backendErrors" :key="name" class="error" role="alert"><strong>{{ name }}</strong>: {{ why }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-    <div v-if="canCommand && ticked.size > 0" class="toolbar" role="toolbar" aria-label="Actions on the ticked rows">
+    <div v-if="canTick && ticked.size > 0" class="toolbar" role="toolbar" aria-label="Actions on the ticked rows">
       <span>{{ ticked.size }} ticked</span>
       <button type="button" class="quiet" @click="recheckTicked">Check now</button>
       <button type="button" class="quiet" @click="dialog = 'acknowledge'">Acknowledge</button>
@@ -306,13 +309,13 @@ const now = () => Date.now() / 1000
         <option v-for="choice in sortChoices" :key="choice.value" :value="choice.value">{{ choice.label }}</option>
       </select>
     </label>
-    <label v-if="canCommand && rows.length > 1" class="check tick-all">
+    <label v-if="canTick && rows.length > 1" class="check tick-all">
       <input type="checkbox" :checked="allTicked" @change="tickAll(($event.target as HTMLInputElement).checked)" /> Tick all
     </label>
     <table v-if="rows.length > 0" :class="['rows', { stacked }]">
       <thead>
         <tr>
-          <th v-if="canCommand" class="tick"></th>
+          <th v-if="canTick" class="tick"></th>
           <th><button type="button" class="sort" @click="sortOn('state')">State{{ arrow('state') }}</button></th>
           <th><button type="button" class="sort" @click="sortOn(nameColumn)">Host{{ arrow(nameColumn) }}</button></th>
           <th v-if="kind === 'service'"><button type="button" class="sort" @click="sortOn('description')">Service{{ arrow('description') }}</button></th>
@@ -332,7 +335,7 @@ const now = () => Date.now() / 1000
           @touchend.passive="dragEnd($event, row)"
           @touchcancel.passive="drag = null"
         >
-          <td v-if="canCommand" class="tick">
+          <td v-if="canTick" class="tick">
             <input type="checkbox" :checked="ticked.has(keyOf(row))" :aria-label="`Tick ${targetName(target(row))}`" @change="tick(row, ($event.target as HTMLInputElement).checked)" />
           </td>
           <td class="state"><StateBadge :kind="kind" :state="cell(row, 'state')" :checked="cell(row, 'has_been_checked')" /></td>

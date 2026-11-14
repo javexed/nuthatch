@@ -519,31 +519,34 @@ describe('dashboards', () => {
     const app = buildApp({ backends: [], store, events: new Events([]), roles: new RolesConfig(), limiter: new Limiter(), cookieSecure: false })
     const call = (user: string, method: string, path: string, body?: unknown) =>
       app.request(path, { method, headers: { Authorization: `Bearer ${store.newToken(user, 't').token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
-    const draft = { title: 'Mine', shared: false, widgets: [{ type: 'totals', of: 'hosts', extra: 'dropped', layout: { x: 0, y: 0, w: 12, h: 3 } }, { type: 'object', backend: 'a', host: 'web1', layout: { x: 0, y: 3, w: 4, h: 3 } }] }
-    const made = (await (await call('ann', 'POST', '/api/v1/dashboards', draft)).json()) as { id: number; widgets: unknown[]; owner: string }
+    const draft = { title: 'Mine', shared: false, range: '6h', choose_host: { hostgroup: 'web' }, widgets: [{ type: 'status', extra: 'dropped', layout: { x: 0, y: 0, w: 12, h: 3 } }, { type: 'status', of: { backend: 'a', host: '$host' }, layout: { x: 0, y: 3, w: 4, h: 3 } }] }
+    const made = (await (await call('ann', 'POST', '/api/v1/dashboards', draft)).json()) as { id: number; widgets: unknown[]; owner: string; range: string; choose_host: unknown }
     expect(made.owner).toBe('ann')
-    expect(made.widgets[0]).toEqual({ type: 'totals', of: 'hosts', layout: { x: 0, y: 0, w: 12, h: 3 } })
+    expect(made.widgets[0]).toEqual({ type: 'status', layout: { x: 0, y: 0, w: 12, h: 3 } })
+    expect([made.range, made.choose_host]).toEqual(['6h', { hostgroup: 'web' }])
 
     expect((await call('bob', 'GET', `/api/v1/dashboards/${made.id}`)).status).toBe(404)
     expect(await (await call('bob', 'GET', '/api/v1/dashboards')).json()).toEqual([])
     expect((await call('ann', 'PUT', `/api/v1/dashboards/${made.id}`, { ...draft, shared: true })).status).toBe(200)
     expect((await call('bob', 'GET', `/api/v1/dashboards/${made.id}`)).status).toBe(200)
     // Anyone changes a shared one, which stays shared; only its owner deletes it.
-    const placed = { ...draft, title: 'changed by bob', shared: false, widgets: [{ type: 'stat', backend: 'site', host: 'web1', label: 'rta', layout: { x: 6, y: 0, w: 6, h: 2 } }] }
+    const placed = { ...draft, title: 'changed by bob', shared: false, widgets: [{ type: 'metric', series: [{ backend: 'site', host: 'web1', label: 'rta' }], layout: { x: 6, y: 0, w: 6, h: 2 } }] }
     expect((await call('bob', 'PUT', `/api/v1/dashboards/${made.id}`, placed)).status).toBe(200)
     const after = (await (await call('ann', 'GET', `/api/v1/dashboards/${made.id}`)).json()) as { title: string; shared: boolean; widgets: { layout?: unknown }[] }
     expect([after.title, after.shared, after.widgets[0]?.layout]).toEqual(['changed by bob', true, { x: 6, y: 0, w: 6, h: 2 }])
     expect((await call('bob', 'DELETE', `/api/v1/dashboards/${made.id}`)).status).toBe(404)
-    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'graph', backend: 'b', host: 'h', layout: { x: 10, y: 0, w: 4, h: 2 } }] })).status).toBe(400)
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'note', text: 'x', layout: { x: 10, y: 0, w: 4, h: 2 } }] })).status).toBe(400)
     // Not shared: not bob's to change.
     expect((await call('ann', 'PUT', `/api/v1/dashboards/${made.id}`, { ...draft, shared: false })).status).toBe(200)
     expect((await call('bob', 'PUT', `/api/v1/dashboards/${made.id}`, draft)).status).toBe(404)
 
     expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'script' }] })).status).toBe(400)
     expect((await call('ann', 'POST', '/api/v1/dashboards', { title: '', widgets: [] })).status).toBe(400)
-    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'problems', of: 'services', limit: 100000, layout: { x: 0, y: 0, w: 6, h: 4 } }] })).status).toBe(400)
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'problems', of: 'services', show: 'everything', layout: { x: 0, y: 0, w: 6, h: 4 } }] })).status).toBe(400)
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', range: '1y', widgets: [] })).status).toBe(400)
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'metric', series: Array(9).fill({ backend: 'a', host: 'h', label: 'l' }), layout: { x: 0, y: 0, w: 6, h: 4 } }] })).status).toBe(400)
     // Every panel has its place.
-    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'totals', of: 'hosts' }] })).status).toBe(400)
+    expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'status' }] })).status).toBe(400)
     expect((await call('ann', 'DELETE', `/api/v1/dashboards/${made.id}`)).status).toBe(200)
   })
 })

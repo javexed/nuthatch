@@ -1,12 +1,15 @@
-// Dashboards: a title and a list of boxes, kept per user in nuthatch's
-// store. A dashboard holds no data, only what its boxes ask for; the
-// asking is done by whoever looks, with their rights.
+// Dashboards: a title, a time range, maybe a host to choose, and panels on
+// a grid, kept per user in nuthatch's store. A dashboard holds no data,
+// only what its panels ask for; the asking is done by whoever looks, with
+// their rights.
 
-import type { Dashboard, DashboardDraft, Layout, PanelSettings, Widget } from '@nuthatch/api'
+import type { Dashboard, DashboardDraft, Layout, PanelSettings, Range, Scope, Series, Target, Widget } from '@nuthatch/api'
+import { RANGES } from '@nuthatch/api'
 import { Refused } from './policy.ts'
 import type { DashboardRow } from './store.ts'
 
 const MAX_WIDGETS = 40
+const MAX_SERIES = 8
 
 function name(value: unknown, what: string, required: boolean): string | undefined {
   if (value === undefined || value === null || value === '') {
@@ -17,15 +20,26 @@ function name(value: unknown, what: string, required: boolean): string | undefin
   return value
 }
 
-function count(value: unknown, what: string, max: number): number | undefined {
-  if (value === undefined || value === null) return undefined
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > max) throw new Refused(`${what} is a whole number from 1 to ${max}`)
-  return value
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], what: string): T {
+  if (!allowed.includes(value as T)) throw new Refused(`${what} is one of ${allowed.join(', ')}`)
+  return value as T
 }
 
-const of = (value: unknown): 'hosts' | 'services' => {
-  if (value !== 'hosts' && value !== 'services') throw new Refused("a box is of 'hosts' or of 'services'")
-  return value
+function target(given: unknown): Target {
+  if (typeof given !== 'object' || given === null) throw new Refused('a host or service is needed')
+  const t = given as Record<string, unknown>
+  const service = name(t.service, 'a service', false)
+  return { backend: name(t.backend, 'a backend', true) ?? '', host: name(t.host, 'a host', true) ?? '', ...(service ? { service } : {}) }
+}
+
+function series(given: unknown): Series {
+  return { ...target(given), label: name((given as Record<string, unknown>).label, 'a metric', true) ?? '' }
+}
+
+function scope(w: Record<string, unknown>): Scope {
+  if (w.of !== undefined && w.of !== null) return { of: target(w.of) }
+  const hostgroup = name(w.hostgroup, 'a host group', false)
+  return hostgroup ? { hostgroup } : {}
 }
 
 function layout(given: unknown): Layout {
@@ -37,54 +51,64 @@ function layout(given: unknown): Layout {
   return { x, y, w, h }
 }
 
-/** A box as it may be kept: only what a box of its kind has. */
-function widget(given: unknown): Widget {
-  if (typeof given !== 'object' || given === null) throw new Refused('a box is an object')
-  const w = given as Record<string, unknown>
-  return { ...inner(w), layout: layout(w.layout) }
+/** A panel's settings as they may be kept: only what a panel of its kind has. */
+function settings(w: Record<string, unknown>): PanelSettings {
+  const title = name(w.title, 'a title', false)
+  const titled = title ? { title } : {}
+  switch (w.type) {
+    case 'status':
+      return { type: 'status', ...titled, ...scope(w) }
+    case 'availability':
+      return { type: 'availability', ...titled, ...scope(w) }
+    case 'problems': {
+      const hostgroup = name(w.hostgroup, 'a host group', false)
+      return {
+        type: 'problems',
+        ...titled,
+        of: oneOf(w.of, ['hosts', 'services'] as const, 'a list'),
+        show: oneOf(w.show, ['problems', 'acknowledged', 'downtimes', 'recovered'] as const, 'what it shows'),
+        ...(hostgroup ? { hostgroup } : {}),
+      }
+    }
+    case 'metric':
+      if (!Array.isArray(w.series) || w.series.length > MAX_SERIES) throw new Refused(`a metric panel has at most ${MAX_SERIES} lines`)
+      return { type: 'metric', ...titled, series: w.series.map(series) }
+    case 'log':
+      return { type: 'log', ...titled, lines: oneOf(w.lines, ['alerts', 'notifications'] as const, 'the lines') }
+    case 'note':
+      if (typeof w.text !== 'string' || w.text.length > 4000 || w.text.includes('\0')) throw new Refused('a note is text of at most 4000 letters')
+      return { type: 'note', ...titled, text: w.text }
+    default:
+      throw new Refused(`no panel of the kind '${String(w.type)}'`)
+  }
 }
 
-function inner(w: Record<string, unknown>): PanelSettings {
-  const title = name(w.title, 'a title', false)
-  switch (w.type) {
-    case 'stat':
-    case 'graph':
-      return {
-        type: w.type,
-        title,
-        backend: name(w.backend, 'a backend', true) ?? '',
-        host: name(w.host, 'a host', true) ?? '',
-        service: name(w.service, 'a service', false),
-        label: name(w.label, 'a label', false),
-        hours: count(w.hours, 'the hours', 24 * 31),
-      }
-    case 'totals':
-      return { type: 'totals', title, of: of(w.of), hostgroup: name(w.hostgroup, 'a host group', false) }
-    case 'problems':
-      return { type: 'problems', title, of: of(w.of), unhandled: w.unhandled === true, hostgroup: name(w.hostgroup, 'a host group', false), limit: count(w.limit, 'the number of rows', 100) }
-    case 'object':
-      return { type: 'object', title, backend: name(w.backend, 'a backend', true) ?? '', host: name(w.host, 'a host', true) ?? '', service: name(w.service, 'a service', false) }
-    case 'log':
-      if (w.lines !== 'alerts' && w.lines !== 'notifications') throw new Refused("a log box shows 'alerts' or 'notifications'")
-      return { type: 'log', title, lines: w.lines, hours: count(w.hours, 'the hours', 24 * 31), limit: count(w.limit, 'the number of lines', 100) }
-    default:
-      throw new Refused(`no box of the kind '${String(w.type)}'`)
-  }
+function widget(given: unknown): Widget {
+  if (typeof given !== 'object' || given === null) throw new Refused('a panel is an object')
+  const w = given as Record<string, unknown>
+  return { ...settings(w), layout: layout(w.layout) }
 }
 
 /** A dashboard as it may be kept, from what a browser sent. */
 export function checkDraft(given: Record<string, unknown>): DashboardDraft {
   const title = name(given.title, 'a title', true) ?? ''
-  if (!Array.isArray(given.widgets) || given.widgets.length > MAX_WIDGETS) throw new Refused(`a dashboard has at most ${MAX_WIDGETS} boxes`)
-  return { title, shared: given.shared === true, widgets: given.widgets.map(widget) }
+  if (!Array.isArray(given.widgets) || given.widgets.length > MAX_WIDGETS) throw new Refused(`a dashboard has at most ${MAX_WIDGETS} panels`)
+  const range = given.range === undefined ? '24h' : oneOf(given.range, Object.keys(RANGES) as Range[], 'the range')
+  let chooseHost: DashboardDraft['choose_host']
+  if (given.choose_host !== undefined && given.choose_host !== null) {
+    if (typeof given.choose_host !== 'object') throw new Refused('choose_host is an object')
+    const hostgroup = name((given.choose_host as Record<string, unknown>).hostgroup, 'a host group', false)
+    chooseHost = hostgroup ? { hostgroup } : {}
+  }
+  return { title, shared: given.shared === true, range, ...(chooseHost ? { choose_host: chooseHost } : {}), widgets: given.widgets.map(widget) }
+}
+
+/** What the store keeps beside the title and sharing. */
+export function bodyOf(draft: DashboardDraft): string {
+  return JSON.stringify({ range: draft.range, choose_host: draft.choose_host, widgets: draft.widgets })
 }
 
 export function fromRow(row: DashboardRow): Dashboard {
-  let widgets: Widget[] = []
-  try {
-    widgets = JSON.parse(row.widgets) as Widget[]
-  } catch {
-    // Kept by an older nuthatch in a form this one does not read: empty.
-  }
-  return { id: row.id, owner: row.owner, title: row.title, shared: row.shared === 1, widgets, updated: row.updated }
+  const body = JSON.parse(row.body) as Pick<Dashboard, 'range' | 'choose_host' | 'widgets'>
+  return { id: row.id, owner: row.owner, title: row.title, shared: row.shared === 1, updated: row.updated, ...body }
 }

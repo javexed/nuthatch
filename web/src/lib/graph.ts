@@ -29,10 +29,11 @@ function usualStep(points: Point[]): number {
   return steps[Math.floor(steps.length / 2)] ?? 0
 }
 
-export function shape(points: Point[], from: number, to: number): Shape {
+/** `scale`: the values at the bottom and top edge, for lines that share a graph. */
+export function shape(points: Point[], from: number, to: number, scale?: { low: number; high: number }): Shape {
   const values = points.map((p) => p[1])
-  let min = Math.min(...values)
-  let max = Math.max(...values)
+  let min = scale?.low ?? Math.min(...values)
+  let max = scale?.high ?? Math.max(...values)
   // A flat line sits in the middle rather than on an edge.
   if (min === max) {
     const pad = Math.abs(min) * 0.1 || 1

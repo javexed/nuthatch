@@ -8,7 +8,7 @@ import CommandDialog, { type Action } from '../components/CommandDialog.vue'
 import EventLog from '../components/EventLog.vue'
 import PerfGraphs from '../components/PerfGraphs.vue'
 import PushInfo from '../components/PushInfo.vue'
-import AddToDashboard from '../components/AddToDashboard.vue'
+import PinButton from '../components/PinButton.vue'
 import AggregateMembers from '../components/AggregateMembers.vue'
 import StateBadge from '../components/StateBadge.vue'
 import StatusList from '../components/StatusList.vue'
@@ -163,7 +163,7 @@ async function send(command: Command, done: string): Promise<boolean> {
       </div>
       <p v-if="notice" class="notice" role="status">{{ notice }}</p>
       <div class="actions">
-        <AddToDashboard :backend="backend" :host="host" :service="service" :labels="perf.map((p) => p.label)" />
+        <PinButton :panel="{ type: 'status', of: { backend, host, ...(service !== undefined ? { service } : {}) } }" />
       </div>
     </section>
 

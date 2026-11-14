@@ -69,7 +69,7 @@ export function place(boxes: Box[], w: number, h: number): Box {
 }
 
 /** A new panel's size, by its type. */
-export const SIZES: Record<Widget['type'], [number, number]> = { totals: [12, 3], problems: [6, 4], object: [4, 3], log: [6, 4], stat: [3, 2], graph: [6, 3] }
+export const SIZES: Record<Widget['type'], [number, number]> = { status: [6, 4], problems: [6, 5], metric: [3, 2], log: [6, 5], availability: [3, 3], note: [4, 2] }
 
 /** The panels with one more, in the first free place. */
 export function withPanel(widgets: Widget[], panel: PanelSettings): Widget[] {

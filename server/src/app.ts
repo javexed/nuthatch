@@ -16,7 +16,7 @@ import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
-import { checkDraft, fromRow } from './dashboards.ts'
+import { bodyOf, checkDraft, fromRow } from './dashboards.ts'
 import { type TailnetMachine, askTailscale, discover } from './discover.ts'
 import type { Events } from './events.ts'
 import type { Graphs } from './graphs.ts'
@@ -729,7 +729,7 @@ export function buildApp(deps: Deps): Hono<Env> {
   app.post('/api/v1/dashboards', async (c) => {
     const { user } = c.get('identity')
     const draft = checkDraft(await body(c))
-    const id = deps.store.newDashboard(user, draft.title, draft.shared, JSON.stringify(draft.widgets))
+    const id = deps.store.newDashboard(user, draft.title, draft.shared, bodyOf(draft))
     const row = deps.store.dashboard(user, id)
     return row ? c.json(fromRow(row)) : c.json({ error: 'not kept' }, 500)
   })
@@ -739,7 +739,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     const id = Number(c.req.param('id'))
     const draft = checkDraft(await body(c))
     // Its owner, or anyone for a shared one.
-    if (!Number.isInteger(id) || !deps.store.saveDashboard(user, id, draft.title, draft.shared, JSON.stringify(draft.widgets))) {
+    if (!Number.isInteger(id) || !deps.store.saveDashboard(user, id, draft.title, draft.shared, bodyOf(draft))) {
       return c.json({ error: 'not found' }, 404)
     }
     const row = deps.store.dashboard(user, id)

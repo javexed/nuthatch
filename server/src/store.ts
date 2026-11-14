@@ -42,8 +42,8 @@ export interface DashboardRow {
   owner: string
   title: string
   shared: number
-  /** JSON. */
-  widgets: string
+  /** JSON: the range, the host chooser and the panels. */
+  body: string
   updated: number
 }
 
@@ -87,7 +87,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS audit_time ON audit (time);
       CREATE TABLE IF NOT EXISTS dashboards (
         id INTEGER PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
-        shared INTEGER NOT NULL, widgets TEXT NOT NULL, updated INTEGER NOT NULL);
+        shared INTEGER NOT NULL, body TEXT NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS push (
         endpoint TEXT PRIMARY KEY, user TEXT NOT NULL, p256dh TEXT NOT NULL,
         auth TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL);
@@ -183,27 +183,27 @@ export class Store {
 
   /** A user's own dashboards and the shared ones, by title. */
   dashboards(user: string): DashboardRow[] {
-    const rows = this.db.prepare('SELECT id, owner, title, shared, widgets, updated FROM dashboards WHERE owner = ? OR shared = 1 ORDER BY title, id').all(user)
+    const rows = this.db.prepare('SELECT id, owner, title, shared, body, updated FROM dashboards WHERE owner = ? OR shared = 1 ORDER BY title, id').all(user)
     return rows.map((row) => ({ ...row }) as unknown as DashboardRow)
   }
 
   /** One dashboard, when it is the user's or shared. */
   dashboard(user: string, id: number): DashboardRow | null {
-    const row = this.db.prepare('SELECT id, owner, title, shared, widgets, updated FROM dashboards WHERE id = ? AND (owner = ? OR shared = 1)').get(id, user)
+    const row = this.db.prepare('SELECT id, owner, title, shared, body, updated FROM dashboards WHERE id = ? AND (owner = ? OR shared = 1)').get(id, user)
     return row ? ({ ...row } as unknown as DashboardRow) : null
   }
 
-  newDashboard(owner: string, title: string, shared: boolean, widgets: string): number {
-    const made = this.db.prepare('INSERT INTO dashboards (owner, title, shared, widgets, updated) VALUES (?, ?, ?, ?, ?)').run(owner, title, shared ? 1 : 0, widgets, now())
+  newDashboard(owner: string, title: string, shared: boolean, body: string): number {
+    const made = this.db.prepare('INSERT INTO dashboards (owner, title, shared, body, updated) VALUES (?, ?, ?, ?, ?)').run(owner, title, shared ? 1 : 0, body, now())
     return Number(made.lastInsertRowid)
   }
 
   /** Changes a dashboard: the user's own, or a shared one, which stays shared. */
-  saveDashboard(user: string, id: number, title: string, shared: boolean, widgets: string): boolean {
+  saveDashboard(user: string, id: number, title: string, shared: boolean, body: string): boolean {
     return (
       this.db
-        .prepare('UPDATE dashboards SET title = ?, shared = CASE WHEN owner = ? THEN ? ELSE 1 END, widgets = ?, updated = ? WHERE id = ? AND (owner = ? OR shared = 1)')
-        .run(title, user, shared ? 1 : 0, widgets, now(), id, user).changes > 0
+        .prepare('UPDATE dashboards SET title = ?, shared = CASE WHEN owner = ? THEN ? ELSE 1 END, body = ?, updated = ? WHERE id = ? AND (owner = ? OR shared = 1)')
+        .run(title, user, shared ? 1 : 0, body, now(), id, user).changes > 0
     )
   }
 

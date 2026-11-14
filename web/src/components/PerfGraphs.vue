@@ -6,6 +6,7 @@ import { computed, ref } from 'vue'
 import { dateTime } from '../lib/format'
 import { type Point, nearest, shape, short } from '../lib/graph'
 import { useLoader } from '../stores/live'
+import PinButton from './PinButton.vue'
 import { api } from '../stores/session'
 
 /** `label`: one number only; `fixed`: these hours, with no choice of range, and no frame (a dashboard's panel). */
@@ -69,6 +70,7 @@ const value = (v: number, unit: string) => `${short(v)}${unit === '' ? '' : unit
             {{ value(hover.point[1], graph.unit) }} <span class="when">{{ clock(hover.point[0]) }}</span>
           </span>
           <span v-else-if="graph.last" class="now">{{ value(graph.last[1], graph.unit) }}</span>
+          <PinButton v-if="!fixed" :panel="{ type: 'metric', series: [{ backend, host, ...(service !== undefined ? { service } : {}), label: graph.label }] }" :label="graph.label" />
         </figcaption>
         <div
           class="plot"

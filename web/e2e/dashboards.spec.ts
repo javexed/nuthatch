@@ -1,15 +1,133 @@
-// Phase 4: a dashboard is made and shared; it shows each user what is
-// theirs to see, and follows what happens.
+// Dashboards: everyone starts with an Overview; a template makes a whole
+// dashboard in one click; a dashboard is changed in place and kept at
+// once, with undo; one search box says what a panel shows; one range for
+// all; a host chosen at the top; pins from a host's page; walls that take
+// turns.
+import { readFileSync } from 'node:fs'
 import { type Page, expect, test } from '@playwright/test'
-import { ENGINES, fits, goTo, livestatus, login, logout, send } from './helpers'
+import { ENGINES, fits, livestatus, login, logout, send } from './helpers'
 
-const sum = async (page: Page, box: string) => {
-  const numbers = await page.getByRole('region', { name: box }).locator('.tile strong').allInnerTexts()
-  return numbers.reduce((total, n) => total + Number(n), 0)
+const desktop = () => test.info().project.name === 'desktop'
+const panel = (page: Page, name: string | RegExp) => page.getByRole('region', { name, exact: true })
+const tiles = (page: Page, name: string) => panel(page, name).locator('.status-tile')
+
+async function deleteOpen(page: Page) {
+  if (!desktop()) {
+    // A narrow screen changes nothing: delete from a wide one.
+    await page.setViewportSize({ width: 1280, height: 900 })
+  }
+  await page.getByRole('button', { name: 'More' }).click()
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.getByRole('button', { name: 'Delete' }).click()
+  await expect(page).toHaveURL(/\/dashboards$/)
 }
 
-test('a shared dashboard shows each user their own, and follows a result', async ({ page }) => {
-  const title = `Shared ${test.info().project.name} ${Date.now()}`
+test('everyone starts with an Overview, and a template makes a whole dashboard', async ({ page }) => {
+  await login(page, 'ops')
+  await page.goto('/dashboards')
+  await page.locator('.managed').getByRole('link', { name: 'Overview' }).click()
+  await expect(panel(page, 'All hosts')).toBeVisible()
+  await expect(tiles(page, 'All hosts').first()).toBeVisible()
+  await expect(panel(page, 'Service problems')).toBeVisible()
+  await expect(panel(page, 'Alerts')).toBeVisible()
+  await fits(page)
+
+  await page.goto('/dashboards')
+  await page.getByRole('button', { name: 'For a host group' }).click()
+  const group = page.locator('.card button.quiet').first()
+  const name = (await group.textContent())?.trim() ?? ''
+  await group.click()
+  await expect(panel(page, name)).toBeVisible()
+  await expect(panel(page, `Availability · ${name}`)).toContainText('%')
+  await expect(panel(page, `Service problems · ${name}`)).toBeVisible()
+  await expect(panel(page, `Recovered · ${name}`)).toBeVisible()
+  await fits(page)
+  await deleteOpen(page)
+})
+
+test('changed in place and kept at once, with undo; panels from the tray, told what to show by one search', async ({ page }) => {
+  test.skip(!desktop(), 'changed on a wide screen')
+  await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine|load=0.5;1;2 users=3')
+  await login(page, 'admin')
+  await page.setViewportSize({ width: 1280, height: 1400 })
+  await page.goto('/dashboards')
+  await page.getByRole('button', { name: 'Blank' }).click()
+  const title = `Built ${Date.now()}`
+  await page.getByLabel('Title').fill(title)
+  await page.getByRole('button', { name: '+ Panel' }).click()
+  const tray = page.getByRole('toolbar', { name: 'Add a panel' })
+
+  // A metric dragged onto the grid; its settings open; one search finds it.
+  const from = await tray.getByRole('button', { name: '+ Metric' }).boundingBox()
+  const grid = await page.locator('.dash-grid').boundingBox()
+  if (!from || !grid) throw new Error('no boxes')
+  await page.mouse.move(from.x + 10, from.y + 10)
+  await page.mouse.down()
+  await page.mouse.move(grid.x + 30, grid.y + 30, { steps: 10 })
+  await expect(page.locator('.drop-ghost')).toBeVisible()
+  await page.mouse.up()
+  const settings = page.getByRole('complementary', { name: 'Panel settings' })
+  await settings.getByLabel('Add', { exact: true }).fill('passive1 load')
+  await settings.getByRole('button', { name: /passive1 · a · load/ }).click()
+  await settings.getByLabel('Add', { exact: true }).fill('passive1 users')
+  await settings.getByRole('button', { name: /passive1 · a · users/ }).click()
+  await expect(settings.locator('.series-list li')).toHaveCount(2)
+  await settings.getByRole('button', { name: 'Done' }).click()
+  const metric = panel(page, 'passive1 / a')
+  await expect(metric).toContainText('0.5')
+
+  // Status of a host, from the same kind of search.
+  await tray.getByRole('button', { name: '+ Status' }).click()
+  await settings.getByLabel('Show').fill('passive1')
+  await settings.getByRole('button', { name: /^passive1\s*host · naemon$/ }).click()
+  await settings.getByRole('button', { name: 'Done' }).click()
+  await expect(tiles(page, 'passive1').first()).toBeVisible()
+
+  // A note: its web address is a link, nothing else is markup.
+  await tray.getByRole('button', { name: '+ Note' }).click()
+  await settings.getByLabel('Text').fill('Runbook https://example.test/run <b>not bold</b>')
+  await settings.getByRole('button', { name: 'Done' }).click()
+  const note = panel(page, 'Note')
+  await expect(note.getByRole('link', { name: 'https://example.test/run' })).toHaveAttribute('href', 'https://example.test/run')
+  await expect(note).toContainText('<b>not bold</b>')
+
+  // Removed, and back with undo.
+  await metric.getByRole('button', { name: 'Remove' }).click()
+  await expect(metric).toHaveCount(0)
+  await page.getByRole('button', { name: 'Undo' }).click()
+  await expect(metric).toBeVisible()
+  // One range for the whole dashboard.
+  await page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '7d' }).click()
+  // Kept without a save: still there after a reload.
+  await page.waitForTimeout(1200)
+  await page.reload()
+  await expect(page.getByLabel('Title')).toHaveValue(title)
+  await expect(panel(page, 'passive1 / a')).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.dash-grid > section')).toHaveCount(3)
+
+  // Duplicated, then exported as a file.
+  await panel(page, 'Note').getByRole('button', { name: 'Duplicate' }).click()
+  await expect(page.locator('.dash-grid > section')).toHaveCount(4)
+  await page.waitForTimeout(1200)
+  await page.getByRole('button', { name: 'More' }).click()
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export' }).click()])
+  const path = (await download.path()) ?? ''
+  const file = JSON.parse(readFileSync(path, 'utf8')) as { title: string; range: string; widgets: unknown[] }
+  expect([file.title, file.range, file.widgets.length]).toEqual([title, '7d', 4])
+
+  // A file makes a dashboard again.
+  await page.goto('/dashboards')
+  await page.locator('input[type=file]').setInputFiles(path)
+  await expect(page.getByLabel('Title')).toHaveValue(title)
+  await expect(page.locator('.dash-grid > section')).toHaveCount(4)
+  await deleteOpen(page)
+  await page.getByRole('link', { name: title }).click()
+  await deleteOpen(page)
+})
+
+test('a shared dashboard shows each user their own, and its outline shows trouble', async ({ page }) => {
+  test.skip(!desktop(), 'changed on a wide screen')
   await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine')
   let hosts = 0
   let opsHosts = 0
@@ -17,166 +135,112 @@ test('a shared dashboard shows each user their own, and follows a result', async
     hosts += Number((await livestatus(engine, 'GET hosts\nStats: state >= 0'))[0]?.[0])
     opsHosts += Number((await livestatus(engine, 'GET hosts\nAuthUser: ops\nStats: state >= 0'))[0]?.[0])
   }
-
   await login(page, 'admin')
-  await goTo(page, 'Dashboards')
-  await page.getByLabel('A new dashboard').fill(title)
-  await page.getByRole('button', { name: 'Make it' }).click()
-  await expect(page.getByLabel('Title')).toHaveValue(title)
-
-  const KIND: Record<string, string> = { problems: 'Problems', object: 'Host or service', log: 'Log' }
-  const addPanel = async (kind: string) => {
-    await page.getByRole('toolbar', { name: 'Add a panel' }).getByRole('button', { name: `+ ${KIND[kind]}` }).click()
-  }
-  await addPanel('problems')
-  await addPanel('object')
+  await page.setViewportSize({ width: 1280, height: 1200 })
+  await page.goto('/dashboards')
+  await page.getByRole('button', { name: 'Blank' }).click()
+  const title = `Shared ${Date.now()}`
+  await page.getByLabel('Title').fill(title)
+  await page.getByRole('button', { name: '+ Panel' }).click()
+  const tray = page.getByRole('toolbar', { name: 'Add a panel' })
   const settings = page.getByRole('complementary', { name: 'Panel settings' })
-  await settings.getByLabel('Backend').selectOption('naemon')
-  await settings.getByLabel('Host').fill('passive1')
-  await settings.getByLabel('Service').fill('a')
+  await tray.getByRole('button', { name: '+ Status' }).click()
   await settings.getByRole('button', { name: 'Done' }).click()
-  await addPanel('log')
+  await tray.getByRole('button', { name: '+ Problems' }).click()
+  await page.locator('.dash-grid > section').last().getByRole('button', { name: 'Settings' }).click()
+  await settings.getByLabel('Host group').fill('passive')
   await settings.getByRole('button', { name: 'Done' }).click()
-  await page.getByLabel(/Shared/).check()
-  await fits(page)
-  if (test.info().project.name === 'desktop') {
-    // The log is dragged by its grip to the top left, and the others make room.
-    await page.setViewportSize({ width: 1280, height: 1600 })
-    const grip = page.getByRole('region', { name: 'Alerts' }).locator('.grip')
-    const to = page.locator('.dash-grid').boundingBox()
-    const from = await grip.boundingBox()
-    const target = await to
-    if (from && target) {
-      await page.mouse.move(from.x + 4, from.y + 4)
-      await page.mouse.down()
-      await page.mouse.move(target.x + 10, target.y + 10, { steps: 8 })
-      await page.mouse.up()
-    }
-    const log = await page.getByRole('region', { name: 'Alerts' }).boundingBox()
-    const others = await page.locator('.dash-grid > section').evaluateAll((all) => all.map((s) => s.getBoundingClientRect().top))
-    expect(log?.y).toBeLessThanOrEqual(Math.min(...others) + 1)
-  }
-  await page.getByRole('button', { name: 'Save' }).click()
+  await page.getByRole('button', { name: 'More' }).click()
+  await page.getByLabel('Shared').check()
+  await expect(tiles(page, 'All hosts')).toHaveCount(hosts)
 
-  await expect(page.getByRole('heading', { name: title })).toBeVisible()
-  await expect(page.locator('.dash-grid > section')).toHaveCount(5)
-  await expect.poll(() => sum(page, 'Hosts')).toBe(hosts)
-  const object = page.getByRole('region', { name: 'passive1 / a' })
-  await expect(object.locator('.badge')).toHaveText('OK')
-  await fits(page)
-
-  // A result comes in: the boxes follow without a reload of the page.
+  // Trouble: the problems panel's outline turns red, without a reload.
   await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;2;broken for the dashboard')
-  await expect(object.locator('.badge')).toHaveText('Critical', { timeout: 15_000 })
-  await expect(object).toContainText('broken for the dashboard')
-  await expect(page.getByRole('region', { name: 'Unhandled service problems' })).toContainText('passive1')
-  await expect(page.getByRole('region', { name: 'Alerts' })).toContainText('broken for the dashboard')
-  // On a wall, the panels alone.
-  await page.getByRole('button', { name: 'Wall' }).click()
-  await expect(page.locator('header.bar')).toBeHidden()
-  await page.getByRole('button', { name: 'Exit' }).click()
-  await expect(page.locator('header.bar')).toBeVisible()
+  await expect(panel(page, 'Service problems · passive')).toHaveClass(/outline-critical/, { timeout: 15_000 })
+  await expect(panel(page, 'Service problems · passive')).toContainText('passive1')
+  await page.waitForTimeout(1200)
   const url = page.url()
   await logout(page)
 
-  // The same dashboard, as ops.
   await login(page, 'ops')
-  await goTo(page, 'Dashboards')
-  await expect(page.locator('.managed li', { hasText: title })).toContainText('by admin')
   await page.goto(url)
-  await expect(page.getByRole('heading', { name: title })).toBeVisible()
-  await expect.poll(() => sum(page, 'Hosts')).toBe(opsHosts)
+  await expect(tiles(page, 'All hosts')).toHaveCount(opsHosts)
   expect(opsHosts).toBeLessThan(hosts)
-  await expect(page.getByRole('region', { name: 'passive1 / a' })).toContainText('Not found')
-  await expect(page.getByRole('region', { name: 'Unhandled service problems' })).not.toContainText('passive1')
-  // Shared: ops may change it, and not delete it.
-  await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible()
+  await expect(panel(page, 'Service problems · passive')).not.toContainText('passive1')
+  await page.getByRole('button', { name: 'More' }).click()
   await expect(page.getByRole('button', { name: 'Delete' })).toHaveCount(0)
-  await fits(page)
   await logout(page)
 
-  // Its owner deletes it.
   await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine')
   await login(page, 'admin')
   await page.goto(url)
-  page.once('dialog', (dialog) => void dialog.accept())
-  await page.getByRole('button', { name: 'Delete' }).click()
-  await expect(page).toHaveURL(/\/dashboards$/)
-  await expect(page.locator('.managed li', { hasText: title })).toHaveCount(0)
+  await deleteOpen(page)
 })
 
-test('a dashboard that is not shared is its owner\'s alone', async ({ page }) => {
-  const title = `Private ${test.info().project.name} ${Date.now()}`
+test('one dashboard for any host, chosen at the top', async ({ page }) => {
   await login(page, 'admin')
   await page.goto('/dashboards')
-  await page.getByLabel('A new dashboard').fill(title)
-  await page.getByRole('button', { name: 'Make it' }).click()
-  await page.getByRole('button', { name: 'Save' }).click()
-  await expect(page.getByRole('heading', { name: title })).toBeVisible()
-  const url = page.url()
-  await logout(page)
-  await login(page, 'ops')
-  await page.goto(url)
-  await expect(page.getByText('Not found', { exact: true })).toBeVisible()
-  await page.goto('/dashboards')
-  await expect(page.locator('.managed li', { hasText: title })).toHaveCount(0)
-})
-
-test('a panel dragged in from the tray, set up from lists, and one added from a service', async ({ page }) => {
-  const title = `Tray ${test.info().project.name} ${Date.now()}`
-  await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine|load=0.5;1;2 users=3')
-  await login(page, 'admin')
-  await page.goto('/dashboards')
-  await page.getByLabel('A new dashboard').fill(title)
-  await page.getByRole('button', { name: 'Make it' }).click()
-  const tray = page.getByRole('toolbar', { name: 'Add a panel' })
-  const settings = page.getByRole('complementary', { name: 'Panel settings' })
-  if (test.info().project.name === 'desktop') {
-    // Dragged to the top left: it lands there, and the totals make room.
-    const from = await tray.getByRole('button', { name: '+ Number' }).boundingBox()
-    const grid = await page.locator('.dash-grid').boundingBox()
-    if (!from || !grid) throw new Error('no boxes')
-    await page.mouse.move(from.x + 10, from.y + 10)
-    await page.mouse.down()
-    await page.mouse.move(grid.x + 30, grid.y + 20, { steps: 10 })
-    await expect(page.locator('.drop-ghost')).toBeVisible()
-    await page.mouse.up()
-    await expect(page.locator('.drop-ghost')).toHaveCount(0)
-    await expect(settings).toBeVisible()
-    const panels = await page.locator('.dash-grid > section').evaluateAll((all) => all.map((s) => ({ top: s.getBoundingClientRect().top, chosen: s.classList.contains('chosen') })))
-    const chosen = panels.find((p) => p.chosen)
-    expect(chosen?.top).toBeLessThanOrEqual(Math.min(...panels.map((p) => p.top)) + 1)
-  } else {
-    await tray.getByRole('button', { name: '+ Number' }).click()
-  }
-  // Chosen from lists, not typed blind.
-  await settings.getByLabel('Backend').selectOption('naemon')
-  await expect(settings.locator('#dash-hosts option[value="passive1"]')).toHaveCount(1)
-  await settings.getByLabel('Host').fill('nosuchhost')
-  await expect(settings.getByLabel('Host')).toHaveAttribute('aria-invalid', 'true')
-  await settings.getByLabel('Host').fill('passive1')
-  await expect(settings.getByLabel('Host')).toHaveAttribute('aria-invalid', 'false')
-  await expect(settings.locator('#dash-services option[value="a"]')).toHaveCount(1)
-  await settings.getByLabel('Service').fill('a')
-  await expect(settings.getByLabel('Metric').locator('option')).toHaveText(['First', 'load · 0.5', 'users · 3'])
-  await settings.getByLabel('Metric').selectOption('users')
-  await settings.getByRole('button', { name: 'Done' }).click()
-  await page.getByRole('button', { name: 'Save' }).click()
-  await expect(page.getByRole('region', { name: 'passive1 / a · users' })).toBeVisible()
-  const url = page.url()
+  await page.getByRole('button', { name: 'For a host', exact: true }).click()
+  await page.getByLabel('Host', { exact: true }).fill('passive1')
+  await page.getByRole('button', { name: /^passive1\s*host · naemon$/ }).click()
+  const chooser = page.getByRole('combobox', { name: 'Host' })
+  await expect(chooser).toBeVisible()
+  await expect(panel(page, 'passive1')).toBeVisible()
+  await expect(panel(page, 'Availability · passive1')).toBeVisible()
+  const other = (await chooser.locator('option').allTextContents()).find((name) => name !== 'passive1') ?? ''
+  await chooser.selectOption({ label: other })
+  await expect(panel(page, other)).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`host=${other}`))
   await fits(page)
+  await deleteOpen(page)
+})
 
-  // From the service's page: a graph of load, onto this dashboard.
-  await page.goto('/service/naemon/passive1/a')
-  await page.getByRole('button', { name: 'Add to dashboard' }).click()
-  const form = page.getByRole('form', { name: 'Add to dashboard' })
-  await form.getByLabel('Dashboard').selectOption({ label: title })
-  await form.getByLabel('Graph').check()
-  await form.getByLabel('Metric').selectOption('load')
-  await form.getByRole('button', { name: 'Add' }).click()
-  await form.getByRole('status').click()
-  await expect(page).toHaveURL(new RegExp(`${new URL(url).pathname}$`))
-  await expect(page.getByRole('region', { name: 'passive1 / a · load' })).toBeVisible()
-  page.once('dialog', (dialog) => void dialog.accept())
-  await page.getByRole('button', { name: 'Delete' }).click()
+test('pinned from a host page with one click, then undone', async ({ page }) => {
+  await login(page, 'viewer')
+  const overview = async () => {
+    await page.goto('/dashboards')
+    await page.locator('.managed').getByRole('link', { name: 'Overview' }).click()
+    await expect(panel(page, 'All hosts')).toBeVisible()
+    return panel(page, 'passive1').count()
+  }
+  const before = await overview()
+  // Pinned, then undone: the dashboard is as it was.
+  await page.goto('/host/naemon/passive1')
+  await page.getByRole('button', { name: 'Pin to a dashboard' }).click()
+  await expect(page.locator('.pinned').getByRole('link', { name: 'Overview' })).toBeVisible()
+  await page.locator('.pinned').getByRole('button', { name: 'Undo' }).click()
+  await expect(page.getByRole('button', { name: 'Pin to a dashboard' })).toBeVisible()
+  expect(await overview()).toBe(before)
+  // Pinned: one more panel, there at once.
+  await page.goto('/host/naemon/passive1')
+  await page.getByRole('button', { name: 'Pin to a dashboard' }).click()
+  await page.locator('.pinned').getByRole('link', { name: 'Overview' }).click()
+  await expect(panel(page, 'passive1')).toHaveCount(before + 1)
+})
+
+test('dashboards take turns on a wall', async ({ page }) => {
+  test.skip(!desktop(), 'one wall is enough')
+  await login(page, 'admin')
+  const ids: string[] = []
+  for (const name of ['Turn A', 'Turn B']) {
+    await page.goto('/dashboards')
+    await page.getByRole('button', { name: 'Blank' }).click()
+    await page.getByLabel('Title').fill(`${name} ${Date.now()}`)
+    await page.waitForTimeout(1200)
+    ids.push(/\/dashboard\/(\d+)/.exec(page.url())?.[1] ?? '')
+  }
+  await page.goto('/dashboards')
+  for (const id of ids) await page.locator(`input[type=checkbox][value="${id}"]`).check()
+  await page.getByLabel('Every').fill('5')
+  await page.getByRole('button', { name: 'Wall' }).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${ids[0]}\\?`))
+  await expect(page.locator('header.bar')).toBeHidden()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${ids[1]}\\?`), { timeout: 10_000 })
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${ids[0]}\\?`), { timeout: 10_000 })
+  await page.getByRole('button', { name: 'Exit' }).click()
+  await expect(page.locator('header.bar')).toBeVisible()
+  for (const id of ids) {
+    await page.goto(`/dashboard/${id}`)
+    await deleteOpen(page)
+  }
 })

@@ -294,31 +294,66 @@ export interface Layout {
 }
 
 /** A panel on a dashboard. What it shows is asked as the one who looks. */
+/** The time a dashboard's graphs, numbers and availability span. */
+export type Range = '1h' | '6h' | '24h' | '7d'
+export const RANGES: Record<Range, number> = { '1h': 3600, '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400 }
+
+/** A host or service a panel is about. The host `$host` is the one chosen
+ * at the top of a dashboard that lets a host be chosen. */
+export interface Target {
+  backend: string
+  host: string
+  service?: string
+}
+
+/** One number of a check's performance data. */
+export interface Series extends Target {
+  label: string
+}
+
+/** What a status or availability panel covers: one host or service, a
+ * host group, or (neither) everything. */
+export interface Scope {
+  of?: Target
+  hostgroup?: string
+}
+
+export type ProblemsShow = 'problems' | 'acknowledged' | 'downtimes' | 'recovered'
+
 /** A panel's settings, without its place on the grid. */
 export type PanelSettings =
-  | { type: 'totals'; title?: string; of: 'hosts' | 'services'; /** Of this host group only. */ hostgroup?: string }
-  | { type: 'problems'; title?: string; of: 'hosts' | 'services'; unhandled?: boolean; hostgroup?: string; limit?: number }
-  | { type: 'object'; title?: string; backend: string; host: string; service?: string }
-  | { type: 'log'; title?: string; lines: 'alerts' | 'notifications'; hours?: number; limit?: number }
-  /** A number of a check's performance data, now, with how it went. */
-  | { type: 'stat'; title?: string; backend: string; host: string; service?: string; label?: string; hours?: number }
-  /** A number of a check's performance data over time. */
-  | { type: 'graph'; title?: string; backend: string; host: string; service?: string; label?: string; hours?: number }
+  /** One host or service as a card; a group or everything as counts and tiles. */
+  | ({ type: 'status'; title?: string } & Scope)
+  /** Hosts or services: problems nobody has taken care of, those acknowledged, in a downtime, or recovered within the range. */
+  | { type: 'problems'; title?: string; of: 'hosts' | 'services'; show: ProblemsShow; hostgroup?: string }
+  /** Numbers over time: small, the first as a number; larger, a graph. */
+  | { type: 'metric'; title?: string; series: Series[] }
+  | { type: 'log'; title?: string; lines: 'alerts' | 'notifications' }
+  /** The share of time up or OK over the range. */
+  | ({ type: 'availability'; title?: string } & Scope)
+  /** Text, with its web addresses as links. */
+  | { type: 'note'; title?: string; text: string }
 
 export type Widget = PanelSettings & { layout: Layout }
 
-export interface Dashboard {
-  id: number
-  owner: string
+export interface DashboardBody {
   title: string
   /** Shown to everyone who logs in, and changed by anyone; deleted by its owner only. */
   shared: boolean
+  range: Range
+  /** A host is chosen at the top (of this host group, if given), for panels about `$host`. */
+  choose_host?: { hostgroup?: string }
   widgets: Widget[]
+}
+
+export interface Dashboard extends DashboardBody {
+  id: number
+  owner: string
   updated: number
 }
 
 /** A dashboard to make or to change. */
-export type DashboardDraft = Pick<Dashboard, 'title' | 'shared' | 'widgets'>
+export type DashboardDraft = DashboardBody
 
 /** Notifications pushed to this user's browsers. */
 export interface PushState {

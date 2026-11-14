@@ -16,6 +16,12 @@ export interface ListFilter {
   host: string
   /** A host group whose hosts' services are meant. */
   hostgroup: string
+  /** Only those acknowledged. */
+  acknowledged?: boolean
+  /** Only those in a downtime. */
+  downtime?: boolean
+  /** Only those whose state changed since then (seconds). */
+  since?: number
 }
 
 export const EMPTY: ListFilter = { states: [], search: '', unhandled: false, group: '', host: '', hostgroup: '' }
@@ -47,6 +53,9 @@ export function toHeaders(kind: Kind, filter: ListFilter): string[] {
   if (filter.group !== '') out.push(`Filter: groups >= ${name(filter.group)}`)
   if (kind === 'service' && filter.host !== '') out.push(`Filter: host_name = ${name(filter.host)}`)
   if (kind === 'service' && filter.hostgroup !== '') out.push(`Filter: host_groups >= ${name(filter.hostgroup)}`)
+  if (filter.acknowledged) out.push('Filter: acknowledged = 1')
+  if (filter.downtime) out.push('Filter: scheduled_downtime_depth > 0')
+  if (filter.since !== undefined && Number.isFinite(filter.since)) out.push(`Filter: last_hard_state_change >= ${Math.floor(filter.since)}`)
   return out
 }
 

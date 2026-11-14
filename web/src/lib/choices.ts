@@ -65,3 +65,15 @@ export function useList<T>(inputs: () => unknown[], load: () => Promise<T[]> | n
   )
   return list
 }
+
+/** A host's or service's performance data now, with its thresholds. */
+export async function perfOf(target: { backend: string; host: string; service?: string }) {
+  if (!oneLine(target.host) || (target.service !== undefined && !oneLine(target.service))) return []
+  const answer = await api.query({
+    table: target.service ? 'services' : 'hosts',
+    columns: ['perf_data'],
+    headers: target.service ? [`Filter: host_name = ${target.host}`, `Filter: description = ${target.service}`] : [`Filter: name = ${target.host}`],
+    backends: [target.backend],
+  })
+  return parsePerfdata(String(answer.rows[0]?.perf_data ?? ''))
+}
