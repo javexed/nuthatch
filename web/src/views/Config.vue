@@ -3,22 +3,30 @@ import { type Changes, compare, portsOf, withGained } from '../lib/rediscover'
 // The hosts and services nuthatch keeps the config of: adding, changing
 // and taking away. Every change is checked by the engine itself before it
 // is written, and the engine then reads its config again.
-import type { ConfigChange, ConfigResult, ConfigState, ManagedHost } from '@nuthatch/api'
+import type { ConfigChange, ConfigResult, ConfigState, ManagedGroup, ManagedHost } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AddHost from '../components/AddHost.vue'
+import GroupForm from '../components/GroupForm.vue'
 import HostForm from '../components/HostForm.vue'
 import { useLive } from '../stores/live'
 import { api, useSession } from '../stores/session'
 
 const session = useSession()
 const live = useLive()
+const route = useRoute()
+const router = useRouter()
 const backends = computed(() => session.session?.config_backends ?? [])
 const backend = ref(backends.value[0] ?? '')
 const state = ref<ConfigState | null>(null)
 const error = ref('')
 /** The host in the form: one being changed, 'new', or none. */
 const editing = ref<ManagedHost | 'new' | null>(null)
+/** The group in its form: one being changed, a new one of a kind, or none. */
+const group = ref<ManagedGroup | { new: ManagedGroup['type'] } | null>(null)
+/** Choosing the host a new service goes on. */
+const choosingHost = ref(false)
 /** A new host: looked at first, or in the full form (with what was found, if anything). */
 const adding = ref<{ step: 'look' } | { step: 'form'; start?: ManagedHost }>({ step: 'look' })
 const busy = ref(false)
@@ -38,8 +46,46 @@ async function load() {
 watch(backend, () => {
   state.value = null
   editing.value = null
+  group.value = null
   void load()
 }, { immediate: true })
+
+// Come from a page's "New" button: ?new=host|service|hostgroup|servicegroup.
+watch(
+  [() => route.query.new, state],
+  ([wanted]) => {
+    if (!state.value || typeof wanted !== 'string') return
+    if (wanted === 'host') startAdding()
+    else if (wanted === 'service') choosingHost.value = true
+    else if (wanted === 'hostgroup' || wanted === 'servicegroup') group.value = { new: wanted }
+    void router.replace({ query: { ...route.query, new: undefined } })
+  },
+  { immediate: true },
+)
+
+/** Opens a host's form with a new service at the end. */
+function addServiceTo(host: ManagedHost) {
+  choosingHost.value = false
+  editing.value = {
+    ...host,
+    services: [...host.services, { description: '', use: state.value?.templates.service[0] ?? '', servicegroups: [], contacts: [], contact_groups: [] }],
+  }
+}
+
+async function saveGroup(g: ManagedGroup) {
+  const previous = group.value !== null && 'name' in group.value ? group.value.name : undefined
+  if (await send({ kind: 'put-group', group: g, previous }, false, `${g.name} is saved, and the engine has it.`)) group.value = null
+}
+
+function checkGroupOnly(g: ManagedGroup) {
+  const previous = group.value !== null && 'name' in group.value ? group.value.name : undefined
+  return send({ kind: 'put-group', group: g, previous }, true, '')
+}
+
+async function removeGroup(g: ManagedGroup) {
+  if (!window.confirm(`Take the ${g.type} ${g.name} out of the config? Its members stay.`)) return
+  await send({ kind: 'delete-group', type: g.type, name: g.name }, false, `${g.name} is taken out.`)
+}
 
 async function send(change: ConfigChange, dryRun: boolean, done: string): Promise<boolean> {
   if (!state.value) return false
@@ -143,6 +189,28 @@ async function remove(host: ManagedHost) {
         @form="(start) => (adding = { step: 'form', start })"
         @cancel="editing = null"
       />
+      <GroupForm
+        v-else-if="group !== null"
+        :key="'new' in group ? ` new ${group.new}` : `${group.type} ${group.name}`"
+        :state="state"
+        :group="'new' in group ? undefined : group"
+        :type="'new' in group ? group.new : group.type"
+        :busy="busy"
+        @check="checkGroupOnly"
+        @save="saveGroup"
+        @cancel="group = null"
+      />
+      <section v-else-if="choosingHost" class="card choose-host" aria-label="Which host">
+        <h2>New service: on which host?</h2>
+        <p v-if="state.hosts.length === 0" class="none">
+          nuthatch keeps no host on {{ backend }} yet, and a service is added to a host it keeps. Add a host first.
+        </p>
+        <div v-else class="chips">
+          <button v-for="h in state.hosts" :key="h.name" type="button" class="chip" @click="addServiceTo(h)">{{ h.name }}</button>
+        </div>
+        <p class="by">The engine's other hosts are in its own files, which nuthatch does not change.</p>
+        <div class="buttons"><button type="button" class="quiet" @click="choosingHost = false">Cancel</button></div>
+      </section>
       <HostForm
         v-else-if="editing !== null"
         :key="editing === 'new' ? ' new' : editing.name"
@@ -203,6 +271,23 @@ async function remove(host: ManagedHost) {
           </li>
         </ul>
         <p v-else class="none">None yet.</p>
+        <h2 class="groups-head">Groups</h2>
+        <p>
+          <button type="button" class="quiet" :disabled="busy" @click="group = { new: 'hostgroup' }">Add a host group</button>
+          <button type="button" class="quiet" :disabled="busy" @click="group = { new: 'servicegroup' }">Add a service group</button>
+        </p>
+        <ul v-if="(state.groups ?? []).length > 0" class="managed">
+          <li v-for="g in state.groups" :key="`${g.type} ${g.name}`" class="card">
+            <div>
+              <strong>{{ g.name }}</strong> <span class="by">{{ g.type === 'hostgroup' ? 'host group' : 'service group' }}{{ g.alias ? ` · ${g.alias}` : '' }}</span>
+              <p class="by">{{ g.members.length === 0 ? 'No members.' : `Members: ${g.members.join(', ')}` }}</p>
+            </div>
+            <div class="actions">
+              <button type="button" class="quiet" :disabled="busy" @click="group = g">Change</button>
+              <button type="button" class="plain" :disabled="busy" @click="removeGroup(g)">Take out</button>
+            </div>
+          </li>
+        </ul>
         <ul v-if="state.unreadable.length > 0" class="unreadable">
           <li v-for="file in state.unreadable" :key="file.file">
             <strong>{{ file.file }}</strong> was changed by hand and is left alone: {{ file.why }}.

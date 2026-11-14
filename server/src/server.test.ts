@@ -13,7 +13,7 @@ import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
 import { CATALOGUE_NAMES, catalogueFile, pluginsDir } from './catalogue.ts'
-import { aggregateArgs, aggregateOf, checkHost, hostFile, readHostFile } from './configadmin.ts'
+import { aggregateArgs, aggregateOf, checkGroup, checkHost, groupFile, groupText, hostFile, readGroupFile, readHostFile } from './configadmin.ts'
 import { discover, hostName, parseTarget, suggest, tailnetMachines } from './discover.ts'
 import { Events } from './events.ts'
 import { Graphs, thin } from './graphs.ts'
@@ -406,6 +406,20 @@ describe('a host to write', () => {
     expect(text).toContain('define host {\n    host_name       web9\n    use             generic-host\n')
     expect(text).toContain('    check_command        check_ping!100,20%!500,60%\n')
     expect(readHostFile(text)).toEqual(JSON.parse(JSON.stringify(checked)))
+  })
+
+  it('keeps groups, in files no host can have', () => {
+    const hosts = checkGroup({ type: 'hostgroup', name: 'web', alias: 'Web servers', members: ['web1', 'web2', 'web1'] })
+    expect(hosts.members).toEqual(['web1', 'web2'])
+    expect(groupFile('hostgroup', 'web')).toBe('_hostgroup-web.cfg')
+    expect(readGroupFile(groupText(hosts))).toEqual(hosts)
+    const services = checkGroup({ type: 'servicegroup', name: 'disks', members: ['web1/disk /', 'db1/disk /var'] })
+    expect(groupText(services)).toMatch(/members\s+web1,disk \/,db1,disk \/var/)
+    expect(readGroupFile(groupText(services))).toEqual(services)
+    for (const bad of [{ type: 'contactgroup', name: 'x' }, { type: 'hostgroup', name: 'a b' }, { type: 'hostgroup', name: 'x', members: ['a;b'] }, { type: 'servicegroup', name: 'x', members: ['web1'] }, { type: 'hostgroup', name: 'x', alias: 'a\n}' }]) {
+      expect(() => checkGroup(bad), JSON.stringify(bad)).toThrow()
+    }
+    expect(() => readGroupFile(groupText(hosts).replace('alias', 'notes x\n    alias'))).toThrow(/does not edit/)
   })
 
   it('has services that take pushes and services that stand for others', () => {

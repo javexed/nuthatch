@@ -16,7 +16,7 @@ import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import type { ConfigChange, ConfigResult, ConfigState, ManagedHost, ManagedService } from '@nuthatch/api'
+import type { ConfigChange, ConfigResult, ConfigState, ManagedGroup, ManagedHost, ManagedService } from '@nuthatch/api'
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
 import { randomBytes } from 'node:crypto'
@@ -192,6 +192,56 @@ export function checkHost(given: unknown, choices: Choices, known: Templates, ex
   }
 }
 
+/** The file a group is kept in: a name no host's file can have (a host's begins with a letter or digit). */
+export function groupFile(type: ManagedGroup['type'], name: string): string {
+  return `_${type}-${name}.cfg`
+}
+
+const SERVICE_MEMBER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\/[A-Za-z0-9][A-Za-z0-9 _.:\/+-]{0,62}$/
+
+/** A group as it may be written, or the reason it may not. Whether its members exist is the engine's verifier's to say. */
+export function checkGroup(given: unknown): ManagedGroup {
+  if (typeof given !== 'object' || given === null) throw new Refused('a group is needed')
+  const g = given as Record<string, unknown>
+  if (g.type !== 'hostgroup' && g.type !== 'servicegroup') throw new Refused('a group is a hostgroup or a servicegroup')
+  if (typeof g.name !== 'string' || !NAME.test(g.name)) throw new Refused("a group's name is letters, digits, '.', '_' and '-', at most 63")
+  const members = Array.isArray(g.members) ? g.members.map((m) => (typeof m === 'string' ? m.trim() : '')).filter((m) => m !== '') : []
+  if (members.length > 1000) throw new Refused('a group has at most 1000 members here')
+  const bad = members.find((m) => !(g.type === 'hostgroup' ? NAME.test(m) : SERVICE_MEMBER.test(m)))
+  if (bad !== undefined) throw new Refused(g.type === 'hostgroup' ? `'${bad}' is not a host's name` : `'${bad}' is not host/service`)
+  return { type: g.type, name: g.name, alias: text(g.alias, 'the alias'), members: [...new Set(members)] }
+}
+
+/** A group as an object file's text. */
+export function groupText(group: ManagedGroup): string {
+  const attrs: [string, string][] = [[`${group.type}_name`, group.name]]
+  put(attrs, 'alias', group.alias ?? group.name)
+  const members = group.type === 'hostgroup' ? group.members : group.members.map((m) => m.replace('/', ','))
+  put(attrs, 'members', members)
+  return writeObjects([{ type: group.type, attrs }], HEADER)
+}
+
+/** Reads a group's file nuthatch wrote. */
+export function readGroupFile(content: string): ManagedGroup {
+  const definitions = parseObjects(content)
+  const [d] = definitions
+  if (definitions.length !== 1 || d === undefined || (d.type !== 'hostgroup' && d.type !== 'servicegroup')) throw new Error('it does not define exactly one group')
+  const type = d.type
+  const name = attr(d, `${type}_name`)
+  if (name === undefined) throw new Error(`its group has no ${type}_name`)
+  const strange = d.attrs.find(([key]) => ![`${type}_name`, 'alias', 'members'].includes(key))?.[0]
+  if (strange !== undefined) throw new Error(`its group has '${strange}', which nuthatch does not edit`)
+  const raw = list(attr(d, 'members'))
+  const members: string[] = []
+  if (type === 'hostgroup') members.push(...raw)
+  else {
+    if (raw.length % 2 !== 0) throw new Error('its members are not pairs of host and service')
+    for (let n = 0; n < raw.length; n += 2) members.push(`${raw[n]}/${raw[n + 1]}`)
+  }
+  const alias = attr(d, 'alias')
+  return { type, name, alias: alias === name ? undefined : alias, members }
+}
+
 function put(attrs: [string, string][], key: string, value: string | string[] | undefined): void {
   const text = Array.isArray(value) ? value.join(',') : value
   if (text !== undefined && text !== '') attrs.push([key, text])
@@ -337,17 +387,19 @@ export class ConfigAdmin {
     const files = this.files()
     const hosts: ManagedHost[] = []
     const unreadable: ConfigState['unreadable'] = []
+    const groups: ManagedGroup[] = []
     for (const [file, content] of files) {
       if (file === CATALOGUE_FILE) continue
       try {
-        hosts.push(readHostFile(content))
+        if (file.startsWith('_')) groups.push(readGroupFile(content))
+        else hosts.push(readHostFile(content))
       } catch (err) {
         unreadable.push({ file, why: err instanceof Error ? err.message : String(err) })
       }
     }
     const main = readMain(this.settings.main, this.settings.paths)
-    const [commands, contacts, contactgroups, hostgroups, servicegroups, timeperiods] = await Promise.all(
-      ['commands', 'contacts', 'contactgroups', 'hostgroups', 'servicegroups', 'timeperiods'].map((table) => this.names(table)),
+    const [commands, contacts, contactgroups, hostgroups, servicegroups, timeperiods, allHosts] = await Promise.all(
+      ['commands', 'contacts', 'contactgroups', 'hostgroups', 'servicegroups', 'timeperiods', 'hosts'].map((table) => this.names(table)),
     )
     // checkd says who it is beside the version it answers as.
     const version = await this.backend.query('GET status\nColumns: program_version').catch(() => [])
@@ -356,12 +408,13 @@ export class ConfigAdmin {
       backend: this.backend.name,
       revision: this.revision(files),
       hosts: hosts.sort((a, b) => a.name.localeCompare(b.name)),
+      groups: groups.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)),
       unreadable,
       templates: { host: templates(main.files, 'host'), service: templates(main.files, 'service') },
       catalogue: catalogueFor(extras),
       extras,
       // nuthatch's own commands may be chosen too: written when needed.
-      choices: { commands: [...new Set([...(commands ?? []), ...catalogueFor(extras)])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [], timeperiods: timeperiods ?? [] },
+      choices: { commands: [...new Set([...(commands ?? []), ...catalogueFor(extras)])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [], timeperiods: timeperiods ?? [], hosts: allHosts ?? [] },
     }
   }
 
@@ -372,9 +425,10 @@ export class ConfigAdmin {
     return next
   }
 
-  private async hostThere(name: string): Promise<boolean> {
-    const rows = await this.backend.query(`GET hosts\nFilter: name = ${name}\nStats: state >= 0`)
-    return rows[0]?.[0] === 1
+  /** Whether the engine has a host or a group of that name. */
+  private async there(table: string, name: string): Promise<boolean> {
+    const rows = await this.backend.query(`GET ${table}\nColumns: name\nFilter: name = ${name}`)
+    return rows.length === 1
   }
 
   private async reload(): Promise<void> {
@@ -400,6 +454,9 @@ export class ConfigAdmin {
     const writes = new Map<string, string>()
     const removes: string[] = []
     let name: string
+    /** What the engine shows when it has taken the change up: a host, or a group. */
+    let kept = { table: 'hosts', name: '' }
+    let file: string | undefined
     if (change.kind === 'put') {
       const host = checkHost(change.host, state.choices, state.templates, state.extras === true)
       name = host.name
@@ -421,10 +478,33 @@ export class ConfigAdmin {
     } else if (change.kind === 'delete' && typeof change.name === 'string' && state.hosts.some((h) => h.name === change.name)) {
       name = change.name
       removes.push(`${change.name}.cfg`)
+    } else if (change.kind === 'put-group') {
+      const group = checkGroup(change.group)
+      kept = { table: `${group.type}s`, name: group.name }
+      name = group.name
+      const kept_ = (state.groups ?? []).filter((g) => g.type === group.type)
+      const before = typeof change.previous === 'string' ? change.previous : undefined
+      const taken = kept_.some((g) => g.name === group.name)
+      if (before === undefined && taken) throw new Refused(`nuthatch already keeps a ${group.type} '${group.name}'`)
+      if (before !== undefined && !kept_.some((g) => g.name === before)) throw new Refused(`nuthatch keeps no ${group.type} '${before}'`)
+      if (before !== undefined && before !== group.name) {
+        if (taken) throw new Refused(`nuthatch already keeps a ${group.type} '${group.name}'`)
+        removes.push(groupFile(group.type, before))
+      }
+      file = groupFile(group.type, group.name)
+      writes.set(file, groupText(group))
+    } else if (
+      change.kind === 'delete-group' &&
+      (change.type === 'hostgroup' || change.type === 'servicegroup') &&
+      (state.groups ?? []).some((g) => g.type === change.type && g.name === change.name)
+    ) {
+      kept = { table: `${change.type}s`, name: change.name }
+      name = change.name
+      removes.push(groupFile(change.type, change.name))
     } else {
-      throw new Refused('nuthatch keeps no such host')
+      throw new Refused('nuthatch keeps no such host or group')
     }
-    const text = writes.get(`${name}.cfg`) ?? ''
+    const text = writes.get(file ?? `${name}.cfg`) ?? ''
 
     // The engine's verifier, on a copy.
     const before = this.files()
@@ -454,7 +534,8 @@ export class ConfigAdmin {
       for (const file of gone) unlinkSync(join(dir, file))
     }
     write(writes, removes)
-    const wanted = change.kind === 'put'
+    if (kept.name === '') kept = { table: 'hosts', name }
+    const wanted = change.kind === 'put' || change.kind === 'put-group'
     let shown = false
     let problem = ''
     try {
@@ -468,7 +549,7 @@ export class ConfigAdmin {
       for (let tries = 0; tries < 60 && !shown; tries++) {
         await sleep(500)
         const anew = await started().then((at) => at !== undefined && at !== startedBefore, () => false)
-        shown = anew && (await this.hostThere(name).catch(() => !wanted)) === wanted
+        shown = anew && (await this.there(kept.table, kept.name).catch(() => !wanted)) === wanted
       }
     } catch (err) {
       problem = err instanceof Error ? err.message : String(err)

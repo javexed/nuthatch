@@ -194,3 +194,17 @@ looking. It is done when asked, not on a timer, and only for the checks
 nuthatch suggests itself (a port, a web page, a certificate): a check by
 a command of your own is left out of it.
 
+## Groups, and "New" where the lists are
+
+nuthatch also keeps host groups and service groups: a name, an alias and
+the members, which may be any of the engine's hosts or services wherever
+they are defined. Each is a file of its own in nuthatch's directory
+(`_hostgroup-<name>.cfg`, `_servicegroup-<name>.cfg`), checked by the
+engine's verifier like a host. Groups the engine has elsewhere are shown
+on the Groups pages and not changed.
+
+The Hosts, Services and Groups pages have a "New" button for those with
+the role `config_edit`. It opens this page at the right step: looking at
+a host to add, choosing which of nuthatch's hosts a new service goes on,
+or a new group.
+

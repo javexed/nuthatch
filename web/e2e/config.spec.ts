@@ -36,7 +36,7 @@ for (const engine of ENGINES) {
     await expect(page.getByRole('heading', { name: 'Config' })).toBeVisible()
     await page.locator('select[name=backend]').selectOption(engine)
     await expect(page.getByText(`on ${engine}`)).toBeVisible()
-    await page.getByRole('button', { name: 'Add a host' }).click()
+    await page.getByRole('button', { name: 'Add a host', exact: true }).click()
     await page.getByRole('button', { name: 'Fill in the form myself' }).click()
     await page.getByLabel('Name').first().fill(name)
     await page.getByLabel('Address').fill('192.0.2.90')
@@ -93,7 +93,7 @@ for (const engine of ENGINES) {
     await goTo(page, 'Config')
     await page.locator('select[name=backend]').selectOption(engine)
     await expect(page.getByText(`on ${engine}`)).toBeVisible()
-    await page.getByRole('button', { name: 'Add a host' }).click()
+    await page.getByRole('button', { name: 'Add a host', exact: true }).click()
     // The test's own nuthatch is a web server to find.
     await page.getByLabel('Name, address or URL').fill('http://127.0.0.1:8092/')
     await page.getByRole('button', { name: 'Look' }).click()
@@ -131,7 +131,7 @@ for (const engine of ENGINES) {
 test('looking at a name that is not there says so', async ({ page }) => {
   await login(page, 'admin')
   await goTo(page, 'Config')
-  await page.getByRole('button', { name: 'Add a host' }).click()
+  await page.getByRole('button', { name: 'Add a host', exact: true }).click()
   await page.getByLabel('Name, address or URL').fill('no-such-host.invalid')
   await page.getByRole('button', { name: 'Look' }).click()
   await expect(page.locator('.add-host [role=alert]')).toContainText('cannot be found')

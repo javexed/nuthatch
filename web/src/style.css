@@ -403,3 +403,8 @@ tr.flash > td { animation: flash 1.6s ease-out; }
 .dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; }
 .managed .again { margin-top: 0.5rem; }
 .managed .again ul { margin: 0.2rem 0 0.5rem; padding-left: 1.2rem; }
+
+.head-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+a.button { display: inline-block; padding: 0.55rem 1rem; border: 1px solid var(--accent); border-radius: 0.4rem; background: var(--accent); color: var(--card); text-decoration: none; font-weight: 600; }
+.groups-head { margin-top: 1.5rem; }
+.choose-host .chips { margin: 0.6rem 0; }

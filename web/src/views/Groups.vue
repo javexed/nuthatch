@@ -7,6 +7,7 @@ import { api, useSession } from '../stores/session'
 const props = defineProps<{ kind: 'host' | 'service' }>()
 const session = useSession()
 const many = computed(() => (session.session?.backends.length ?? 0) > 1)
+const canAdd = computed(() => session.has('config_edit') && (session.session?.config_backends ?? []).length > 0)
 
 const HOSTS = ['num_hosts_up', 'num_hosts_down', 'num_hosts_unreach', 'num_hosts_pending'] as const
 const SERVICES = ['num_services_ok', 'num_services_warn', 'num_services_crit', 'num_services_unknown', 'num_services_pending'] as const
@@ -39,7 +40,12 @@ function servicesLink(row: Record<string, unknown>, state?: number) {
 </script>
 
 <template>
-  <h1>{{ kind === 'host' ? 'Host groups' : 'Service groups' }}</h1>
+  <div class="page-head">
+    <h1>{{ kind === 'host' ? 'Host groups' : 'Service groups' }}</h1>
+    <RouterLink v-if="canAdd" class="button" :to="{ name: 'config', query: { new: kind === 'host' ? 'hostgroup' : 'servicegroup' } }">
+      New {{ kind === 'host' ? 'host group' : 'service group' }}
+    </RouterLink>
+  </div>
   <nav class="tabs" aria-label="Kinds of group">
     <RouterLink :to="{ name: 'hostgroups' }">Host groups</RouterLink>
     <RouterLink :to="{ name: 'servicegroups' }">Service groups</RouterLink>

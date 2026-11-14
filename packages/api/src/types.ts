@@ -178,8 +178,19 @@ export interface ManagedHost {
   services: ManagedService[]
 }
 
+/** A host group or a service group that nuthatch keeps the config of. */
+export interface ManagedGroup {
+  type: 'hostgroup' | 'servicegroup'
+  name: string
+  alias?: string
+  /** Hosts by name; for a service group, `host/service`. */
+  members: string[]
+}
+
 export interface ConfigState {
   backend: string
+  /** The groups nuthatch keeps. */
+  groups?: ManagedGroup[]
   /** What the files are now; sent back with a change, which is refused when they changed in between. */
   revision: string
   hosts: ManagedHost[]
@@ -187,7 +198,7 @@ export interface ConfigState {
   unreadable: { file: string; why: string }[]
   templates: { host: string[]; service: string[] }
   /** What the engine has, to choose from. */
-  choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[]; timeperiods?: string[] }
+  choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[]; timeperiods?: string[]; hosts?: string[] }
   /** The check commands nuthatch can add itself when a host uses one (its own, for suggested checks). */
   catalogue?: string[]
   /** Whether the engine is checkd, which has services that take pushes and services that stand for others. */
@@ -234,7 +245,11 @@ export interface Discovery {
   suggestions: Suggestion[]
 }
 
-export type ConfigChange = { kind: 'put'; host: ManagedHost; /** Its name before, when it is not new. */ previous?: string } | { kind: 'delete'; name: string }
+export type ConfigChange =
+  | { kind: 'put'; host: ManagedHost; /** Its name before, when it is not new. */ previous?: string }
+  | { kind: 'delete'; name: string }
+  | { kind: 'put-group'; group: ManagedGroup; previous?: string }
+  | { kind: 'delete-group'; type: ManagedGroup['type']; name: string }
 
 export interface ConfigResult {
   /** Whether the engine's own check took the config. */
