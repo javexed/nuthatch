@@ -10,6 +10,9 @@ import { writeObjects } from './nagioscfg.ts'
 export const CATALOGUE_FILE = 'nuthatch-commands.cfg'
 export const CATALOGUE_HOST = 'nuthatch-commands'
 
+export const AGGREGATE_COMMAND = 'nuthatch_aggregate'
+export const PUSHED_COMMAND = 'nuthatch_pushed'
+
 /** Name, then the plugin and its arguments; `{plugins}` is the plugins' directory. */
 const COMMANDS: [string, string][] = [
   ['nuthatch_tcp', '{plugins}/check_tcp -H $HOSTADDRESS$ -p $ARG1$'],
@@ -20,6 +23,11 @@ const COMMANDS: [string, string][] = [
   ['nuthatch_smtp', '{plugins}/check_smtp -H $HOSTADDRESS$ -p $ARG1$'],
   ['nuthatch_imap', '{plugins}/check_imap -H $HOSTADDRESS$ -p $ARG1$'],
   ['nuthatch_imaps', '{plugins}/check_imap -H $HOSTADDRESS$ -p $ARG1$ -S'],
+  // checkd only. A service that stands for others; and the command of a
+  // service that takes pushes, which every service must have and this
+  // one never runs.
+  [AGGREGATE_COMMAND, 'checkd:aggregate $ARG1$'],
+  [PUSHED_COMMAND, 'checkd:aggregate --never-run'],
 ]
 
 export const CATALOGUE_NAMES = COMMANDS.map(([name]) => name)

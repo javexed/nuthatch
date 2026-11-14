@@ -7,6 +7,7 @@ import { computed, ref, watch } from 'vue'
 import CommandDialog, { type Action } from '../components/CommandDialog.vue'
 import EventLog from '../components/EventLog.vue'
 import PerfGraphs from '../components/PerfGraphs.vue'
+import PushInfo from '../components/PushInfo.vue'
 import StateBadge from '../components/StateBadge.vue'
 import StatusList from '../components/StatusList.vue'
 import { type Target, deleteComment, deleteDowntime, recheck, removeAcknowledgement, setChecks, setNotifications } from '../lib/commands'
@@ -186,6 +187,7 @@ async function send(command: Command, done: string): Promise<boolean> {
       </dl>
     </section>
 
+    <PushInfo v-if="service !== undefined && (session.has('config_edit') || session.has('configuration_information'))" :key="`${backend}/${host}/${service}`" :backend="backend" :host="host" :service="service" />
     <PerfGraphs :backend="backend" :host="host" :service="service" />
     <section v-if="perf.length > 0" class="card">
       <h2>Performance data</h2>

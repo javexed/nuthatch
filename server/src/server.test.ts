@@ -13,7 +13,7 @@ import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
 import { CATALOGUE_NAMES, catalogueFile, pluginsDir } from './catalogue.ts'
-import { checkHost, hostFile, readHostFile } from './configadmin.ts'
+import { aggregateArgs, aggregateOf, checkHost, hostFile, readHostFile } from './configadmin.ts'
 import { discover, hostName, parseTarget, suggest, tailnetMachines } from './discover.ts'
 import { Events } from './events.ts'
 import { Graphs, thin } from './graphs.ts'
@@ -400,6 +400,45 @@ describe('a host to write', () => {
     expect(text).toContain('define host {\n    host_name       web9\n    use             generic-host\n')
     expect(text).toContain('    check_command        check_ping!100,20%!500,60%\n')
     expect(readHostFile(text)).toEqual(JSON.parse(JSON.stringify(checked)))
+  })
+
+  it('has services that take pushes and services that stand for others', () => {
+    const service = (more: Record<string, unknown>) => ({ description: 'x', use: 'generic-service', servicegroups: [], contacts: [], contact_groups: [], ...more })
+    const withServices = (...services: unknown[]) => ({ ...host, services })
+    const checked = checkHost(
+      withServices(
+        service({ description: 'backup', check_command: 'check_ping', push: { token: '', every: 90000 } }),
+        service({ description: 'kept', push: { token: 'abcdefghijklmnop' } }),
+        service({ description: 'site', aggregate: { members: ['web*/http', '@web', 'db1/disk space'], min: '2' } }),
+      ),
+      choices,
+      known,
+    )
+    const [backup, kept, site] = checked.services
+    // A token is made here; what the service is decides its command.
+    expect(backup?.push?.token).toMatch(/^[0-9a-f]{32}$/)
+    expect(backup?.push?.every).toBe(90000)
+    expect(backup?.check_command).toBe('nuthatch_pushed')
+    expect(kept?.push).toEqual({ token: 'abcdefghijklmnop' })
+    expect(site?.check_command).toBe("nuthatch_aggregate!--min 2 web*/http @web 'db1/disk space'")
+    const text = hostFile(checked)
+    expect(text).toContain('_PUSH_EVERY')
+    expect(text).toMatch(/active_checks_enabled\s+0/)
+    expect(readHostFile(text)).toEqual(JSON.parse(JSON.stringify(checked)))
+    expect(aggregateOf(aggregateArgs({ members: ['a', 'b/d e'], min: '50%' }))).toEqual({ members: ['a', 'b/d e'], min: '50%' })
+
+    const bad = (more: Record<string, unknown>, extras = true) => () => checkHost(withServices(service(more)), choices, known, extras)
+    expect(bad({ push: { token: 'short' } })).toThrow(/token/)
+    expect(bad({ push: { token: '', every: 5 } })).toThrow(/60 seconds/)
+    expect(bad({ aggregate: { members: [] } })).toThrow(/members/)
+    expect(bad({ aggregate: { members: ['web1!x'] } })).toThrow(/not a member/)
+    expect(bad({ aggregate: { members: ["a'; rm"] } })).toThrow(/not a member/)
+    expect(bad({ aggregate: { members: ['a'], min: 'most' } })).toThrow(/number/)
+    expect(bad({ push: { token: '' }, aggregate: { members: ['a'] } })).toThrow(/not both/)
+    // Only checkd has them.
+    expect(bad({ push: { token: '' } }, false)).toThrow(/only checkd/)
+    // A file with such settings on a service of another kind is not nuthatch's to edit.
+    expect(() => readHostFile(hostFile(checkHost(host, choices, known)).replace('check_command ', '_PUSH_TOKEN abcdefghijklmnop\n    check_command '))).toThrow(/does not edit/)
   })
 
   it('cannot carry a definition of its own, or what the engine has not', () => {
@@ -984,5 +1023,75 @@ describe('events', () => {
     // Not in a loop as fast as it can go.
     expect(waits.length).toBeLessThan(40)
     stop()
+  })
+})
+
+describe('a downtime for many', () => {
+  function site(roles: Record<string, string[]>, visible = ['web1', 'web2']) {
+    const backend = fake('site', (request) => {
+      if (request.startsWith('GET contactgroups')) return [['admins', ['ann']]]
+      if (request.startsWith('GET contacts')) return [[1]]
+      if (request.startsWith('GET hosts\nAuthUser')) return [[0]]
+      if (request.startsWith('GET hosts\nStats')) return [[3]]
+      if (request.startsWith('GET hosts\nColumns: name')) return (request.includes('AuthUser: ops') ? visible : ['web1', 'web2', 'web3']).map((name) => [name])
+      if (request.startsWith('GET services\nColumns: host_name description')) return [['web1', 'backup'], ['web2', 'backup']]
+      return []
+    })
+    const store = new Store(':memory:')
+    const app = buildApp({ backends: [backend], store, events: new Events([]), roles: new RolesConfig(roles), limiter: new Limiter(), cookieSecure: false, devUser: 'ops' })
+    const post = (body: unknown) => app.request('/api/v1/downtime-many', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify(body) })
+    return { backend, store, post }
+  }
+  const soon = Math.floor(Date.now() / 1000) + 60
+  const asked = { backend: 'site', hosts: 'web*', services: '', start: soon, end: soon + 3600, comment: 'switch work' }
+
+  it('says what fits, and then gives each a downtime', async () => {
+    const { backend, post } = site({ authorized_for_all_host_commands: ['ops'] })
+    const dry = await post({ ...asked, dry_run: true })
+    expect(dry.status).toBe(200)
+    expect(await dry.json()).toEqual({ matches: [['web1'], ['web2'], ['web3']] })
+    expect(backend.sent).toEqual([])
+    // The pattern is the whole name, and nothing of it is the engine's to read as more.
+    expect(backend.asked.find((r) => r.startsWith('GET hosts\nColumns: name'))).toContain('Filter: name ~ ^web.*$')
+    expect((await post(asked)).status).toBe(200)
+    expect(backend.sent).toHaveLength(3)
+    expect(backend.sent[0]).toMatch(new RegExp(`SCHEDULE_HOST_DOWNTIME;web1;${soon};${soon + 3600};1;0;0;ops;switch work$`))
+    const services = await post({ ...asked, hosts: '@webs', services: 'back?p', dry_run: true })
+    expect(await services.json()).toEqual({ matches: [['web1', 'backup'], ['web2', 'backup']] })
+    expect(backend.asked.at(-1)).toContain('Filter: host_groups >= webs\nFilter: description ~ ^back.p$')
+  })
+
+  it('covers only what a contact sees, and refuses what cannot be', async () => {
+    const { backend, post } = site({})
+    const answer = await post({ ...asked, dry_run: true })
+    expect(await answer.json()).toEqual({ matches: [['web1'], ['web2']] })
+    expect(backend.asked.at(-1)).toContain('AuthUser: ops')
+    for (const bad of [{ hosts: 'web*\nGET contacts' }, { hosts: '' }, { hosts: 'a;b' }, { end: soon - 10 }, { end: 5 }]) {
+      expect((await post({ ...asked, ...bad })).status, JSON.stringify(bad)).toBe(400)
+    }
+    const readOnly = site({ authorized_for_read_only: ['ops'] })
+    expect((await readOnly.post(asked)).status).toBe(403)
+    expect(readOnly.backend.sent).toEqual([])
+  })
+})
+
+describe('how a service takes pushes', () => {
+  it('is shown to those who see the config, with the address where it is known', async () => {
+    const backend = fake('site', (request) => {
+      if (request.startsWith('GET contactgroups')) return []
+      if (request.startsWith('GET services\nColumns: custom_variable_names')) {
+        return request.includes('description = backup') ? [[['OWNER', 'PUSH_TOKEN', 'PUSH_EVERY'], ['ann', 'abcdefghijklmnop', '90000'], 1700000000]] : [[[], [], 0]]
+      }
+      return []
+    })
+    const app = (roles: Record<string, string[]>, pushUrls?: Map<string, string>) =>
+      buildApp({ backends: [backend], store: new Store(':memory:'), events: new Events([]), roles: new RolesConfig(roles), limiter: new Limiter(), cookieSecure: false, devUser: 'ops', pushUrls })
+    const path = '/api/v1/push-info/site?host=nas&service=backup'
+    expect((await app({}).request(path)).status).toBe(403)
+    const known = await app({ authorized_for_configuration_information: ['ops'] }, new Map([['site', 'https://checkd.example.test/']])).request(path)
+    expect(await known.json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', url: 'https://checkd.example.test/api/v1/push/abcdefghijklmnop', every: 90000, last: 1700000000 })
+    const plain = app({ authorized_for_config_edit: ['ops'] })
+    expect(await (await plain.request(path)).json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', every: 90000, last: 1700000000 })
+    expect(await (await plain.request('/api/v1/push-info/site?host=nas&service=disk')).json()).toEqual({ takes: false })
   })
 })

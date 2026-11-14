@@ -390,3 +390,14 @@ tr.flash > td { animation: flash 1.6s ease-out; }
 .pull { display: flex; align-items: center; justify-content: center; gap: 0.2rem; overflow: hidden; color: var(--muted); font-size: 0.9rem; }
 .pull.ready, .pull.done { color: var(--accent); font-weight: 600; }
 .pull.done { transition: height 0.2s; }
+
+/* A page's title with what can be done on the page beside it. */
+.page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; }
+.page-head h1 { margin-bottom: 0; }
+.fields .wide { grid-column: 1 / -1; }
+.fields textarea { width: 100%; font: inherit; }
+.many-downtime .matches ul { margin: 0.3rem 0 0; padding-left: 1.2rem; max-height: 9rem; overflow: auto; }
+.push-info .call { margin: 0.6rem 0; padding: 0.6rem 0.8rem; border: 1px solid var(--line); border-radius: 0.4rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+.fields select, .fields input { max-width: 100%; min-width: 0; }
+/* A dialog longer than the screen scrolls within itself. */
+.dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; }

@@ -56,6 +56,8 @@ export interface Deps {
   webRoot?: string
   /** By backend: the config that can be changed here. */
   config?: Map<string, ConfigAdmin>
+  /** By backend: where its engine takes pushes (checkd's HTTP API), as jobs elsewhere reach it. */
+  pushUrls?: Map<string, string>
   /** Sites reached through their own nuthatch. */
   remotes?: RemoteSite[]
   /** The origins of apps served elsewhere (the phone app) that may call the API, with a token. */
@@ -116,6 +118,9 @@ const TYPES: Record<string, string> = {
 }
 
 const WHO_FOR = 30_000
+
+/** How many hosts or services one downtime for many may cover. */
+const MANY = 500
 
 export function buildApp(deps: Deps): Hono<Env> {
   const app = new Hono<Env>()
@@ -473,6 +478,91 @@ export function buildApp(deps: Deps): Hono<Env> {
       return false
     }
   }
+
+  /**
+   * A downtime for every host, or every service, whose name fits: the
+   * engine is asked which those are, as the user where the user's rights
+   * are a contact's, and each gets the usual command. With `dry_run`,
+   * only which they are.
+   */
+  app.post('/api/v1/downtime-many', async (c) => {
+    const { user, peer } = c.get('identity')
+    const sent = await body(c)
+    if (peer?.readOnly) return c.json({ error: `${peer.name} may only read here` }, 403)
+    const backend = deps.backends.find((b) => b.name === sent.backend)
+    if (!backend) throw new Refused(`a downtime for many is set at the nuthatch of the site itself; there is no backend '${String(sent.backend)}' here`)
+    const pattern = (value: unknown, what: string, needed: boolean): string => {
+      const text = typeof value === 'string' ? value.trim() : ''
+      if (text === '' && !needed) return ''
+      if (!/^[A-Za-z0-9@*?][A-Za-z0-9 _.:*?@+-]{0,62}$/.test(text)) throw new Refused(`${what}: a name, with * for any run of characters and ? for any one`)
+      return text
+    }
+    const hosts = pattern(sent.hosts, 'hosts', true)
+    const services = pattern(sent.services, 'services', false)
+    const [start, end] = [Number(sent.start), Number(sent.end)]
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start || end <= now()) throw new Refused('a downtime ends after it starts, and not in the past')
+    const comment = typeof sent.comment === 'string' && sent.comment.trim() !== '' ? sent.comment.trim() : 'downtime'
+    const { roles, canSubmit } = await who(user)
+    const byRole = roles.has('all_host_commands') || (services !== '' && roles.has('all_service_commands'))
+    let refusal: string | undefined
+    if (roles.has('read_only')) refusal = 'this user is read-only'
+    else if (byRole) refusal = undefined
+    else if (canSubmit[backend.name] !== true) refusal = 'this user is not a contact that may send commands (can_submit_commands)'
+    else if (!(await backend.enforcesAuth())) refusal = 'this backend does not limit what a user sees (AuthUser); commands need the role all_host_commands here'
+    if (refusal !== undefined) {
+      deps.store.audit(user, backend.name, 'command refused', `downtime for ${hosts}/${services}: ${refusal}`)
+      return c.json({ error: refusal }, 403)
+    }
+    // A pattern as a regular expression that is the whole name.
+    const whole = (glob: string) => `^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`
+    const lines = [services === '' ? 'GET hosts\nColumns: name' : 'GET services\nColumns: host_name description']
+    if (hosts.startsWith('@')) lines.push(`Filter: ${services === '' ? 'groups' : 'host_groups'} >= ${hosts.slice(1)}`)
+    else lines.push(`Filter: ${services === '' ? 'name' : 'host_name'} ~ ${whole(hosts)}`)
+    if (services !== '') lines.push(`Filter: description ~ ${whole(services)}`)
+    // By a contact's rights: only what the engine shows that contact.
+    if (!byRole) lines.push(`AuthUser: ${user}`)
+    lines.push(`Limit: ${MANY + 1}`)
+    const found = await backend.query(lines.join('\n'))
+    if (found.length > MANY) throw new Refused(`more than ${MANY} fit; narrow it`)
+    const matches = found.map((row) => row.map(String)).sort((a, b) => a.join('/').localeCompare(b.join('/')))
+    if (sent.dry_run === true) return c.json({ matches })
+    for (const match of matches) {
+      const name = services === '' ? 'SCHEDULE_HOST_DOWNTIME' : 'SCHEDULE_SVC_DOWNTIME'
+      const checked = checkCommand(name, [...match, String(start), String(end), '1', '0', '0', '', comment], user, now())
+      await backend.command(checked.line)
+    }
+    deps.store.audit(user, backend.name, 'command', `downtime for ${matches.length} that fit ${hosts}${services === '' ? '' : `/${services}`}, ${start} to ${end}: ${comment}`.slice(0, 500))
+    return c.json({ matches })
+  })
+
+  /**
+   * How a service takes pushes, for those who may see the engine's
+   * config: the token is all a caller needs.
+   */
+  app.get('/api/v1/push-info/:backend', async (c) => {
+    const { user } = c.get('identity')
+    const { roles } = await who(user)
+    if (!roles.has('config_edit') && !roles.has('configuration_information')) throw new Forbidden('how a service takes pushes is shown to those who see the config')
+    const backend = deps.backends.find((b) => b.name === c.req.param('backend'))
+    const [host, service] = [c.req.query('host') ?? '', c.req.query('service') ?? '']
+    if (!backend || /[\n\r]/.test(host + service) || host === '' || service === '') return c.json({ takes: false })
+    const found = await backend.query(
+      `GET services\nColumns: custom_variable_names custom_variable_values last_check\nFilter: host_name = ${host}\nFilter: description = ${service}`,
+    )
+    const [names, values, last] = (found[0] ?? []) as [unknown, unknown, unknown]
+    const variable = (name: string) => (Array.isArray(names) && Array.isArray(values) ? values[names.indexOf(name)] : undefined)
+    const token = names instanceof Array && names.includes('PUSH_TOKEN') ? String(variable('PUSH_TOKEN')) : undefined
+    if (token === undefined) return c.json({ takes: false })
+    const every = Number(variable('PUSH_EVERY'))
+    const base = deps.pushUrls?.get(backend.name)
+    return c.json({
+      takes: true,
+      path: `/api/v1/push/${token}`,
+      ...(base ? { url: `${base.replace(/\/+$/, '')}/api/v1/push/${token}` } : {}),
+      ...(Number.isFinite(every) && every > 0 ? { every } : {}),
+      last: Number(last) || 0,
+    })
+  })
 
   app.post('/api/v1/command', async (c) => {
     const { user, peer } = c.get('identity')

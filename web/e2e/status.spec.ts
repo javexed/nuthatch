@@ -135,7 +135,7 @@ for (const engine of ENGINES) {
     await page.getByRole('button', { name: 'Remove acknowledgement' }).click()
     await expect(page.locator('.headline')).not.toContainText('acknowledged')
 
-    await page.getByRole('button', { name: 'Downtime' }).click()
+    await page.getByRole('button', { name: 'Downtime', exact: true }).click()
     await page.getByRole('textbox', { name: 'Comment' }).fill(`${stamp} downtime`)
     await page.getByRole('button', { name: 'Schedule downtime' }).click()
     await expect(card('Downtimes')).toContainText(`${stamp} downtime`)
@@ -170,7 +170,7 @@ test('several hosts at once from the list', async ({ page }) => {
   await expect(page.getByRole('toolbar')).toContainText('4 ticked')
   await page.getByRole('button', { name: 'Check now' }).click()
   await expect(page.getByRole('status')).toHaveText('Asked for 4 checks.')
-  await page.getByRole('button', { name: 'Downtime' }).click()
+  await page.getByRole('button', { name: 'Downtime', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('4 objects')
   await page.getByRole('button', { name: 'Cancel' }).click()
   await fits(page)

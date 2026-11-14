@@ -89,6 +89,7 @@ function main(): void {
 
   const backends: Backend[] = []
   const admins = new Map<string, ConfigAdmin>()
+  const pushUrls = new Map<string, string>()
   const remotes: RemoteSite[] = []
   const keyOf = (file: unknown, what: string): string => {
     if (typeof file !== 'string') fail(`${path}: ${what} needs key_file, the file that holds its key`)
@@ -123,6 +124,11 @@ function main(): void {
     try {
       const backend = new LivestatusBackend(name, livestatus)
       backends.push(backend)
+      // Where jobs elsewhere reach the engine's HTTP API, to push results.
+      if (entry.push_url !== undefined) {
+        if (typeof entry.push_url !== 'string' || !/^https?:\/\/[^\s]+$/.test(entry.push_url)) fail(`${path}: backend ${name}: push_url is a URL`)
+        pushUrls.set(name, entry.push_url as string)
+      }
       // [backend.config]: where its config can be changed.
       if (entry.config !== undefined) {
         const c = entry.config as Record<string, unknown>
@@ -219,6 +225,7 @@ function main(): void {
     cookieSecure: behindProxy,
     webRoot: webRoot === undefined ? undefined : resolve(webRoot),
     config: admins,
+    pushUrls,
     remotes,
     peers,
     appOrigins: appOrigins as string[],

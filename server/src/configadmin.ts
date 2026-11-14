@@ -19,7 +19,8 @@ import { dirname, join, resolve } from 'node:path'
 import type { ConfigChange, ConfigResult, ConfigState, ManagedHost, ManagedService } from '@nuthatch/api'
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
-import { CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, catalogueFile } from './catalogue.ts'
+import { randomBytes } from 'node:crypto'
+import { AGGREGATE_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, PUSHED_COMMAND, catalogueFile } from './catalogue.ts'
 import { Refused } from './policy.ts'
 import { now } from './store.ts'
 
@@ -54,6 +55,47 @@ const ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:_-]{0,254}$/
 const MEMBER = /^[A-Za-z0-9][A-Za-z0-9 _.@-]{0,62}$/
 const HOST_KEYS = ['host_name', 'use', 'alias', 'address', 'check_command', 'hostgroups', 'contacts', 'contact_groups', 'notes']
 const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes']
+const TOKEN = /^[A-Za-z0-9_-]{16,64}$/
+/** A host, a pattern or `@group`; or the same, `/`, and a service or a pattern for one. */
+const AGGREGATE_MEMBER = /^[A-Za-z0-9@*?][A-Za-z0-9._*?@-]{0,62}(\/[A-Za-z0-9*?][A-Za-z0-9 _.:+*?-]{0,62})?$/
+
+/** The arguments of an aggregate's command: `--min 2 web1/http 'db1/disk space'`. */
+export function aggregateArgs(aggregate: NonNullable<ManagedService['aggregate']>): string {
+  const words = aggregate.members.map((member) => (member.includes(' ') ? `'${member}'` : member))
+  return [...(aggregate.min ? ['--min', aggregate.min] : []), ...words].join(' ')
+}
+
+/** The other way round; undefined when it is not what nuthatch writes. */
+export function aggregateOf(args: string): ManagedService['aggregate'] | undefined {
+  const words = [...args.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
+  const min = words[0] === '--min' ? words[1] : undefined
+  const members = min === undefined ? words : words.slice(2)
+  if (members.length === 0 || members.some((m) => !AGGREGATE_MEMBER.test(m)) || (min !== undefined && !/^\d{1,4}%?$/.test(min))) return undefined
+  return min === undefined ? { members } : { members, min }
+}
+
+function pushOf(given: unknown, what: string): ManagedService['push'] {
+  if (typeof given !== 'object' || given === null) throw new Refused(`${what}: what it takes pushes with is needed`)
+  const p = given as Record<string, unknown>
+  // A token is made here, never taken on trust from a form's default.
+  const token = p.token === undefined || p.token === '' ? randomBytes(16).toString('hex') : p.token
+  if (typeof token !== 'string' || !TOKEN.test(token)) throw new Refused(`${what}: a token is 16 to 64 letters, digits, '-' and '_'`)
+  if (p.every === undefined || p.every === null || p.every === '') return { token }
+  const every = Number(p.every)
+  if (!Number.isInteger(every) || every < 60 || every > 366 * 86400) throw new Refused(`${what}: the time within which a push is expected is 60 seconds to a year`)
+  return { token, every }
+}
+
+function aggregateGiven(given: unknown, what: string): NonNullable<ManagedService['aggregate']> {
+  const a = (typeof given === 'object' && given !== null ? given : {}) as Record<string, unknown>
+  if (!Array.isArray(a.members) || a.members.length === 0 || a.members.length > 40) throw new Refused(`${what}: name 1 to 40 members`)
+  const members = a.members.map((m) => (typeof m === 'string' ? m.trim() : ''))
+  const bad = members.find((m) => !AGGREGATE_MEMBER.test(m))
+  if (bad !== undefined) throw new Refused(`${what}: '${bad}' is not a member: a host (web1, web*, @group) or host/service`)
+  if (a.min === undefined || a.min === null || a.min === '') return { members }
+  if (typeof a.min !== 'string' || !/^\d{1,4}%?$/.test(a.min)) throw new Refused(`${what}: how many must be OK is a number or a percentage`)
+  return { members, min: a.min }
+}
 const HEADER = 'Written by nuthatch. A file changed by hand is left alone when nuthatch\nno longer understands it.'
 
 function text(value: unknown, what: string, required = false): string | undefined {
@@ -89,7 +131,7 @@ type Choices = ConfigState['choices']
 type Templates = ConfigState['templates']
 
 /** A host as it may be written, or the reason it may not. */
-export function checkHost(given: unknown, choices: Choices, known: Templates): ManagedHost {
+export function checkHost(given: unknown, choices: Choices, known: Templates, extras = true): ManagedHost {
   if (typeof given !== 'object' || given === null) throw new Refused('a host is needed')
   const h = given as Record<string, unknown>
   if (typeof h.name !== 'string' || !NAME.test(h.name)) throw new Refused("a host's name is letters, digits, '.', '_' and '-', at most 63")
@@ -105,14 +147,25 @@ export function checkHost(given: unknown, choices: Choices, known: Templates): M
     const what = `service ${given.description}`
     if (services.some((s) => s.description === given.description)) throw new Refused(`${what} is there twice`)
     if (typeof given.use !== 'string' || !known.service.includes(given.use)) throw new Refused(`${what}: choose one of the service templates`)
+    const push = given.push === undefined || given.push === null ? undefined : pushOf(given.push, what)
+    const aggregate = given.aggregate === undefined || given.aggregate === null ? undefined : aggregateGiven(given.aggregate, what)
+    if ((push || aggregate) && !extras) throw new Refused(`${what}: only checkd has services that take pushes or stand for others`)
+    if (push && aggregate) throw new Refused(`${what} takes pushes or stands for others, not both`)
     services.push({
       description: given.description,
       use: given.use,
-      check_command: command(given.check_command, `${what}: the check command`, choices.commands),
+      // What it is decides its command, whatever was sent.
+      check_command: push
+        ? PUSHED_COMMAND
+        : aggregate
+          ? `${AGGREGATE_COMMAND}!${aggregateArgs(aggregate)}`
+          : command(given.check_command, `${what}: the check command`, choices.commands),
       servicegroups: names(given.servicegroups, `${what}: service groups`, choices.servicegroups),
       contacts: names(given.contacts, `${what}: contacts`, choices.contacts),
       contact_groups: names(given.contact_groups, `${what}: contact groups`, choices.contactgroups),
       notes: text(given.notes, `${what}: notes`),
+      ...(push ? { push } : {}),
+      ...(aggregate ? { aggregate } : {}),
     })
   }
   return {
@@ -153,6 +206,13 @@ export function hostFile(host: ManagedHost): string {
     put(attrs, 'contacts', service.contacts)
     put(attrs, 'contact_groups', service.contact_groups)
     put(attrs, 'notes', service.notes)
+    if (service.push) {
+      // Told its result, never checked.
+      attrs.push(['active_checks_enabled', '0'], ['_PUSH_TOKEN', service.push.token])
+      if (service.push.every !== undefined) attrs.push(['_PUSH_EVERY', String(service.push.every)])
+    }
+    // Worked out by the engine, which costs nothing: every minute.
+    if (service.aggregate) attrs.push(['check_interval', '1'])
     definitions.push({ type: 'service', attrs })
   }
   return writeObjects(definitions, HEADER)
@@ -175,8 +235,20 @@ export function readHostFile(content: string): ManagedHost {
     if (d === first) continue
     if (d.type !== 'service') throw new Error(`it defines a ${d.type}`)
     if (attr(d, 'host_name') !== name) throw new Error('it has a service of another host')
-    if (strange(d, SERVICE_KEYS) !== undefined) throw new Error(`a service has '${strange(d, SERVICE_KEYS)}', which nuthatch does not edit`)
+    const command = attr(d, 'check_command')
+    const token = attr(d, '_PUSH_TOKEN')
+    const every = attr(d, '_PUSH_EVERY')
+    const aggregate = command?.startsWith(`${AGGREGATE_COMMAND}!`) ? aggregateOf(command.slice(AGGREGATE_COMMAND.length + 1)) : undefined
+    const push = token !== undefined && command === PUSHED_COMMAND ? { token, ...(every !== undefined ? { every: Number(every) } : {}) } : undefined
+    // The further settings are nuthatch's only on a service of those two kinds, as it writes them.
+    const extra = push ? ['_PUSH_TOKEN', '_PUSH_EVERY', 'active_checks_enabled'] : aggregate ? ['check_interval'] : []
+    if (strange(d, [...SERVICE_KEYS, ...extra]) !== undefined) {
+      throw new Error(`a service has '${strange(d, [...SERVICE_KEYS, ...extra])}', which nuthatch does not edit`)
+    }
+    if (command?.startsWith(`${AGGREGATE_COMMAND}!`) && !aggregate) throw new Error('a service stands for others in a way nuthatch does not write')
     services.push({
+      ...(push ? { push } : {}),
+      ...(aggregate ? { aggregate } : {}),
       description: attr(d, 'service_description') ?? '',
       use: attr(d, 'use') ?? '',
       check_command: attr(d, 'check_command'),
@@ -259,6 +331,9 @@ export class ConfigAdmin {
     const [commands, contacts, contactgroups, hostgroups, servicegroups] = await Promise.all(
       ['commands', 'contacts', 'contactgroups', 'hostgroups', 'servicegroups'].map((table) => this.names(table)),
     )
+    // checkd says who it is beside the version it answers as.
+    const version = await this.backend.query('GET status\nColumns: program_version').catch(() => [])
+    const extras = String(version[0]?.[0] ?? '').includes('checkd')
     return {
       backend: this.backend.name,
       revision: this.revision(files),
@@ -266,6 +341,7 @@ export class ConfigAdmin {
       unreadable,
       templates: { host: templates(main.files, 'host'), service: templates(main.files, 'service') },
       catalogue: CATALOGUE_NAMES,
+      extras,
       // nuthatch's own commands may be chosen too: written when needed.
       choices: { commands: [...new Set([...(commands ?? []), ...CATALOGUE_NAMES])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [] },
     }
@@ -307,7 +383,7 @@ export class ConfigAdmin {
     const removes: string[] = []
     let name: string
     if (change.kind === 'put') {
-      const host = checkHost(change.host, state.choices, state.templates)
+      const host = checkHost(change.host, state.choices, state.templates, state.extras === true)
       name = host.name
       const before = typeof change.previous === 'string' ? change.previous : undefined
       const taken = state.hosts.some((h) => h.name === host.name) || state.unreadable.some((u) => u.file === `${host.name}.cfg`)

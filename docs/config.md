@@ -132,3 +132,47 @@ with the rest of a change and checked by the engine like it, when a host
 first uses one. They can be chosen in the full form too.
 
 Looking is for the role `config_edit`, and written to the audit log.
+
+## Services that are not checked by a command (checkd)
+
+With checkd as the engine, a service in the form has a third choice
+beside its template and its check command: how its state is found.
+
+- **A job elsewhere tells it.** For a backup or a cron job: the service
+  is not checked, and the job calls an address when it is done. The
+  form asks only after how many hours of silence the service is to go
+  CRITICAL, if at all. nuthatch makes the address's token when the
+  service is saved, and keeps it when the service is changed. The
+  address is on the service's own page, under "Takes pushes", for those
+  with the role `config_edit` or `configuration_information`: whoever
+  has it can set that one service to any state. For nuthatch to show
+  the whole address, the backend says where checkd's HTTP API is
+  reached:
+
+      [[backend]]
+      name = "checkd"
+      livestatus = "unix:/run/checkd/live"
+      push_url = "http://127.0.0.1:6559"
+
+  and checkd must be started with `--http` at that address (checkd's
+  `docs/push.md`).
+- **From other hosts and services.** A service that stands for others:
+  the members one to a line, a host (`web1`, `web*`, `@group` for a host
+  group) or `host/service`, and how many must be OK, a number or a
+  percentage; without it, the service is as bad as its worst member
+  (checkd's `docs/aggregate.md`).
+
+Naemon has neither, and its form does not offer them. In the files these
+are a service with `_PUSH_TOKEN` and the command `nuthatch_pushed`, and
+one with the command `nuthatch_aggregate`.
+
+## A downtime for many
+
+On the Hosts and Services pages, "Downtime for many" takes a pattern for
+host names (`web*`, or `@group`) and, for services, one for their names
+(`backup`, `disk *`, `*`). It first says what fits, then schedules a
+fixed downtime for each, by the engine's usual command: on Naemon as on
+checkd. A user whose rights are a contact's covers what that contact
+sees; at most 500 at a time; one line in the audit log. It is set at
+the site's own nuthatch, not through another.
+

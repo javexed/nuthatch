@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -123,6 +123,16 @@ export class Client {
 
   command(command: Command): Promise<{ sent: string }> {
     return this.call('POST', '/api/v1/command', { ...command, args: command.args.map(String) })
+  }
+
+  /** Which hosts (one name each) or services (host, description) fit; and, without `dry_run`, a downtime for each. */
+  downtimeMany(downtime: ManyDowntime): Promise<{ matches: string[][] }> {
+    return this.call('POST', '/api/v1/downtime-many', downtime)
+  }
+
+  pushInfo(backend: string, host: string, service: string): Promise<PushInfo> {
+    const query = new URLSearchParams({ host, service })
+    return this.call('GET', `/api/v1/push-info/${encodeURIComponent(backend)}?${query.toString()}`)
   }
 
   tokens(): Promise<Token[]> {

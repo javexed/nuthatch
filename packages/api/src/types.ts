@@ -119,6 +119,45 @@ export interface ManagedService {
   contacts: string[]
   contact_groups: string[]
   notes?: string
+  /**
+   * A service that is not checked but told its result (checkd): a job
+   * elsewhere calls a URL with the token. An empty token asks for a new
+   * one. With `every`, seconds, the service is CRITICAL when nothing
+   * came for that long.
+   */
+  push?: { token: string; every?: number }
+  /**
+   * A service that stands for others (checkd): hosts (`web1`, `web*`,
+   * `@group`) and services (`web1/http`). With `min`, a number or a
+   * percentage, that many must be OK; without it, all.
+   */
+  aggregate?: { members: string[]; min?: string }
+}
+
+/** How a service takes pushes, for those who may see the config. */
+export interface PushInfo {
+  takes: boolean
+  /** The path to call at the engine's HTTP API. */
+  path?: string
+  /** The whole address, where the server knows it (`push_url` of the backend). */
+  url?: string
+  /** Seconds within which a push is expected. */
+  every?: number
+  /** When the last result came, pushed or not; 0 for never. */
+  last?: number
+}
+
+/** A downtime for every host, or service, whose name fits a pattern. */
+export interface ManyDowntime {
+  backend: string
+  /** `web*`, or `@group` for a host group. */
+  hosts: string
+  /** Empty for the hosts themselves; otherwise the services on them that fit. */
+  services: string
+  start: number
+  end: number
+  comment: string
+  dry_run?: boolean
 }
 
 /** A host that nuthatch keeps the config of, with its services. */
@@ -147,6 +186,8 @@ export interface ConfigState {
   choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[] }
   /** The check commands nuthatch can add itself when a host uses one (its own, for suggested checks). */
   catalogue?: string[]
+  /** Whether the engine is checkd, which has services that take pushes and services that stand for others. */
+  extras?: boolean
 }
 
 /** A port found open when a host was looked at, and what answered there. */

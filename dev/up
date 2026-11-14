@@ -65,7 +65,8 @@ checkd)
     echo "checkd: Livestatus at $run/live"
     # For dev/restart.
     echo $$ > "$run/pid"
-    exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" "$run/naemon.cfg"
+    # --http: where services that take pushes are told their results.
+    exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" --http 127.0.0.1:6560 "$run/naemon.cfg"
     ;;
 *)
     echo "usage: dev/up naemon|checkd" >&2
