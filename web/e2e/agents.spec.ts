@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { fits, login } from './helpers'
 
+const agentsDir = join(dirname(fileURLToPath(import.meta.url)), '../../dev/run/checkd/workers/agents')
 const agentBinary = join(dirname(fileURLToPath(import.meta.url)), '../../../checkd/dist/agent/checkd-agent-linux-x86_64')
 
 test('an agent installed from the Agents page joins checkd', async ({ page, request }) => {
@@ -22,7 +23,8 @@ test('an agent installed from the Agents page joins checkd', async ({ page, requ
   await page.getByRole('button', { name: 'Make command' }).click()
   const command = (await page.locator('pre.call code').textContent()) ?? ''
   expect(command).toMatch(/^curl -fsSL 'http:\/\/127\.0\.0\.1:8092\/agent\/install\/[A-Za-z0-9_-]+' \| sudo sh$/)
-  await expect(page.getByRole('row', { name: /lab2/ })).toBeVisible()
+  // Made, not run: the host's checks stay where they were.
+  await expect(page.getByRole('row', { name: /lab2/ }).getByRole('cell', { name: 'Waiting' })).toBeVisible()
   await fits(page)
 
   const script = await (await request.get(command.split("'")[1] ?? '')).text()
@@ -44,6 +46,8 @@ test('an agent installed from the Agents page joins checkd', async ({ page, requ
       await page.reload()
       await expect(page.getByRole('row', { name: /lab2/ }).getByRole('cell', { name: 'Yes' })).toBeVisible({ timeout: 1000 })
     }).toPass({ timeout: 30_000 })
+    // Connected: its token is now the host's.
+    await expect.poll(() => existsSync(join(agentsDir, 'lab2.token')) && !existsSync(join(agentsDir, 'lab2.new')), { timeout: 15_000 }).toBe(true)
   } finally {
     agent?.kill('SIGTERM')
     page.once('dialog', (dialog) => void dialog.accept())

@@ -15,7 +15,7 @@ well, for `check_nrpe` from the engine.
    monitoring plugins package. **NRPE** (Linux) also installs NRPE, open
    to the engine.
 2. **Make command** writes a new token for the host into checkd's agents
-   directory, reloads checkd, and gives a command:
+   directory and gives a command:
    - Linux, as root:
      `curl -fsSL --proto '=https' 'https://…/agent/install/<code>' | sudo sh`
    - Windows, in Windows PowerShell as Administrator:
@@ -23,8 +23,13 @@ well, for `check_nrpe` from the engine.
 
    On a LAN without a certificate authority the commands also check
    nuthatch's certificate by its pin (below).
-3. Run it on the host. The code works once, within 15 minutes. Making a
-   new command for a host shuts out the agent it had.
+3. Run it on the host. The code works once, within 15 minutes.
+
+Until the new agent connects, the host shows **Waiting** and nothing
+changes: its checks run where they ran, and an agent it had goes on. Once
+the agent connects, its token becomes the host's, checkd reloads, and the
+host's service checks go to it; an agent it had before is shut out. A
+command never run is taken back after an hour.
 
 On Linux the script downloads the agent for the machine (x86_64 or
 aarch64), checks it against `SHA256SUMS`, puts the token and the engine's
@@ -38,7 +43,8 @@ Administrators, readable by LOCAL SERVICE), and registers the scheduled
 task `checkd-agent`, run at startup as LOCAL SERVICE. Not yet tried on a
 Windows machine.
 
-**Remove** deletes the token and reloads checkd; the agent is shut out.
+**Remove** deletes the token, and reloads checkd if the agent was in use;
+the agent is shut out and the host's checks go back to where they ran.
 It stays installed on the host.
 
 ## Settings
@@ -50,7 +56,7 @@ It stays installed on the host.
     [[backend]]
     name = "site"
     livestatus = "unix:/run/checkd/live"
-    push_url = "http://127.0.0.1:6559"   # for "Connected", from /metrics
+    push_url = "http://127.0.0.1:6559"   # needed: /metrics tells when an agent connects
 
     [backend.agents]
     dir = "/etc/checkd/workers/agents"   # checkd's agents= directory

@@ -155,6 +155,7 @@ function main(): void {
         }
         if (server_name !== undefined && (typeof server_name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(server_name))) fail(`${path}: backend ${name}: agents.server_name is a host name`)
         if (!existsSync(dir) || !existsSync(ca)) console.error(`warning: backend ${name}: agents.dir or agents.ca is not there yet`)
+        if (!pushUrls.get(name)) fail(`${path}: backend ${name}: agents need push_url, checkd's HTTP: its /metrics tells when a new agent has connected`)
         const admin = admins.get(name)
         agents.set(
           name,
@@ -321,6 +322,11 @@ function main(): void {
     })
   }
   server.on('error', (err) => fail(`cannot listen at ${listen}: ${err.message}`))
+  // New agents' tokens: in use once their agent has connected, taken back
+  // when never used.
+  setInterval(() => {
+    for (const each of agents.values()) each.settle().catch((err: unknown) => console.error(`agents: ${err instanceof Error ? err.message : String(err)}`))
+  }, 5000).unref()
   // For monitored hosts: the install script and the binaries only.
   let hostsServer: ReturnType<typeof createAdaptorServer> | undefined
   if (agentListen) {

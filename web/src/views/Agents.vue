@@ -125,7 +125,7 @@ const until = computed(() => (made.value ? new Date(made.value.until).toLocaleTi
     <tbody>
       <tr v-for="a in agents" :key="a.host">
         <td><RouterLink :to="{ name: 'host', params: { backend, host: a.host } }">{{ a.host }}</RouterLink></td>
-        <td>{{ a.connected === undefined ? '–' : a.connected ? 'Yes' : 'No' }}</td>
+        <td>{{ a.connected ? 'Yes' : a.waiting ? 'Waiting' : a.connected === undefined ? '–' : 'No' }}</td>
         <td><button type="button" class="quiet" @click="remove(a.host)">Remove</button></td>
       </tr>
     </tbody>

@@ -356,6 +356,9 @@ export interface AgentRow {
   host: string
   /** Connected now; absent when it cannot be told. */
   connected?: boolean
+  /** Its install command is made, and its agent has not connected yet: the
+   * host's checks stay where they were. */
+  waiting?: boolean
 }
 
 export interface AgentInstall {

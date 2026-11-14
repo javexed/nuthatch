@@ -1,13 +1,14 @@
 // Agents: checkd-agent on a monitored host, which connects out to the
 // engine and runs that host's service checks there. nuthatch keeps the
-// engine's agents directory (a `<host>.token` file per agent, read by
-// checkd at each reload) and hands out the commands that install one.
+// engine's agents directory (a `<host>.token` file per agent in use; a
+// `<host>.new` for one not connected yet) and hands out the commands that
+// install one.
 //
 // An install command carries a short-lived code, not the token: the code
 // fetches a script with the token in it, once, within a quarter of an hour.
 
 import { X509Certificate, createHash, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend } from './backend.ts'
 import { Refused } from './policy.ts'
@@ -31,7 +32,12 @@ export interface AgentRow {
   host: string
   /** Connected now; absent when it cannot be told. */
   connected?: boolean
+  /** Made, not connected yet: the host's checks stay where they were. */
+  waiting?: boolean
 }
+
+/** A new token not used within this long is taken back. */
+const WAIT_FOR = 60 * 60_000
 
 /** What an install script needs. */
 export interface Install {
@@ -99,29 +105,38 @@ export class Agents {
     this.reload = reload
   }
 
-  hosts(): string[] {
+  private files(suffix: '.token' | '.new'): string[] {
     if (!existsSync(this.settings.dir)) return []
     return readdirSync(this.settings.dir)
-      .filter((f) => f.endsWith('.token'))
-      .map((f) => f.slice(0, -'.token'.length))
+      .filter((f) => f.endsWith(suffix))
+      .map((f) => f.slice(0, -suffix.length))
       .filter(agentName)
       .sort()
   }
 
-  async list(): Promise<AgentRow[]> {
-    const connected = await this.connected()
-    return this.hosts().map((host) => (connected ? { host, connected: connected.has(host) } : { host }))
+  /** Hosts whose agent is in use, with a `.token`. */
+  hosts(): string[] {
+    return this.files('.token')
   }
 
-  /** Hosts whose agent is connected, from checkd's `/metrics`. */
-  private async connected(): Promise<Set<string> | undefined> {
+  async list(): Promise<AgentRow[]> {
+    const pools = await this.pools()
+    const known = this.hosts()
+    const waiting = this.files('.new').filter((h) => !known.includes(h))
+    const rows = [...known.map((host) => ({ host })), ...waiting.map((host) => ({ host, waiting: true }))]
+    rows.sort((a, b) => a.host.localeCompare(b.host))
+    return rows.map((row) => (pools ? { ...row, connected: (pools.get(`host_${row.host}`) ?? 0) + (pools.get(`waiting_${row.host}`) ?? 0) > 0 } : row))
+  }
+
+  /** Workers per pool, from checkd's `/metrics`. */
+  private async pools(): Promise<Map<string, number> | undefined> {
     if (!this.settings.metrics) return undefined
     try {
       const answer = await fetch(`${this.settings.metrics.replace(/\/+$/, '')}/metrics`, { signal: AbortSignal.timeout(3000) })
       if (!answer.ok) return undefined
-      const found = new Set<string>()
-      for (const m of (await answer.text()).matchAll(/^checkd_pool_workers\{pool="host_([^"]+)"\} (\d+)$/gm)) {
-        if (m[1] !== undefined && Number(m[2]) > 0) found.add(m[1])
+      const found = new Map<string, number>()
+      for (const m of (await answer.text()).matchAll(/^checkd_pool_workers\{pool="([^"]+)"\} (\d+)$/gm)) {
+        if (m[1] !== undefined) found.set(m[1], Number(m[2]))
       }
       return found
     } catch {
@@ -129,29 +144,57 @@ export class Agents {
     }
   }
 
-  /** A new token for a host's agent; an agent it had before is shut out. */
+  /** A new token for a host's agent, as `<host>.new`: checkd lets the agent
+   * in with it but sends it nothing, and the host's checks stay where they
+   * were, until `settle` sees it connected. An agent the host has goes on
+   * until then. */
   async add(host: string): Promise<string> {
     if (!agentName(host)) throw new Refused('a host name of letters, digits, ., - and _')
     const rows = await this.backend.query(`GET hosts\nColumns: name\nFilter: name = ${host}`)
     if (rows.length !== 1) throw new Refused(`no host '${host}'`)
     const token = randomBytes(24).toString('base64url')
-    const file = join(this.settings.dir, `${host}.token`)
-    const fresh = join(this.settings.dir, `.${host}.token.new`)
+    const file = join(this.settings.dir, `${host}.new`)
+    const fresh = join(this.settings.dir, `.${host}.new.tmp`)
     // Readable by the group too: checkd may run as another user of it.
     writeFileSync(fresh, `${token}\n`, { mode: 0o640 })
     chmodSync(fresh, 0o640)
     renameSync(fresh, file)
-    await this.reload()
     return token
+  }
+
+  /** A new token whose agent has connected becomes the host's, and checkd
+   * reloads to send it the host's checks; one not used within the hour is
+   * taken back. Run every few seconds. */
+  async settle(now = Date.now()): Promise<void> {
+    const waiting = this.files('.new')
+    if (waiting.length === 0) return
+    const pools = await this.pools()
+    let joined = false
+    for (const host of waiting) {
+      const file = join(this.settings.dir, `${host}.new`)
+      if ((pools?.get(`waiting_${host}`) ?? 0) > 0) {
+        renameSync(file, join(this.settings.dir, `${host}.token`))
+        joined = true
+      } else if (now - statSync(file).mtimeMs > WAIT_FOR) {
+        unlinkSync(file)
+      }
+    }
+    if (joined) await this.reload()
   }
 
   async remove(host: string): Promise<boolean> {
     if (!agentName(host)) return false
-    const file = join(this.settings.dir, `${host}.token`)
-    if (!existsSync(file)) return false
-    unlinkSync(file)
-    await this.reload()
-    return true
+    let found = false
+    let inUse = false
+    for (const suffix of ['.new', '.token']) {
+      const file = join(this.settings.dir, `${host}${suffix}`)
+      if (!existsSync(file)) continue
+      unlinkSync(file)
+      found = true
+      inUse ||= suffix === '.token'
+    }
+    if (inUse) await this.reload()
+    return found
   }
 
   ca(): string {

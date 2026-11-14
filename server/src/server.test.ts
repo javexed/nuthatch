@@ -1,6 +1,6 @@
 import { createDecipheriv, createECDH, createHash, hkdfSync, randomBytes, verify as cryptoVerify } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -1230,10 +1230,11 @@ describe('agents', () => {
     expect(made.status).toBe(200)
     const { command } = (await made.json()) as { command: string }
     expect(command).toMatch(/^curl -fsSL --proto '=https' 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]{24}' \| sudo sh$/)
-    expect(reloads()).toBe(1)
-    const token = readFileSync(join(dir, 'agents', 'web1.token'), 'utf8').trim()
+    // Nothing moves yet: a new token, and no reload.
+    expect(reloads()).toBe(0)
+    const token = readFileSync(join(dir, 'agents', 'web1.new'), 'utf8').trim()
     expect(token).toMatch(/^[A-Za-z0-9_-]{32}$/)
-    expect(statSync(join(dir, 'agents', 'web1.token')).mode & 0o777).toBe(0o640)
+    expect(statSync(join(dir, 'agents', 'web1.new')).mode & 0o777).toBe(0o640)
     const path = new URL(urlOf(command)).pathname
     // A look ahead leaves the code as it is.
     expect((await app.request(path, { method: 'HEAD' })).status).toBe(200)
@@ -1252,7 +1253,7 @@ describe('agents', () => {
     // Once only.
     expect((await app.request(path)).status).toBe(404)
     const listed = await app.request('/api/v1/agents/site')
-    expect(await listed.json()).toEqual({ agents: [{ host: 'web1' }] })
+    expect(await listed.json()).toEqual({ agents: [{ host: 'web1', waiting: true }] })
   })
 
   it('writes a PowerShell script for Windows', async () => {
@@ -1350,5 +1351,46 @@ describe('agents', () => {
     expect(text).toContain('--engine wss://checkd.example.com/workers --name web1')
     const win = (await (await post({ host: 'win1', os: 'windows' })).json()) as { command: string }
     expect(await (await app.request(new URL(urlOf(win.command)).pathname)).text()).toContain('--engine wss://checkd.example.com/workers')
+  })
+
+  it("a new agent's checks move to it only once it has connected; one never run is taken back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nuthatch-settle-'))
+    let pools = ''
+    const metrics = createServer((_, res) => res.end(pools))
+    await new Promise<void>((done) => metrics.listen(0, '127.0.0.1', done))
+    const backend = fake('site', (request) => (request.startsWith('GET hosts\nColumns: name\nFilter: name = ') ? [[request.split('= ')[1]]] : []))
+    let reloads = 0
+    const agents = new Agents(backend, { dir, engine: 'e:4730', ca: '', metrics: `http://127.0.0.1:${(metrics.address() as AddressInfo).port}` }, async () => {
+      reloads++
+    })
+    try {
+      // web1 has an agent at work; a new command for it leaves that one be.
+      writeFileSync(join(dir, 'web1.token'), 'old\n')
+      await agents.add('web1')
+      await agents.add('web2')
+      pools = 'checkd_pool_workers{pool="host_web1"} 1\n'
+      expect(await agents.list()).toEqual([{ host: 'web1', connected: true }, { host: 'web2', waiting: true, connected: false }])
+      await agents.settle()
+      expect(reloads).toBe(0)
+      expect(readFileSync(join(dir, 'web1.token'), 'utf8')).toBe('old\n')
+      // web2's agent connects: its token is the host's, and checkd reloads.
+      pools = 'checkd_pool_workers{pool="host_web1"} 1\ncheckd_pool_workers{pool="waiting_web2"} 1\n'
+      const web2 = readFileSync(join(dir, 'web2.new'), 'utf8')
+      await agents.settle()
+      expect(reloads).toBe(1)
+      expect(readFileSync(join(dir, 'web2.token'), 'utf8')).toBe(web2)
+      expect(existsSync(join(dir, 'web2.new'))).toBe(false)
+      // web1's new command is never run: taken back after an hour.
+      await agents.settle(Date.now() + 61 * 60_000)
+      expect(existsSync(join(dir, 'web1.new'))).toBe(false)
+      expect(readFileSync(join(dir, 'web1.token'), 'utf8')).toBe('old\n')
+      expect(reloads).toBe(1)
+      // Removing a waiting one needs no reload.
+      await agents.add('web2')
+      expect(await agents.remove('web2')).toBe(true)
+      expect(reloads).toBe(2)
+    } finally {
+      metrics.close()
+    }
   })
 })
