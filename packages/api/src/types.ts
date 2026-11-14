@@ -136,6 +136,10 @@ export interface ManagedService {
    * percentage, that many must be OK; without it, all.
    */
   aggregate?: { members: string[]; min?: string }
+  /** Where it is checked on a checkd with agents: by the engine, a look
+   * from outside; or only by the host's agent, a look at the machine
+   * itself. Set by nuthatch for its own commands of those kinds. */
+  run_on?: 'engine' | 'agent'
 }
 
 /** How a service takes pushes, for those who may see the config. */
@@ -249,6 +253,13 @@ export interface Suggestion {
 }
 
 /** What looking at a host before adding it found. */
+/** A guess at a host's system, from outside. */
+export interface SystemGuess {
+  family: 'linux' | 'windows' | 'unix'
+  /** What it was told by. */
+  why: string
+}
+
 export interface Discovery {
   /** What was typed. */
   input: string
@@ -264,6 +275,7 @@ export interface Discovery {
   /** A check for the host itself, when it does not answer ping. */
   host_check?: string
   suggestions: Suggestion[]
+  system?: SystemGuess
 }
 
 export type ConfigChange =
@@ -396,6 +408,44 @@ export interface AgentRow {
   /** Its install command is made, and its agent has not connected yet: the
    * host's checks stay where they were. */
   waiting?: boolean
+  /** Its system, from its inventory. */
+  os?: string
+  /** Checks proposed from its inventory, not taken up or set aside yet. */
+  proposals?: number
+}
+
+/** What an agent says its machine is and runs. Its word only: shown and
+ * proposed from, never run. */
+export interface Inventory {
+  os: { family: string; name: string; id: string; version: string; kernel: string; arch: string }
+  hostname: string
+  cpus: number
+  memory: number
+  disks: { path: string; fs: string; size: number; used_pct: number }[]
+  services: { name: string; description: string }[]
+  ports: { port: number; address: string }[]
+}
+
+/** A check proposed from an inventory. */
+export interface Proposal {
+  /** Stands for it when it is taken up or set aside. */
+  key: string
+  description: string
+  /** What led to it. */
+  why: string
+  /** Ticked to begin with. */
+  checked: boolean
+}
+
+export interface HostInventory {
+  inventory: Inventory
+  /** When it came, s since 1970. */
+  received: number
+  /** Whether nuthatch keeps the host's config, so that checks can be added. */
+  managed: boolean
+  /** The base checks were added when the inventory first came. */
+  base: string[]
+  proposals: Proposal[]
 }
 
 /** A login for one install over SSH: sent once, kept nowhere. */

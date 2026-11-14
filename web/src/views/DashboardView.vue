@@ -5,7 +5,7 @@
 // the whole dashboard; a host chosen at the top for panels about it.
 import type { Dashboard, DashboardBody, Layout, PanelSettings, Range, Scope, Series, Widget } from '@nuthatch/api'
 import { ApiError, RANGES } from '@nuthatch/api'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FindTarget from '../components/FindTarget.vue'
 import WidgetBox from '../components/WidgetBox.vue'
@@ -28,14 +28,21 @@ const narrow = ref(false)
 const wall = ref(false)
 const arranging = computed(() => mayEdit.value && !wall.value && !narrow.value)
 
-const KINDS: { type: Widget['type']; label: string; make: () => PanelSettings }[] = [
-  { type: 'status', label: 'Status', make: () => ({ type: 'status' }) },
-  { type: 'problems', label: 'Problems', make: () => ({ type: 'problems', of: 'services', show: 'problems' }) },
-  { type: 'metric', label: 'Metric', make: () => ({ type: 'metric', series: [] }) },
-  { type: 'log', label: 'Log', make: () => ({ type: 'log', lines: 'alerts' }) },
-  { type: 'availability', label: 'Availability', make: () => ({ type: 'availability' }) },
-  { type: 'note', label: 'Note', make: () => ({ type: 'note', text: '' }) },
+/** The tray. A number and a graph are one kind of panel at two sizes. */
+const KINDS: { key: string; label: string; make: () => PanelSettings; size?: [number, number] }[] = [
+  { key: 'hosts', label: 'Hosts', make: () => ({ type: 'status' }) },
+  { key: 'problems', label: 'Problems', make: () => ({ type: 'problems', of: 'services', show: 'problems' }) },
+  { key: 'number', label: 'Number', make: () => ({ type: 'metric', series: [] }), size: [3, 2] },
+  { key: 'graph', label: 'Graph', make: () => ({ type: 'metric', series: [] }), size: [6, 4] },
+  { key: 'alerts', label: 'Alerts', make: () => ({ type: 'log', lines: 'alerts' }) },
+  { key: 'uptime', label: 'Uptime', make: () => ({ type: 'availability' }) },
+  { key: 'note', label: 'Note', make: () => ({ type: 'note', text: '' }) },
 ]
+const kindOf = (key: string) => KINDS.find((k) => k.key === key)
+const sizeOf = (key: string): [number, number] => {
+  const kind = kindOf(key)
+  return kind?.size ?? SIZES[kind?.make().type ?? 'note']
+}
 const tray = ref(false)
 const menu = ref(false)
 
@@ -57,6 +64,8 @@ async function load() {
     history.length = 0
     canUndo.value = false
     selected.value = null
+    // An empty dashboard begins with what can go on it.
+    tray.value = d.widgets.length === 0
     error.value = ''
   } catch (err) {
     error.value = err instanceof ApiError ? (err.status === 404 ? 'Not found' : err.message) : 'Server unreachable'
@@ -119,7 +128,12 @@ function undo() {
   selected.value = null
   body.value = JSON.parse(before) as DashboardBody
 }
+/** The ⋯ menu closes on a click elsewhere, or Escape. */
+function away(event: PointerEvent) {
+  if (menu.value && !(event.target instanceof Element && event.target.closest('.more'))) menu.value = false
+}
 function keys(event: KeyboardEvent) {
+  if (event.key === 'Escape') menu.value = false
   const typing = event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
   if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey && !typing && arranging.value) {
     event.preventDefault()
@@ -132,10 +146,12 @@ onMounted(() => {
   onNarrow()
   narrowQuery.addEventListener('change', onNarrow)
   window.addEventListener('keydown', keys)
+  window.addEventListener('pointerdown', away)
 })
 onUnmounted(() => {
   narrowQuery.removeEventListener('change', onNarrow)
   window.removeEventListener('keydown', keys)
+  window.removeEventListener('pointerdown', away)
   void keep()
 })
 
@@ -182,7 +198,7 @@ function toggleChooser(on: boolean) {
 }
 
 // A panel dragged in from the tray: where it would land, the others moved out of its way.
-const incoming = ref<{ type: Widget['type']; layout: Layout } | null>(null)
+const incoming = ref<{ layout: Layout } | null>(null)
 const shown = computed(() => {
   const widgets = body.value?.widgets ?? []
   const coming = incoming.value
@@ -212,11 +228,14 @@ function add(settings: PanelSettings, at?: Layout, size?: [number, number]) {
   body.value.widgets.forEach((x, i) => (x.layout = moved[i]!))
   body.value.widgets.push({ ...settings, layout: moved[boxes.length]! } as Widget)
   const needs = settings.type === 'metric' || settings.type === 'note' || settings.type === 'status' || settings.type === 'availability'
-  selected.value = needs ? body.value.widgets.length - 1 : null
+  const n = body.value.widgets.length - 1
+  selected.value = needs ? n : null
+  // Where it went, when that is below what shows.
+  void nextTick(() => grid.value?.querySelectorAll('.panel')[order.value.findIndex((o) => o.n === n)]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
 }
-function addKind(type: Widget['type'], at?: Layout) {
-  const kind = KINDS.find((k) => k.type === type)
-  if (kind) add(kind.make(), at)
+function addKind(key: string, at?: Layout) {
+  const kind = kindOf(key)
+  if (kind) add(kind.make(), at, sizeOf(key))
 }
 function duplicate(n: number) {
   const w = body.value?.widgets[n]
@@ -232,11 +251,11 @@ function removePanel(n: number) {
 }
 
 // Dragging in from the tray. A press that does not move is a click.
-let fromTray: { type: Widget['type']; x: number; y: number; moved: boolean } | null = null
-function grabKind(event: PointerEvent, type: Widget['type']) {
+let fromTray: { key: string; x: number; y: number; moved: boolean } | null = null
+function grabKind(event: PointerEvent, key: string) {
   if (event.button !== 0) return
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  fromTray = { type, x: event.clientX, y: event.clientY, moved: false }
+  fromTray = { key, x: event.clientX, y: event.clientY, moved: false }
 }
 function dragKind(event: PointerEvent) {
   if (!fromTray || !grid.value) return
@@ -248,20 +267,20 @@ function dragKind(event: PointerEvent) {
     incoming.value = null
     return
   }
-  const [w, h] = SIZES[fromTray.type]
+  const [w, h] = sizeOf(fromTray.key)
   const col = (rect.width + 12) / COLUMNS
   const x = Math.floor((event.clientX - rect.left) / col) - Math.floor(w / 2)
   const y = Math.floor((event.clientY - rect.top) / (70 + 12))
-  incoming.value = { type: fromTray.type, layout: clamp({ x, y, w, h }) }
+  incoming.value = { layout: clamp({ x, y, w, h }) }
 }
 function dropKind() {
   if (!fromTray) return
-  const { type, moved } = fromTray
+  const { key, moved } = fromTray
   fromTray = null
   const at = incoming.value?.layout
   incoming.value = null
-  if (!moved) addKind(type)
-  else if (at) addKind(type, at)
+  if (!moved) addKind(key)
+  else if (at) addKind(key, at)
 }
 function cancelKind() {
   fromTray = null
@@ -411,7 +430,10 @@ const rangeNames = Object.keys(RANGES) as Range[]
             <label class="check"><input :checked="!!body.choose_host" type="checkbox" name="choose-host" @change="toggleChooser(($event.target as HTMLInputElement).checked)" /> Choose a host</label>
             <label v-if="body.choose_host" class="field">
               Of host group
-              <input v-model="body.choose_host.hostgroup" name="choose-hostgroup" list="dash-groups" autocomplete="off" />
+              <select v-model="body.choose_host.hostgroup" name="choose-hostgroup">
+                <option :value="undefined">All</option>
+                <option v-for="g in groupList ?? []" :key="g" :value="g">{{ g }}</option>
+              </select>
             </label>
             <button type="button" class="plain" @click="exportIt">Export</button>
             <button v-if="mine" type="button" class="plain" @click="remove">Delete</button>
@@ -424,15 +446,15 @@ const rangeNames = Object.keys(RANGES) as Range[]
     <div v-if="arranging && tray" class="dash-tray" role="toolbar" aria-label="Add a panel">
       <button
         v-for="kind in KINDS"
-        :key="kind.type"
+        :key="kind.key"
         type="button"
         class="quiet tray-item"
-        @pointerdown="grabKind($event, kind.type)"
+        @pointerdown="grabKind($event, kind.key)"
         @pointermove="dragKind"
         @pointerup="dropKind"
         @pointercancel="cancelKind"
-        @keydown.enter.prevent="addKind(kind.type)"
-        @keydown.space.prevent="addKind(kind.type)"
+        @keydown.enter.prevent="addKind(kind.key)"
+        @keydown.space.prevent="addKind(kind.key)"
       >
         + {{ kind.label }}
       </button>
@@ -467,7 +489,7 @@ const rangeNames = Object.keys(RANGES) as Range[]
         <label>Title <input v-model="panel.title" name="panel-title" maxlength="200" /></label>
         <template v-if="panel.type === 'status' || panel.type === 'availability'">
           <p class="by">{{ scopeText(panel) }}</p>
-          <FindTarget mode="scope" label="Show" :chooser="!!body.choose_host" @scope="setScope" />
+          <FindTarget mode="scope" label="What" :chooser="!!body.choose_host" @scope="setScope" />
         </template>
         <template v-else-if="panel.type === 'metric'">
           <ul class="series-list">
@@ -496,7 +518,13 @@ const rangeNames = Object.keys(RANGES) as Range[]
               <option value="recovered">Recovered</option>
             </select>
           </label>
-          <label>Host group <input v-model="panel.hostgroup" name="panel-hostgroup" list="dash-groups" maxlength="200" autocomplete="off" /></label>
+          <label>
+            Host group
+            <select v-model="panel.hostgroup" name="panel-hostgroup">
+              <option :value="undefined">All</option>
+              <option v-for="g in groupList ?? []" :key="g" :value="g">{{ g }}</option>
+            </select>
+          </label>
         </template>
         <fieldset v-else-if="panel.type === 'log'" class="field inline">
           <legend>Lines</legend>
@@ -506,7 +534,6 @@ const rangeNames = Object.keys(RANGES) as Range[]
         <label v-else-if="panel.type === 'note'">Text <textarea v-model="panel.text" name="panel-text" rows="6" maxlength="4000"></textarea></label>
         <button type="button" class="quiet" @click="selected = null">Done</button>
       </aside>
-      <datalist id="dash-groups"><option v-for="g in groupList ?? []" :key="g" :value="g" /></datalist>
     </div>
     <p v-if="body.widgets.length === 0 && !arranging" class="none">Empty</p>
   </template>

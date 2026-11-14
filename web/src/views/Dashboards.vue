@@ -135,6 +135,6 @@ function startWall() {
     <button v-for="g in groups" :key="g" type="button" class="quiet" :disabled="busy" @click="makeGroup(g)">{{ g }}</button>
   </div>
   <div v-if="making === 'host'" class="card">
-    <FindTarget mode="scope" label="Host" @scope="makeHost" />
+    <FindTarget mode="host" label="Host" @scope="makeHost" />
   </div>
 </template>

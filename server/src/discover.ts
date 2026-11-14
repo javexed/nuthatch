@@ -13,7 +13,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { type Socket, connect as tcpConnect, isIP } from 'node:net'
 import { type PeerCertificate, type TLSSocket, connect as tlsConnect } from 'node:tls'
-import type { Discovery, FoundPort, Suggestion } from '@nuthatch/api'
+import type { Discovery, FoundPort, Suggestion, SystemGuess } from '@nuthatch/api'
 import { Refused } from './policy.ts'
 
 type Kind = 'banner' | 'web' | 'tls' | 'open'
@@ -50,6 +50,8 @@ export const PORTS: Known[] = [
   { port: 3000, service: 'Web 3000', kind: 'web' },
   { port: 3306, service: 'MySQL', kind: 'open' },
   { port: 3389, service: 'RDP', kind: 'open' },
+  { port: 5666, service: 'NRPE', kind: 'open' },
+  { port: 5985, service: 'WinRM', kind: 'open' },
   { port: 5000, service: 'Web 5000', kind: 'web' },
   { port: 5001, service: 'Web 5001', kind: 'web' },
   { port: 5432, service: 'PostgreSQL', kind: 'open' },
@@ -241,14 +243,34 @@ function page(address: string, port: number, secure: boolean, hostHeader: string
 }
 
 /** One ping, by the system's ping: whether it answered, and how fast. */
-function ping(address: string): Promise<{ ok: boolean; ms?: number } | null> {
+function ping(address: string): Promise<{ ok: boolean; ms?: number; ttl?: number } | null> {
   return new Promise((done) => {
     execFile('ping', ['-n', '-c', '1', '-W', '2', address], { timeout: 5000 }, (err, stdout) => {
       if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') return done(null)
       const ms = stdout.match(/time[=<]([\d.]+) ?ms/)?.[1]
-      done({ ok: err === null, ms: ms === undefined ? undefined : Math.round(Number(ms)) })
+      const ttl = stdout.match(/ttl=(\d+)/i)?.[1]
+      done({ ok: err === null, ms: ms === undefined ? undefined : Math.round(Number(ms)), ...(ttl === undefined ? {} : { ttl: Number(ttl) }) })
     })
   })
+}
+
+/** Linux or Windows, as far as can be told from outside: what SSH says of
+ * itself, the ports only Windows opens, and how far a ping's TTL is from
+ * where each starts (64 and 128). A guess, which the user can change. */
+export function guessSystem(found: FoundPort[], ttl: number | undefined): SystemGuess | undefined {
+  const ssh = found.find((f) => f.service.startsWith('SSH') && f.banner)?.banner ?? ''
+  const distro = /(Ubuntu|Debian|Raspbian|Fedora|Red ?Hat|CentOS|Rocky|Alma|SUSE|Alpine|Arch|Gentoo)/i.exec(ssh)?.[1]
+  if (distro) return { family: 'linux', why: distro }
+  if (/FreeBSD|OpenBSD|NetBSD/i.test(ssh)) return { family: 'unix', why: /FreeBSD|OpenBSD|NetBSD/i.exec(ssh)?.[0] ?? 'BSD' }
+  if (/Windows|for_Windows/i.test(ssh)) return { family: 'windows', why: 'OpenSSH for Windows' }
+  const open = new Set(found.map((f) => f.port))
+  if (open.has(3389) || open.has(5985)) return { family: 'windows', why: open.has(5985) ? 'WinRM' : 'Remote Desktop' }
+  if (ttl !== undefined) {
+    if (ttl > 64 && ttl <= 128) return { family: 'windows', why: `TTL ${ttl}` }
+    if (ttl <= 64 && (open.has(22) || ssh !== '')) return { family: 'linux', why: `SSH, TTL ${ttl}` }
+  }
+  if (ssh.includes('OpenSSH')) return { family: 'linux', why: 'OpenSSH' }
+  return undefined
 }
 
 async function inTurn<T, R>(items: T[], work: (item: T) => Promise<R>): Promise<R[]> {
@@ -341,7 +363,7 @@ export function suggest(target: Target, found: FoundPort[], pinged: boolean | nu
       add({ description: 'IMAPS', check_command: `nuthatch_imaps!${f.port}`, checked: true, why: f.tls ? `TLS, expires in ${f.tls.days} days` : `port ${f.port}` })
     } else {
       // Telnet and NetBIOS are found, but not worth watching by default.
-      add({ description: f.service, check_command: `nuthatch_tcp!${f.port}`, checked: !['Telnet', 'NetBIOS'].includes(f.service), why: f.banner ?? `port ${f.port} open` })
+      add({ description: f.service, check_command: `nuthatch_tcp!${f.port}`, checked: !['Telnet', 'NetBIOS', 'NRPE', 'WinRM'].includes(f.service), why: f.banner ?? `port ${f.port} open` })
     }
   }
   // A host that does not answer ping is checked on its first open port.
@@ -384,15 +406,17 @@ export async function discover(given: unknown, also: unknown = []): Promise<Disc
     },
   )
   const { host_check, suggestions } = suggest(target, found, pinged === null ? null : pinged.ok)
+  const system = guessSystem(found, pinged?.ttl)
   return {
     input: String(given).trim(),
     name: hostName(target.host),
     address: target.host,
     addresses,
-    ping: pinged,
+    ping: pinged === null ? null : { ok: pinged.ok, ...(pinged.ms === undefined ? {} : { ms: pinged.ms }) },
     found,
     host_check,
     suggestions,
+    ...(system ? { system } : {}),
   }
 }
 

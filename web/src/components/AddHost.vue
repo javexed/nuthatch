@@ -1,15 +1,16 @@
 <script setup lang="ts">
 // Adding a host by looking first: a name, an address or a URL is typed,
 // the server looks at what answers there (from where the engine runs),
-// and the checks it suggests are ticked or not. The full form is a step
-// away, filled in from what was found, or empty.
+// and the checks it suggests are ticked or not. On a checkd with agents,
+// an agent is installed next, guessed Linux or Windows from what answered.
+// The full form is a step away, filled in from what was found, or empty.
 import type { ConfigState, Discovery, ManagedHost, TailnetMachine } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../stores/session'
 
-const props = defineProps<{ backend: string; state: ConfigState; busy: boolean }>()
-const emit = defineEmits<{ check: [host: ManagedHost]; save: [host: ManagedHost]; form: [host?: ManagedHost]; cancel: [] }>()
+const props = defineProps<{ backend: string; state: ConfigState; busy: boolean; agents?: boolean }>()
+const emit = defineEmits<{ check: [host: ManagedHost]; save: [host: ManagedHost, agent?: 'linux' | 'windows']; form: [host?: ManagedHost]; cancel: [] }>()
 
 const target = ref('')
 const looking = ref(false)
@@ -18,6 +19,9 @@ const found = ref<Discovery | null>(null)
 const name = ref('')
 const template = ref(props.state.templates.host[0] ?? '')
 const ticked = ref<boolean[]>([])
+/** Its system, guessed; and whether an agent is installed once it is added. */
+const system = ref<'linux' | 'windows' | ''>('')
+const withAgent = ref(false)
 
 // The tailnet's machines the engine has no host for: one tap to look at one.
 const machines = ref<TailnetMachine[]>([])
@@ -48,6 +52,9 @@ async function look() {
     found.value = seen
     name.value = props.state.hosts.some((h) => h.name === seen.name) ? '' : seen.name
     ticked.value = seen.suggestions.map((s) => s.checked)
+    system.value = seen.system?.family === 'linux' || seen.system?.family === 'windows' ? seen.system.family : ''
+    withAgent.value = props.agents === true && system.value !== ''
+
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Server unreachable'
   } finally {
@@ -141,6 +148,16 @@ function days(n: number): string {
         </label>
       </div>
 
+      <div v-if="agents" class="fields">
+        <fieldset class="inline">
+          <legend>System<template v-if="found.system"> <span class="by">({{ found.system.why }})</span></template></legend>
+          <label><input v-model="system" type="radio" value="linux" name="system" /> Linux</label>
+          <label><input v-model="system" type="radio" value="windows" name="system" /> Windows</label>
+          <label><input v-model="system" type="radio" value="" name="system" /> Other</label>
+        </fieldset>
+        <label v-if="system"><input v-model="withAgent" type="checkbox" name="with-agent" /> Install agent</label>
+      </div>
+
       <fieldset v-if="found.suggestions.length > 0" class="suggestions">
         <legend>Checks</legend>
         <label v-for="(s, n) in found.suggestions" :key="s.description" class="suggestion">
@@ -166,7 +183,7 @@ function days(n: number): string {
       </button>
       <template v-if="found">
         <button type="button" class="quiet" :disabled="busy || !name" @click="emit('check', host())">Check only</button>
-        <button type="button" :disabled="busy || !name || !template" @click="emit('save', host())">
+        <button type="button" :disabled="busy || !name || !template" @click="emit('save', host(), withAgent && system ? system : undefined)">
           Add {{ name || 'host' }}{{ count > 0 ? ` with ${count} check${count === 1 ? '' : 's'}` : '' }}
         </button>
       </template>

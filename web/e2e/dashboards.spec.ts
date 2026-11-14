@@ -38,7 +38,7 @@ test('everyone starts with an Overview, and a template makes a whole dashboard',
   const name = (await group.textContent())?.trim() ?? ''
   await group.click()
   await expect(panel(page, name)).toBeVisible()
-  await expect(panel(page, `Availability · ${name}`)).toContainText('%')
+  await expect(panel(page, `Uptime · ${name}`)).toContainText('%')
   await expect(panel(page, `Service problems · ${name}`)).toBeVisible()
   await expect(panel(page, `Recovered · ${name}`)).toBeVisible()
   await fits(page)
@@ -54,11 +54,11 @@ test('changed in place and kept at once, with undo; panels from the tray, told w
   await page.getByRole('button', { name: 'Blank' }).click()
   const title = `Built ${Date.now()}`
   await page.getByLabel('Title').fill(title)
-  await page.getByRole('button', { name: '+ Panel' }).click()
+  // Empty: the tray is open already.
   const tray = page.getByRole('toolbar', { name: 'Add a panel' })
 
-  // A metric dragged onto the grid; its settings open; one search finds it.
-  const from = await tray.getByRole('button', { name: '+ Metric' }).boundingBox()
+  // A graph dragged onto the grid; its settings open on a list to browse.
+  const from = await tray.getByRole('button', { name: '+ Graph' }).boundingBox()
   const grid = await page.locator('.dash-grid').boundingBox()
   if (!from || !grid) throw new Error('no boxes')
   await page.mouse.move(from.x + 10, from.y + 10)
@@ -67,8 +67,10 @@ test('changed in place and kept at once, with undo; panels from the tray, told w
   await expect(page.locator('.drop-ghost')).toBeVisible()
   await page.mouse.up()
   const settings = page.getByRole('complementary', { name: 'Panel settings' })
-  await settings.getByLabel('Add', { exact: true }).fill('passive1 load')
-  await settings.getByRole('button', { name: /passive1 · a · load/ }).click()
+  await settings.getByRole('button', { name: /^passive1\s*naemon$/ }).click()
+  await settings.getByRole('button', { name: /^a$/ }).click()
+  await settings.getByRole('button', { name: /^load\s*0\.5$/ }).click()
+  // Or a few words.
   await settings.getByLabel('Add', { exact: true }).fill('passive1 users')
   await settings.getByRole('button', { name: /passive1 · a · users/ }).click()
   await expect(settings.locator('.series-list li')).toHaveCount(2)
@@ -76,9 +78,10 @@ test('changed in place and kept at once, with undo; panels from the tray, told w
   const metric = panel(page, 'passive1 / a')
   await expect(metric).toContainText('0.5')
 
-  // Status of a host, from the same kind of search.
-  await tray.getByRole('button', { name: '+ Status' }).click()
-  await settings.getByLabel('Show').fill('passive1')
+  // Hosts: one host, from the same kind of search.
+  await tray.getByRole('button', { name: '+ Hosts' }).click()
+  await expect(settings.getByRole('button', { name: 'All hosts' })).toBeVisible()
+  await settings.getByLabel('What').fill('passive1')
   await settings.getByRole('button', { name: /^passive1\s*host · naemon$/ }).click()
   await settings.getByRole('button', { name: 'Done' }).click()
   await expect(tiles(page, 'passive1').first()).toBeVisible()
@@ -141,14 +144,14 @@ test('a shared dashboard shows each user their own, and its outline shows troubl
   await page.getByRole('button', { name: 'Blank' }).click()
   const title = `Shared ${Date.now()}`
   await page.getByLabel('Title').fill(title)
-  await page.getByRole('button', { name: '+ Panel' }).click()
+  // Empty: the tray is open already.
   const tray = page.getByRole('toolbar', { name: 'Add a panel' })
   const settings = page.getByRole('complementary', { name: 'Panel settings' })
-  await tray.getByRole('button', { name: '+ Status' }).click()
+  await tray.getByRole('button', { name: '+ Hosts' }).click()
   await settings.getByRole('button', { name: 'Done' }).click()
   await tray.getByRole('button', { name: '+ Problems' }).click()
   await page.locator('.dash-grid > section').last().getByRole('button', { name: 'Settings' }).click()
-  await settings.getByLabel('Host group').fill('passive')
+  await settings.getByLabel('Host group').selectOption('passive')
   await settings.getByRole('button', { name: 'Done' }).click()
   await page.getByRole('button', { name: 'More' }).click()
   await page.getByLabel('Shared').check()
@@ -186,7 +189,7 @@ test('one dashboard for any host, chosen at the top', async ({ page }) => {
   const chooser = page.getByRole('combobox', { name: 'Host' })
   await expect(chooser).toBeVisible()
   await expect(panel(page, 'passive1')).toBeVisible()
-  await expect(panel(page, 'Availability · passive1')).toBeVisible()
+  await expect(panel(page, 'Uptime · passive1')).toBeVisible()
   const other = (await chooser.locator('option').allTextContents()).find((name) => name !== 'passive1') ?? ''
   await chooser.selectOption({ label: other })
   await expect(panel(page, other)).toBeVisible()

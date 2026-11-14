@@ -41,7 +41,7 @@ const title = computed(() => {
     case 'status':
     case 'availability': {
       const what = w.of ? name(resolve(w.of) ?? w.of) : (w.hostgroup ?? 'All hosts')
-      return w.type === 'availability' ? `Availability · ${what}` : what
+      return w.type === 'availability' ? `Uptime · ${what}` : what
     }
     case 'problems': {
       const SHOW = { problems: `${w.of === 'hosts' ? 'Host' : 'Service'} problems`, acknowledged: 'Acknowledged', downtimes: 'In a downtime', recovered: 'Recovered' }
@@ -49,7 +49,7 @@ const title = computed(() => {
     }
     case 'metric': {
       const first = series.value[0] ?? w.series[0]
-      if (!first) return 'Metric'
+      if (!first) return compact.value ? 'Number' : 'Graph'
       return `${name(first)}${w.series.length === 1 ? ` · ${first.label}` : ''}`
     }
     case 'log':

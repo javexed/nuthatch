@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -166,6 +166,16 @@ export class Client {
 
   agentJob(id: string): Promise<{ done: boolean; ok: boolean; output: string }> {
     return this.call('GET', `/api/v1/agents/jobs/${encodeURIComponent(id)}`)
+  }
+
+  /** What a host's agent says it is, and the checks proposed from it; null before it has said. */
+  inventory(backend: string, host: string): Promise<{ inventory: HostInventory | null; agent: AgentRow | null }> {
+    return this.call('GET', `/api/v1/agents/${encodeURIComponent(backend)}/${encodeURIComponent(host)}/inventory`)
+  }
+
+  /** Takes up proposed checks (added to the host's config) and sets others aside. */
+  proposals(backend: string, host: string, add: string[], dismiss: string[]): Promise<{ added: string[] }> {
+    return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}/${encodeURIComponent(host)}/proposals`, { add, dismiss })
   }
 
   removeAgent(backend: string, host: string): Promise<Record<string, never>> {

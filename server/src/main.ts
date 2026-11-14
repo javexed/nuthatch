@@ -16,6 +16,7 @@ import { parse } from 'smol-toml'
 import { type Peer, VERSION, buildApp, hostsOnly, userName } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers } from './auth.ts'
 import { Agents, type Pin, pinOf } from './agents.ts'
+import { HostSetup } from './hostsetup.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
 import { pluginsDir } from './catalogue.ts'
 import { ConfigAdmin } from './configadmin.ts'
@@ -257,6 +258,9 @@ function main(): void {
   const webRoot = text(config, 'web_root')
 
   const store = new Store(storePath)
+  // What agents say their hosts are: kept, and the base checks added once.
+  const setup = new HostSetup(store, admins)
+  for (const [name, each] of agents) each.onInventory = (host, text, received) => setup.take(name, host, text, received)
   // [notifications]: to browsers, through their push services.
   let pusher: Pusher | undefined
   if (config.notifications !== undefined) {
@@ -291,6 +295,7 @@ function main(): void {
     cookieSecure: behindProxy,
     webRoot: webRoot === undefined ? undefined : resolve(webRoot),
     config: admins,
+    setup,
     pushUrls,
     agents,
     agentBin,

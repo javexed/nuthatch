@@ -1,39 +1,78 @@
 # Agents
 
-With checkd as the engine, the Agents page installs `checkd-agent` on a
+With checkd as the engine, nuthatch installs `checkd-agent` on a
 monitored Linux or Windows host. The agent connects out to the engine over
-TLS and runs that host's service checks there; see checkd's
-`docs/agent.md`. The page is for the role `config_edit`.
+TLS and runs that host's checks there; see checkd's `docs/agent.md`. For
+the role `config_edit`.
 
-NRPE goes on working beside it. On Linux the page can install NRPE as
+NRPE goes on working beside it. On Linux nuthatch can install NRPE as
 well, for `check_nrpe` from the engine.
 
-## Installing
+## Adding a host with an agent
 
-1. Choose the host and its system. **Plugins only** limits the agent to
-   programs in the plugin directories, and on Linux installs the
-   monitoring plugins package. **NRPE** (Linux) also installs NRPE, open
-   to the engine.
-2. **Make command** writes a new token for the host into checkd's agents
-   directory and gives a command:
-   - Linux, as root:
-     `curl -fsSL --proto '=https' 'https://…/agent/install/<code>' | sudo sh`
-   - Windows, in Windows PowerShell as Administrator:
-     `irm 'https://…/agent/install/<code>' | iex`
+**Config → Add a host**: type its name or address and **Look**. nuthatch
+guesses its system from what answered (what its SSH server says of
+itself, Windows' own ports, a ping's TTL); change it if wrong. With
+**Install agent** ticked, adding the host goes on to installing its agent,
+**over SSH** by default (below), or by a **command** to run there.
 
-   On a LAN without a certificate authority the commands also check
-   nuthatch's certificate by its pin (below).
-3. Run it on the host. The code works once, within 15 minutes.
+Once connected, the agent says what its machine is: system, processors,
+memory, disks, the services running and the ports listened on (its
+inventory). From that:
 
-Until the new agent connects, the host shows **Waiting** and nothing
-changes: its checks run where they ran, and an agent it had goes on. Once
-the agent connects, its token becomes the host's, checkd reloads, and the
-host's service checks go to it; an agent it had before is shut out. A
-command never run is taken back after an hour.
+- **At once**, the base checks are added: each disk, memory, and the load
+  (Linux) or processor (Windows). They are checkd's own checks, made by
+  the agent, with no plugin on the host.
+- **Proposed**, to tick and **Add**: the services it runs that are worth
+  watching (a web server, a database, Docker, …), the processor on Linux,
+  and other services. **Dismiss all** sets them aside.
+
+The agent says again once a day; a service that appears later is
+proposed then, on the host's page and in Config. The inventory is kept in
+nuthatch's store. It is the agent's word: nothing in it is run, and only
+nuthatch's own commands are added, with a mount point or a service name as
+their argument when it is plainly one.
+
+Checks are added only to hosts nuthatch keeps the config of. For a host
+defined elsewhere, its page shows the agent and its inventory.
+
+A look from outside (a port, a web page, a certificate) stays with the
+engine on a host with an agent (`_CHECKD_RUN_ON engine`); a check of the
+machine itself only ever runs on its agent (`_CHECKD_RUN_ON agent`), and
+is UNKNOWN while the host has none.
+
+## An existing host
+
+Its page has **Agent → Install agent**, as does its card in Config. The
+options:
+
+- **Plugins** also installs the monitoring plugins package (Linux), for
+  checks that need them. Without it the agent runs checkd's own checks and
+  programs under `/usr/local/lib/checkd-agent` (Windows: its `plugins`
+  directory) only.
+- **NRPE** (Linux) also installs NRPE, open to the engine.
+
+**Command instead** writes a new token for the host into checkd's agents
+directory and gives a command:
+
+- Linux, as root:
+  `curl -fsSL --proto '=https' 'https://…/agent/install/<code>' | sudo sh`
+- Windows, in Windows PowerShell as Administrator:
+  `irm 'https://…/agent/install/<code>' | iex`
+
+On a LAN without a certificate authority the commands also check
+nuthatch's certificate by its pin (below). The code works once, within 15
+minutes.
+
+Until the new agent connects, the host shows **Waiting for the agent**
+and nothing changes: its checks run where they ran, and an agent it had
+goes on. Once the agent connects, its token becomes the host's, checkd
+reloads, and the host's checks go to it; an agent it had before is shut
+out. A command never run is taken back after an hour.
 
 ### Over SSH
 
-**Over SSH** has nuthatch log in to the host and run the command itself.
+**Over SSH** (the default) has nuthatch log in to the host and run the command itself.
 Give the SSH address (the host's address to start with), port and user,
 and a password or a private key (with its passphrase, if it has one);
 **Look up host key** shows the key the host's SSH server offers, and

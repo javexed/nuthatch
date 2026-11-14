@@ -104,6 +104,8 @@ for (const engine of ENGINES) {
     for (const box of await page.locator('.suggestion input[type=checkbox]').all()) await box.setChecked(false)
     await http.first().getByRole('checkbox').check()
     await page.locator('.add-host').getByLabel('Name', { exact: true }).fill(name)
+    // No agent here: that is agents.spec.ts.
+    if (engine === 'checkd') await page.getByLabel('Install agent').uncheck()
 
     await page.getByRole('button', { name: /^Add look-.* with 1 check$/ }).click()
     await expect(page.getByRole('status')).toContainText(`${name} is saved, and the engine has it.`, { timeout: 90_000 })

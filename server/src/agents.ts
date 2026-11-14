@@ -102,10 +102,48 @@ export class Agents {
   readonly settings: AgentSettings
   private readonly reload: () => Promise<void>
 
+  /** Told of each inventory an agent in use sends (`<host>.inventory.json`). */
+  onInventory?: (host: string, text: string, received: number) => Promise<void>
+  /** Each inventory file's time when last told of. */
+  private told = new Map<string, number>()
+
   constructor(backend: Backend, settings: AgentSettings, reload: () => Promise<void>) {
     this.backend = backend
     this.settings = settings
     this.reload = reload
+  }
+
+  /** What a host's agent last said its machine is, as checkd wrote it. */
+  inventoryFile(host: string): { text: string; received: number } | undefined {
+    if (!agentName(host)) return undefined
+    const file = join(this.settings.dir, `${host}.inventory.json`)
+    try {
+      const received = Math.floor(statSync(file).mtimeMs / 1000)
+      return { text: readFileSync(file, 'utf8'), received }
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Tells of inventories new since the last look, of agents in use only:
+   * checks added for a host whose agent still waits would be made by the
+   * engine of its own machine until the agent is in use. */
+  private async inventories(): Promise<void> {
+    if (!this.onInventory) return
+    for (const host of this.hosts()) {
+      const file = join(this.settings.dir, `${host}.inventory.json`)
+      let at: number
+      try {
+        at = statSync(file).mtimeMs
+      } catch {
+        continue
+      }
+      if (this.told.get(host) === at) continue
+      const found = this.inventoryFile(host)
+      if (!found) continue
+      this.told.set(host, at)
+      await this.onInventory(host, found.text, found.received).catch((err: unknown) => console.error(`agents: inventory of ${host}: ${err instanceof Error ? err.message : String(err)}`))
+    }
   }
 
   private files(suffix: '.token' | '.new'): string[] {
@@ -170,7 +208,7 @@ export class Agents {
    * taken back. Run every few seconds. */
   async settle(now = Date.now()): Promise<void> {
     const waiting = this.files('.new')
-    if (waiting.length === 0) return
+    if (waiting.length === 0) return this.inventories()
     const pools = await this.pools()
     let joined = false
     for (const host of waiting) {
@@ -183,19 +221,21 @@ export class Agents {
       }
     }
     if (joined) await this.reload()
+    await this.inventories()
   }
 
   async remove(host: string): Promise<boolean> {
     if (!agentName(host)) return false
     let found = false
     let inUse = false
-    for (const suffix of ['.new', '.token']) {
+    for (const suffix of ['.new', '.token', '.inventory.json']) {
       const file = join(this.settings.dir, `${host}${suffix}`)
       if (!existsSync(file)) continue
       unlinkSync(file)
       found = true
       inUse ||= suffix === '.token'
     }
+    this.told.delete(host)
     if (inUse) await this.reload()
     return found
   }
@@ -283,7 +323,9 @@ export function linuxScript({ install, settings, ca, sums }: ScriptFacts): strin
     '--token-file', '/etc/checkd-agent/token',
     '--ca', '/etc/checkd-agent/ca.crt',
     ...(settings.serverName ? ['--server-name', settings.serverName] : []),
-    ...(install.plugins ? ['--restrict-path', '/usr/lib/nagios/plugins', '--restrict-path', '/usr/lib64/nagios/plugins', '--restrict-path', '/usr/local/lib/checkd-agent'] : []),
+    // checkd's own checks need no program; plugins only from these places.
+    ...(install.plugins ? ['--restrict-path', '/usr/lib/nagios/plugins', '--restrict-path', '/usr/lib64/nagios/plugins'] : []),
+    '--restrict-path', '/usr/local/lib/checkd-agent',
   ]
   return `#!/bin/sh
 # checkd-agent for ${install.host}, from nuthatch.
@@ -390,7 +432,7 @@ export function windowsScript({ install, settings, ca, sums }: ScriptFacts): str
     '--token-file', '$data\\token',
     '--ca', '$data\\ca.crt',
     ...(settings.serverName ? ['--server-name', settings.serverName] : []),
-    ...(install.plugins ? ['--restrict-path', '$dir\\plugins'] : []),
+    '--restrict-path', '$dir\\plugins',
   ]
   // Inside a PowerShell string in double quotes: a quote is `".
   const argLine = args.map((a) => (/\s/.test(a) || a.startsWith('$') ? `\`"${a}\`"` : a)).join(' ')

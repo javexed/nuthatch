@@ -3,13 +3,14 @@ import { type Changes, compare, portsOf, withGained } from '../lib/rediscover'
 // The hosts and services nuthatch keeps the config of: adding, changing
 // and taking away. Every change is checked by the engine itself before it
 // is written, and the engine then reads its config again.
-import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGroup, ManagedHost } from '@nuthatch/api'
+import type { AgentRow, ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGroup, ManagedHost } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AddHost from '../components/AddHost.vue'
 import ContactForm from '../components/ContactForm.vue'
 import GroupForm from '../components/GroupForm.vue'
+import HostAgent from '../components/HostAgent.vue'
 import HostForm from '../components/HostForm.vue'
 import { useLive } from '../stores/live'
 import { api, useSession } from '../stores/session'
@@ -37,6 +38,27 @@ const notice = ref('')
 /** What the engine's own check said, when it refused, or on a check only. */
 const report = ref<{ title: string; output: string; text?: string } | null>(null)
 
+/** checkd's agents on this backend, by host, when it has any. */
+const hasAgents = computed(() => (session.session?.agent_backends ?? []).includes(backend.value))
+const agents = ref<AgentRow[]>([])
+const agentOf = computed(() => new Map(agents.value.map((a) => [a.host, a])))
+/** A host just added, its agent being installed. */
+const settingUp = ref<{ name: string; address: string; os: 'linux' | 'windows' } | null>(null)
+/** Hosts whose agent panel is open. */
+const agentOpen = ref<Record<string, boolean>>({})
+
+async function loadAgents() {
+  if (!hasAgents.value) {
+    agents.value = []
+    return
+  }
+  try {
+    agents.value = (await api.agents(backend.value)).agents
+  } catch {
+    agents.value = []
+  }
+}
+
 async function load() {
   if (backend.value === '') return
   try {
@@ -45,6 +67,7 @@ async function load() {
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Server unreachable'
   }
+  await loadAgents()
 }
 watch(backend, () => {
   state.value = null
@@ -131,9 +154,13 @@ async function send(change: ConfigChange, dryRun: boolean, done: string): Promis
   }
 }
 
-async function save(host: ManagedHost) {
+async function save(host: ManagedHost, agent?: 'linux' | 'windows') {
   const previous = editing.value !== 'new' && editing.value !== null ? editing.value.name : undefined
-  if (await send({ kind: 'put', host, previous }, false, `${host.name} is saved, and the engine has it.`)) editing.value = null
+  if (!(await send({ kind: 'put', host, previous }, false, `${host.name} is saved, and the engine has it.`))) return
+  editing.value = null
+  if (agent) {
+    settingUp.value = { name: host.name, address: host.address, os: agent }
+  }
 }
 
 const check = (host: ManagedHost) => {
@@ -195,11 +222,17 @@ async function remove(host: ManagedHost) {
     </section>
 
     <template v-if="state">
+      <section v-if="settingUp" class="card" :aria-label="`Setting up ${settingUp.name}`">
+        <h2>{{ settingUp.name }}</h2>
+        <HostAgent :backend="backend" :host="settingUp.name" :address="settingUp.address" :os="settingUp.os" install @changed="load" />
+        <div class="buttons"><button type="button" class="quiet" @click="settingUp = null">Close</button></div>
+      </section>
       <AddHost
-        v-if="editing === 'new' && adding.step === 'look'"
+        v-else-if="editing === 'new' && adding.step === 'look'"
         :backend="backend"
         :state="state"
         :busy="busy"
+        :agents="hasAgents"
         @check="check"
         @save="save"
         @form="(start) => (adding = { step: 'form', start })"
@@ -257,6 +290,7 @@ async function remove(host: ManagedHost) {
           <li v-for="host in state.hosts" :key="host.name" class="card">
             <div>
               <strong>{{ host.name }}</strong> <span class="by">{{ host.address }} · {{ host.use }}</span>
+              <span v-if="agentOf.get(host.name)?.proposals" class="badge">{{ agentOf.get(host.name)!.proposals }} proposed</span>
               <p v-if="host.services.length > 0" class="by">{{ host.services.map((s) => s.description).join(', ') }}</p>
               <div v-if="again[host.name] && !again[host.name]!.looking" class="again" aria-live="polite">
                 <p v-if="again[host.name]!.error" class="error">{{ again[host.name]!.error }}</p>
@@ -279,8 +313,12 @@ async function remove(host: ManagedHost) {
                   </template>
                 </template>
               </div>
+              <HostAgent v-if="agentOpen[host.name]" :backend="backend" :host="host.name" :address="host.address" @changed="load" />
             </div>
             <div class="actions">
+              <button v-if="hasAgents" type="button" class="quiet" :aria-pressed="agentOpen[host.name] === true" @click="agentOpen[host.name] = !agentOpen[host.name]">
+                {{ agentOf.get(host.name) || agentOpen[host.name] ? 'Agent' : 'Install agent' }}
+              </button>
               <button type="button" class="quiet" :disabled="busy || again[host.name]?.looking" @click="lookAgain(host)">
                 {{ again[host.name]?.looking ? 'Looking…' : 'Look again' }}
               </button>
@@ -290,6 +328,17 @@ async function remove(host: ManagedHost) {
           </li>
         </ul>
         <p v-else class="none">None</p>
+        <template v-if="agents.some((a) => !state!.hosts.some((h) => h.name === a.host))">
+          <h2 class="groups-head">Other agents</h2>
+          <ul class="managed">
+            <li v-for="a in agents.filter((a) => !state!.hosts.some((h) => h.name === a.host))" :key="a.host" class="card">
+              <div>
+                <RouterLink :to="{ name: 'host', params: { backend, host: a.host } }"><strong>{{ a.host }}</strong></RouterLink>
+                <span class="by"> {{ a.os ?? '' }}{{ a.waiting ? ' · waiting' : a.connected === false ? ' · not connected' : '' }}</span>
+              </div>
+            </li>
+          </ul>
+        </template>
         <h2 class="groups-head">Groups</h2>
         <p>
           <button type="button" class="quiet" :disabled="busy" @click="group = { new: 'hostgroup' }">Add a host group</button>

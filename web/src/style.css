@@ -490,11 +490,17 @@ body.wall main { max-width: none; padding: 0.8rem; }
 .find .found button { display: flex; justify-content: space-between; gap: 0.5rem; width: 100%; text-align: left; padding: 0.35rem 0.5rem; }
 .find .found button:hover, .find .found button:focus { background: var(--bg); }
 .find .detail { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.find .found .head { padding: 0.45rem 0.5rem 0.15rem; color: var(--muted); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.find .found .row { display: flex; align-items: center; }
+.find .found .row > button:first-child { flex: 1; min-width: 0; }
+.find .found .into { width: auto; padding: 0.35rem 0.7rem; color: var(--muted); }
+.find .found button:disabled { opacity: 1; cursor: default; }
+.find .found .back { color: var(--muted); }
 .series-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; font-size: 0.9rem; }
 .series-list li { display: flex; justify-content: space-between; gap: 0.5rem; }
 fieldset.inline { border: 0; padding: 0; margin: 0; display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .templates { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1rem; }
-.template { padding: 0.9rem 1.2rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; font-weight: 600; }
+.template { display: inline-block; padding: 0.9rem 1.2rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); font-size: 1rem; cursor: pointer; font-weight: 600; }
 .template .file { display: none; }
 .wall-pick { margin-right: 0.6rem; }
 .managed li .wall-pick + div { flex: 1; }

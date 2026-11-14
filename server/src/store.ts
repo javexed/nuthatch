@@ -1,6 +1,7 @@
 // nuthatch's own store, one SQLite file: sessions, API tokens,
-// preferences and the audit log. Nothing about what is monitored is kept
-// here; that stays with the engines and their config files.
+// preferences, dashboards, the audit log, and what agents said their
+// hosts are (their inventories). What is monitored, and how, stays with
+// the engines and their config files.
 //
 // Session and token secrets are kept as SHA-256 hashes, so a copy of the
 // file does not log anyone in.
@@ -56,6 +57,15 @@ export interface PushRow {
   created: number
 }
 
+export interface InventoryRow {
+  body: string
+  received: number
+  /** Keys of the base checks added. */
+  base: string[]
+  /** Keys of proposals set aside. */
+  dismissed: string[]
+}
+
 export interface AuditRow {
   time: number
   user: string
@@ -91,7 +101,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS push (
         endpoint TEXT PRIMARY KEY, user TEXT NOT NULL, p256dh TEXT NOT NULL,
         auth TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS push_user ON push (user);`)
+      CREATE INDEX IF NOT EXISTS push_user ON push (user);
+      CREATE TABLE IF NOT EXISTS inventories (
+        backend TEXT NOT NULL, host TEXT NOT NULL, body TEXT NOT NULL,
+        received INTEGER NOT NULL, base TEXT NOT NULL, dismissed TEXT NOT NULL,
+        PRIMARY KEY (backend, host));`)
   }
 
   /** Starts a session. The answer is the cookie's secret and the session. */
@@ -209,6 +223,37 @@ export class Store {
 
   deleteDashboard(owner: string, id: number): boolean {
     return this.db.prepare('DELETE FROM dashboards WHERE id = ? AND owner = ?').run(id, owner).changes > 0
+  }
+
+  inventory(backend: string, host: string): InventoryRow | undefined {
+    const row = this.db.prepare('SELECT body, received, base, dismissed FROM inventories WHERE backend = ? AND host = ?').get(backend, host) as
+      | { body: string; received: number; base: string; dismissed: string }
+      | undefined
+    return row && { body: row.body, received: row.received, base: JSON.parse(row.base) as string[], dismissed: JSON.parse(row.dismissed) as string[] }
+  }
+
+  /** Keeps what an agent said; what was decided of it before stays. */
+  keepInventory(backend: string, host: string, body: string, received: number): void {
+    this.db
+      .prepare(`INSERT INTO inventories (backend, host, body, received, base, dismissed) VALUES (?, ?, ?, ?, '[]', '[]')
+        ON CONFLICT (backend, host) DO UPDATE SET body = excluded.body, received = excluded.received`)
+      .run(backend, host, body, received)
+  }
+
+  /** The base checks added to a host, so that they are added once. */
+  setInventoryBase(backend: string, host: string, base: string[]): void {
+    this.db.prepare('UPDATE inventories SET base = ? WHERE backend = ? AND host = ?').run(JSON.stringify(base), backend, host)
+  }
+
+  dismissProposals(backend: string, host: string, keys: string[]): void {
+    const row = this.inventory(backend, host)
+    if (!row) return
+    const all = [...new Set([...row.dismissed, ...keys])].slice(-1000)
+    this.db.prepare('UPDATE inventories SET dismissed = ? WHERE backend = ? AND host = ?').run(JSON.stringify(all), backend, host)
+  }
+
+  forgetInventory(backend: string, host: string): void {
+    this.db.prepare('DELETE FROM inventories WHERE backend = ? AND host = ?').run(backend, host)
   }
 
   /** Writes down what somebody did: logins, commands, refusals. */

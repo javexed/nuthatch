@@ -20,7 +20,7 @@ import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGr
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
 import { randomBytes } from 'node:crypto'
-import { AGGREGATE_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, PUSHED_COMMAND, catalogueFile, catalogueFor } from './catalogue.ts'
+import { AGGREGATE_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, FROM_OUTSIDE, ON_AGENT, PUSHED_COMMAND, catalogueFile, catalogueFor } from './catalogue.ts'
 import { Refused } from './policy.ts'
 import { now } from './store.ts'
 
@@ -54,7 +54,7 @@ const DESCRIPTION = /^[A-Za-z0-9][A-Za-z0-9 _.:/+-]{0,62}$/
 const ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:_-]{0,254}$/
 const MEMBER = /^[A-Za-z0-9][A-Za-z0-9 _.@-]{0,62}$/
 const HOST_KEYS = ['host_name', 'use', 'alias', 'address', 'check_command', 'hostgroups', 'contacts', 'contact_groups', 'notes', '_CHECKD_DOWNTIME_PERIOD']
-const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes', '_CHECKD_DOWNTIME_PERIOD']
+const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes', '_CHECKD_DOWNTIME_PERIOD', '_CHECKD_RUN_ON']
 const TOKEN = /^[A-Za-z0-9_-]{16,64}$/
 /** A host, a pattern or `@group`; or the same, `/`, and a service or a pattern for one. */
 const AGGREGATE_MEMBER = /^[A-Za-z0-9@*?][A-Za-z0-9._*?@-]{0,62}(\/[A-Za-z0-9*?][A-Za-z0-9 _.:+*?-]{0,62})?$/
@@ -159,15 +159,20 @@ export function checkHost(given: unknown, choices: Choices, known: Templates, ex
     const aggregate = given.aggregate === undefined || given.aggregate === null ? undefined : aggregateGiven(given.aggregate, what)
     if ((push || aggregate) && !extras) throw new Refused(`${what}: only checkd has services that take pushes or stand for others`)
     if (push && aggregate) throw new Refused(`${what} takes pushes or stands for others, not both`)
+    const checkCommand = push
+      ? PUSHED_COMMAND
+      : aggregate
+        ? `${AGGREGATE_COMMAND}!${aggregateArgs(aggregate)}`
+        : command(given.check_command, `${what}: the check command`, choices.commands)
+    // A look from outside stays with the engine when the host has an agent;
+    // a look at the machine itself goes to its agent only.
+    const commandName = (checkCommand ?? '').split('!')[0] ?? ''
+    const runOn = !extras ? undefined : FROM_OUTSIDE.includes(commandName) ? 'engine' : ON_AGENT.includes(commandName) ? 'agent' : undefined
     services.push({
       description: given.description,
       use: given.use,
       // What it is decides its command, whatever was sent.
-      check_command: push
-        ? PUSHED_COMMAND
-        : aggregate
-          ? `${AGGREGATE_COMMAND}!${aggregateArgs(aggregate)}`
-          : command(given.check_command, `${what}: the check command`, choices.commands),
+      check_command: checkCommand,
       servicegroups: names(given.servicegroups, `${what}: service groups`, choices.servicegroups),
       contacts: names(given.contacts, `${what}: contacts`, choices.contacts),
       contact_groups: names(given.contact_groups, `${what}: contact groups`, choices.contactgroups),
@@ -175,6 +180,7 @@ export function checkHost(given: unknown, choices: Choices, known: Templates, ex
       downtime_period: period(given.downtime_period, `${what}: the downtime's timeperiod`, choices.timeperiods, extras),
       ...(push ? { push } : {}),
       ...(aggregate ? { aggregate } : {}),
+      ...(runOn ? { run_on: runOn } : {}),
     })
   }
   return {
@@ -360,6 +366,7 @@ export function hostFile(host: ManagedHost): string {
     put(attrs, 'contact_groups', service.contact_groups)
     put(attrs, 'notes', service.notes)
     put(attrs, '_CHECKD_DOWNTIME_PERIOD', service.downtime_period)
+    if (service.run_on) attrs.push(['_CHECKD_RUN_ON', service.run_on])
     if (service.push) {
       // Told its result, never checked.
       // Told its result, never checked but when freshness finds nothing
@@ -415,6 +422,7 @@ export function readHostFile(content: string): ManagedHost {
       contact_groups: list(attr(d, 'contact_groups')),
       notes: attr(d, 'notes'),
       downtime_period: attr(d, '_CHECKD_DOWNTIME_PERIOD'),
+      ...(attr(d, '_CHECKD_RUN_ON') === 'engine' || attr(d, '_CHECKD_RUN_ON') === 'agent' ? { run_on: attr(d, '_CHECKD_RUN_ON') as 'engine' | 'agent' } : {}),
     })
   }
   return {

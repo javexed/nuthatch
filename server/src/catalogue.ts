@@ -27,10 +27,24 @@ const COMMANDS: [string, string][] = [
   // service that takes pushes, run when freshness finds nothing came.
   [AGGREGATE_COMMAND, 'checkd:aggregate $ARG1$'],
   [PUSHED_COMMAND, 'checkd:dummy 2 "nothing was pushed in time"'],
+  // checkd only: the machine itself, made by its agent (agent.md).
+  ['nuthatch_disk', 'checkd:disk -p $ARG1$ -w $ARG2$ -c $ARG3$'],
+  ['nuthatch_memory', 'checkd:memory -w $ARG1$ -c $ARG2$'],
+  ['nuthatch_load', 'checkd:load -w $ARG1$ -c $ARG2$'],
+  ['nuthatch_cpu', 'checkd:cpu -w $ARG1$ -c $ARG2$'],
+  ['nuthatch_service', 'checkd:service -s $ARG1$'],
 ]
 
 /** nuthatch's commands that only checkd can run. */
-export const CHECKD_ONLY = [AGGREGATE_COMMAND, PUSHED_COMMAND]
+export const CHECKD_ONLY = [AGGREGATE_COMMAND, PUSHED_COMMAND, 'nuthatch_disk', 'nuthatch_memory', 'nuthatch_load', 'nuthatch_cpu', 'nuthatch_service']
+
+/** nuthatch's commands that look at a host from outside: on a host with an
+ * agent, the engine makes them, not the agent. */
+export const FROM_OUTSIDE = ['nuthatch_tcp', 'nuthatch_http', 'nuthatch_https', 'nuthatch_cert', 'nuthatch_ssh', 'nuthatch_smtp', 'nuthatch_imap', 'nuthatch_imaps']
+
+/** nuthatch's commands that look at the machine itself: only its agent
+ * makes them, never the engine of its own machine. */
+export const ON_AGENT = ['nuthatch_disk', 'nuthatch_memory', 'nuthatch_load', 'nuthatch_cpu', 'nuthatch_service']
 
 export const CATALOGUE_NAMES = COMMANDS.map(([name]) => name)
 

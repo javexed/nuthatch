@@ -26,23 +26,28 @@ a Pin for that number. **Undo** takes it off again; **Change** moves it.
 
 | Panel | Shows |
 |---|---|
-| Status | one service: its card; one host: its card and a tile per service; a host group or everything: counts and a tile per host, with a dot when one of its services is not OK |
+| Hosts | everything or a host group: counts and a tile per host, with a dot when one of its services is not OK; one host: its card and a tile per service; one service: its card |
 | Problems | hosts or services: problems nobody has taken care of, acknowledged, in a downtime, or recovered within the range |
-| Metric | numbers of checks; small, the first as a number (with a bar when it has a maximum) coloured by its thresholds; larger, a graph, lines of one unit together |
-| Log | alerts or notifications within the range |
-| Availability | the share of the range up or OK; for a group, the lowest hosts too |
+| Number | the first number of a check, coloured by its thresholds (with a bar when it has a maximum) |
+| Graph | numbers of checks over the range, lines of one unit together |
+| Alerts | alerts or notifications within the range |
+| Uptime | the share of the range up or OK; for a group, the lowest hosts too |
 | Note | text; its web addresses are links |
+
+A Number and a Graph are one panel: made larger, a number becomes a
+graph, and smaller, a graph a number.
 
 What can be worked out is not asked: a panel's title comes from what it
 shows, lists show as many rows as fit, and a metric is a number or a
 graph by its size. A panel's outline takes the colour of the worst it
-shows. What a panel shows is chosen with one search: a few words, and
-every host group, host, service or number with them all.
+shows. What a panel shows is chosen from a list (everything, the host
+groups, the hosts; › opens a host's services or numbers), or by a few
+words: every host group, host, service or number with them all.
 
 ## Changing
 
 Whoever may change a dashboard changes it in place, on a wide screen:
-**+ Panel** opens the tray, whose panels are dragged onto the grid (a
+**+ Panel** opens the tray (open already on an empty dashboard), whose panels are dragged onto the grid (a
 dashed box shows where they land) or clicked; a panel moves by its grip
 and resizes by its corner; the gear opens its settings; ⧉ duplicates it.
 Every change is kept at once; **Undo** (or Ctrl+Z) takes back one step.

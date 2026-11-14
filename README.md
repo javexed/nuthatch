@@ -50,9 +50,10 @@ and is made to be used on a phone as much as at a desk.
   site ([docs/sites.md](docs/sites.md)).
 - **On a phone:** installable from the browser, with notifications
   pushed to it ([docs/notifications.md](docs/notifications.md)).
-- **Agents** (checkd): a one-line command installs checkd's agent on a
-  Linux or Windows host, and NRPE if wanted
-  ([docs/agents.md](docs/agents.md)).
+- **Agents** (checkd): a host is added with checkd's agent, installed
+  over SSH or by a one-line command, on Linux or Windows; the agent says
+  what the machine runs, its disks and memory are watched at once, and its
+  services are proposed ([docs/agents.md](docs/agents.md)).
 
 With checkd as the engine there is more in the config form: services a
 job elsewhere tells its result, services that stand for others, and

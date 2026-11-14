@@ -17,7 +17,9 @@ import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
 import { CATALOGUE_NAMES, catalogueFile, pluginsDir } from './catalogue.ts'
 import { aggregateArgs, aggregateOf, checkContact, checkGroup, contactText, readContactFile, checkHost, groupFile, groupText, hostFile, readGroupFile, readHostFile } from './configadmin.ts'
-import { discover, hostName, parseTarget, suggest, tailnetMachines } from './discover.ts'
+import { discover, guessSystem, hostName, parseTarget, suggest, tailnetMachines } from './discover.ts'
+import { HostSetup } from './hostsetup.ts'
+import { open as openProposals, plan, readInventory } from './proposals.ts'
 import { Events } from './events.ts'
 import { Graphs, thin } from './graphs.ts'
 import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagioscfg.ts'
@@ -1271,7 +1273,8 @@ describe('agents', () => {
     expect(text).not.toContain('SYSTEM')
     expect(text).toContain('--token-file `"$data\\token`"')
     expect(text).not.toContain('NSClient')
-    expect(text).not.toContain('--restrict-path')
+    // Only checkd's own checks and what is put into its plugins directory.
+    expect(text).toContain('--restrict-path `"$dir\\plugins`"')
   })
 
   it('serves only the listed binaries, and is for config_edit only', async () => {
@@ -1416,5 +1419,124 @@ describe('agents', () => {
     expect((await app.request('/api/v1/agents/jobs/nope')).status).toBe(404)
     const viewer = site({})
     expect((await viewer.app.request('/api/v1/agents/site/ssh-keys', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify({ address: '127.0.0.1' }) })).status).toBe(403)
+  })
+})
+
+describe('checks proposed from an inventory', () => {
+  const linux = {
+    version: 1,
+    os: { family: 'linux', name: 'Debian GNU/Linux 12 (bookworm)', id: 'debian', version: '12', kernel: '6.1.0', arch: 'x86_64' },
+    hostname: 'web1',
+    cpus: 4,
+    memory: 8 * 1024 ** 3,
+    disks: [
+      { path: '/', fs: 'ext4', size: 100 * 1024 ** 3, used_pct: 40 },
+      { path: '/boot/efi', fs: 'vfat', size: 512 * 1024 ** 2, used_pct: 1 },
+      { path: '/tiny', fs: 'ext4', size: 1024, used_pct: 1 },
+      { path: '/x;rm -rf /', fs: 'ext4', size: 100 * 1024 ** 3, used_pct: 1 },
+    ],
+    services: [
+      { name: 'nginx.service', description: 'A high performance web server' },
+      { name: 'postgresql@15-main.service', description: 'PostgreSQL Cluster 15-main' },
+      { name: 'ssh.service', description: 'OpenBSD Secure Shell server' },
+      { name: 'systemd-journald.service', description: 'Journal Service' },
+      { name: 'myapp.service', description: 'My app' },
+      { name: '$(reboot).service', description: 'x' },
+      { name: '--now', description: 'x' },
+    ],
+    ports: [{ port: 22, address: '0.0.0.0' }],
+  }
+
+  it('reads an inventory, and leaves out what cannot go into a command', () => {
+    const inventory = readInventory(JSON.stringify(linux))
+    expect(inventory?.os.family).toBe('linux')
+    expect(readInventory('not json')).toBeUndefined()
+    expect(readInventory('{"os": null}')).toBeUndefined()
+    const planned = plan(inventory!)
+    const base = planned.filter((p) => p.base).map((p) => p.check_command)
+    expect(base).toEqual(['nuthatch_disk!/!85!95', 'nuthatch_disk!/boot/efi!85!95', 'nuthatch_memory!90!95', 'nuthatch_load!8,6,4.8!16,12,8'])
+    const rest = Object.fromEntries(planned.filter((p) => !p.base).map((p) => [p.description, [p.check_command, p.checked]]))
+    expect(rest).toEqual({
+      CPU: ['nuthatch_cpu!90!98', false],
+      nginx: ['nuthatch_service!nginx', true],
+      'PostgreSQL 15-main': ['nuthatch_service!postgresql@15-main', true],
+      'SSH server': ['nuthatch_service!ssh', false],
+      'Service myapp': ['nuthatch_service!myapp', false],
+    })
+    // What the host has, or was set aside, is not proposed again.
+    const left = openProposals(planned, [{ description: 'nginx', use: 's', check_command: 'nuthatch_service!nginx', servicegroups: [], contacts: [], contact_groups: [] }], ['cpu'])
+    expect(left.map((p) => p.key)).not.toContain('service:nginx')
+    expect(left.map((p) => p.key)).not.toContain('cpu')
+  })
+
+  it('on Windows: drives, memory and the processor; known services only', () => {
+    const windows = {
+      ...linux,
+      os: { family: 'windows', name: 'Microsoft Windows Server 2022 Standard', id: 'windows', version: '10.0.20348', kernel: '20348', arch: '64-bit' },
+      disks: [{ path: 'C:', fs: 'NTFS', size: 100 * 1024 ** 3, used_pct: 60 }],
+      services: [{ name: 'W3SVC', description: 'World Wide Web Publishing Service' }, { name: 'MSSQL$EXPRESS', description: 'SQL' }, { name: 'Dnscache', description: 'DNS Client' }],
+    }
+    const planned = plan(readInventory(JSON.stringify(windows))!)
+    expect(planned.map((p) => p.check_command)).toEqual(['nuthatch_disk!C:!85!95', 'nuthatch_memory!90!95', 'nuthatch_cpu!90!98', 'nuthatch_service!W3SVC'])
+  })
+
+  it('adds the base checks once, to a host nuthatch keeps, and only proposed checks after', async () => {
+    const store = new Store(':memory:')
+    const host = { name: 'web1', address: '192.0.2.1', use: 'generic-host', hostgroups: [], contacts: [], contact_groups: [], services: [] as { description: string; check_command?: string }[] }
+    const changes: unknown[] = []
+    const admin = {
+      async state() {
+        return { revision: 'r1', hosts: [host], templates: { host: ['generic-host'], service: ['generic-service'] }, extras: true }
+      },
+      async change(_revision: string, change: { host: typeof host }) {
+        changes.push(change)
+        host.services = change.host.services
+        return { verified: true, applied: true, output: '' }
+      },
+    }
+    const setup = new HostSetup(store, new Map([['site', admin as never]]))
+    await setup.take('site', 'web1', JSON.stringify(linux), 100)
+    expect(host.services.map((s) => s.description)).toEqual(['Disk /', 'Disk /boot/efi', 'Memory', 'Load'])
+    // The same, or a newer one: no base again.
+    await setup.take('site', 'web1', JSON.stringify(linux), 200)
+    expect(changes).toHaveLength(1)
+    const view = await setup.view('site', 'web1')
+    expect(view?.managed).toBe(true)
+    expect(view?.base).toEqual(['disk:/', 'disk:/boot/efi', 'memory', 'load'])
+    expect(view?.proposals.map((p) => p.key)).toEqual(['cpu', 'service:nginx', 'service:postgresql@15-main', 'service:ssh', 'service:myapp'])
+    // Keys only: a command sent along is nothing.
+    expect(await setup.decide('site', 'web1', ['service:nginx', 'nuthatch_service!reboot'], ['service:ssh', 'made-up'])).toEqual(['service:nginx'])
+    expect(host.services.at(-1)).toMatchObject({ description: 'nginx', check_command: 'nuthatch_service!nginx', use: 'generic-service' })
+    expect((await setup.view('site', 'web1'))?.proposals.map((p) => p.key)).toEqual(['cpu', 'service:postgresql@15-main', 'service:myapp'])
+    // A host nuthatch does not keep: shown, nothing written.
+    await setup.take('site', 'other', JSON.stringify(linux), 100)
+    expect((await setup.view('site', 'other'))?.managed).toBe(false)
+    await expect(setup.decide('site', 'other', ['memory'], [])).rejects.toThrow()
+    expect(changes).toHaveLength(2)
+  })
+
+  it('a check of the machine runs on its agent, a look from outside on the engine', () => {
+    const choices = { commands: CATALOGUE_NAMES, contacts: [], contactgroups: [], hostgroups: [], servicegroups: [], timeperiods: [], hosts: [] }
+    const known = { host: ['generic-host'], service: ['generic-service'] }
+    const service = (check_command: string) => ({ description: check_command.split('!')[0], use: 'generic-service', check_command })
+    const host = checkHost({ name: 'web1', address: '192.0.2.1', use: 'generic-host', services: [service('nuthatch_disk!/!85!95'), service('nuthatch_https!443!/'), service('nuthatch_aggregate!web1/x')] }, choices, known, true)
+    expect(host.services.map((s) => s.run_on)).toEqual(['agent', 'engine', undefined])
+    const text = hostFile(host)
+    expect(text).toMatch(/_CHECKD_RUN_ON\s+agent/)
+    expect(text).toMatch(/_CHECKD_RUN_ON\s+engine/)
+    expect(readHostFile(text).services.map((s) => s.run_on)).toEqual(['agent', 'engine', undefined])
+    // Naemon: none.
+    const naemon = checkHost({ name: 'web1', address: '192.0.2.1', use: 'generic-host', services: [service('nuthatch_https!443!/')] }, choices, known, false)
+    expect(naemon.services[0]?.run_on).toBeUndefined()
+  })
+
+  it('guesses the system from outside', () => {
+    const port = (port: number, service: string, banner?: string): FoundPort => ({ port, service, kind: banner ? 'banner' : 'open', ...(banner ? { banner } : {}) })
+    expect(guessSystem([port(22, 'SSH', 'SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3')], 64)).toEqual({ family: 'linux', why: 'Debian' })
+    expect(guessSystem([port(3389, 'RDP')], undefined)?.family).toBe('windows')
+    expect(guessSystem([port(445, 'SMB')], 128)).toEqual({ family: 'windows', why: 'TTL 128' })
+    expect(guessSystem([port(22, 'SSH', 'SSH-2.0-OpenSSH_for_Windows_9.5')], 128)?.family).toBe('windows')
+    expect(guessSystem([port(22, 'SSH', 'SSH-2.0-OpenSSH_9.6')], 63)?.family).toBe('linux')
+    expect(guessSystem([port(80, 'HTTP')], undefined)).toBeUndefined()
   })
 })

@@ -5,7 +5,7 @@ import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
 import { Readable } from 'node:stream'
-import type { BackendStatus, QueryAnswer, Role, Session as SessionAnswer, StatsAnswer } from '@nuthatch/api'
+import type { AgentRow, BackendStatus, QueryAnswer, Role, Session as SessionAnswer, StatsAnswer } from '@nuthatch/api'
 import { getConnInfo } from '@hono/node-server/conninfo'
 import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
@@ -16,6 +16,7 @@ import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
+import type { HostSetup } from './hostsetup.ts'
 import { bodyOf, checkDraft, fromRow } from './dashboards.ts'
 import { type TailnetMachine, askTailscale, discover } from './discover.ts'
 import type { Events } from './events.ts'
@@ -64,6 +65,8 @@ export interface Deps {
   pushUrls?: Map<string, string>
   /** By backend: checkd's agents, which nuthatch adds and installs. */
   agents?: Map<string, Agents>
+  /** What agents said their hosts are, and the checks proposed from it. */
+  setup?: HostSetup
   /** The agent binaries, checkd's dist/agent. */
   agentBin?: string
   /** This nuthatch's address as monitored hosts reach it; else the request's. */
@@ -956,9 +959,44 @@ export function buildApp(deps: Deps): Hono<Env> {
     return `${deps.cookieSecure ? 'https:' : url.protocol}//${host}`
   }
 
+  /** An agent's row, with its system and its waiting proposals. */
+  async function rowOf(agents: Agents, row: AgentRow): Promise<AgentRow> {
+    const backend = agents.backend.name
+    const kept = deps.setup ? await deps.setup.view(backend, row.host).catch(() => null) : null
+    return { ...row, ...(kept ? { os: kept.inventory.os.name || kept.inventory.os.family, proposals: kept.proposals.length } : {}) }
+  }
+
   app.get('/api/v1/agents/:backend', async (c) => {
     const { agents } = await agentsOf(c)
-    return c.json({ agents: await agents.list(), ...(deps.agentListen ? { addresses: deps.agentListen.addresses } : {}) })
+    const rows = await Promise.all((await agents.list()).map((row) => rowOf(agents, row)))
+    return c.json({ agents: rows, ...(deps.agentListen ? { addresses: deps.agentListen.addresses } : {}) })
+  })
+
+  app.get('/api/v1/agents/:backend/:host/inventory', async (c) => {
+    const { agents } = await agentsOf(c)
+    const host = c.req.param('host')
+    if (!agentName(host)) throw new Refused('a host name of letters, digits, ., - and _')
+    // Taken up at once, not at the next look round.
+    const file = agents.inventoryFile(host)
+    if (file && deps.setup && agents.hosts().includes(host)) await deps.setup.take(agents.backend.name, host, file.text, file.received)
+    const row = (await agents.list()).find((r) => r.host === host)
+    return c.json({ inventory: deps.setup ? await deps.setup.view(agents.backend.name, host) : null, agent: row ? await rowOf(agents, row) : null })
+  })
+
+  app.post('/api/v1/agents/:backend/:host/proposals', async (c) => {
+    const { agents, user } = await agentsOf(c)
+    const host = c.req.param('host')
+    if (!agentName(host) || !deps.setup) throw new Refused('no such host')
+    const sent = await body(c)
+    try {
+      const added = await deps.setup.decide(agents.backend.name, host, sent.add, sent.dismiss)
+      if (added.length > 0) deps.store.audit(user, agents.backend.name, 'config', `checks of ${host}: ${added.join(', ')}`)
+      return c.json({ added })
+    } catch (err) {
+      if (err instanceof Unverified) return c.json({ error: err.message, output: err.output }, 422)
+      if (err instanceof Conflict) return c.json({ error: err.message }, 409)
+      throw err
+    }
   })
 
   /** What an install is for, checked, and nuthatch's address for the host. */
@@ -1075,6 +1113,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     const { agents, user } = await agentsOf(c)
     const host = c.req.param('host')
     if (!(await agents.remove(host))) return c.json({ error: 'no such agent' }, 404)
+    deps.setup?.forget(agents.backend.name, host)
     deps.store.audit(user, agents.backend.name, 'agent removed', host)
     return c.json({})
   })
