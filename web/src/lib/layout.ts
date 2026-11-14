@@ -1,3 +1,5 @@
+import type { Widget } from '@nuthatch/api'
+
 // Where the panels of a dashboard go: a grid of 12 columns and rows of
 // one height. A panel moved or resized pushes those in its way down; then
 // every panel rises as far as it can.
@@ -64,4 +66,25 @@ export function place(boxes: Box[], w: number, h: number): Box {
       if (!boxes.some((b) => overlap(b, box))) return box
     }
   }
+}
+
+/** A new panel's size, by its type. */
+export const SIZES: Record<Widget['type'], [number, number]> = { totals: [12, 3], problems: [6, 4], object: [4, 3], log: [6, 4], stat: [3, 2], graph: [6, 3] }
+
+/** Every panel with a place: those without one get the first free. */
+export function placed(widgets: Widget[]): Widget[] {
+  const boxes: Box[] = []
+  return widgets.map((w) => {
+    const [width, height] = SIZES[w.type]
+    const layout = w.layout ?? place(boxes, width, height)
+    boxes.push(layout)
+    return { ...w, layout }
+  })
+}
+
+/** The panels with one more, in the first free place. */
+export function withPanel(widgets: Widget[], panel: Widget): Widget[] {
+  const all = placed(widgets)
+  const [w, h] = SIZES[panel.type]
+  return [...all, { ...panel, layout: place(all.map((x) => x.layout!), w, h) }]
 }

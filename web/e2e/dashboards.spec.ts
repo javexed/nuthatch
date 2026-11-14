@@ -24,9 +24,9 @@ test('a shared dashboard shows each user their own, and follows a result', async
   await page.getByRole('button', { name: 'Make it' }).click()
   await expect(page.getByLabel('Title')).toHaveValue(title)
 
+  const KIND: Record<string, string> = { problems: 'Problems', object: 'Host or service', log: 'Log' }
   const addPanel = async (kind: string) => {
-    await page.getByLabel('Panel', { exact: true }).selectOption(kind)
-    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await page.getByRole('toolbar', { name: 'Add a panel' }).getByRole('button', { name: `+ ${KIND[kind]}` }).click()
   }
   await addPanel('problems')
   await addPanel('object')
@@ -120,4 +120,63 @@ test('a dashboard that is not shared is its owner\'s alone', async ({ page }) =>
   await expect(page.getByText('Not found', { exact: true })).toBeVisible()
   await page.goto('/dashboards')
   await expect(page.locator('.managed li', { hasText: title })).toHaveCount(0)
+})
+
+test('a panel dragged in from the tray, set up from lists, and one added from a service', async ({ page }) => {
+  const title = `Tray ${test.info().project.name} ${Date.now()}`
+  await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine|load=0.5;1;2 users=3')
+  await login(page, 'admin')
+  await page.goto('/dashboards')
+  await page.getByLabel('A new dashboard').fill(title)
+  await page.getByRole('button', { name: 'Make it' }).click()
+  const tray = page.getByRole('toolbar', { name: 'Add a panel' })
+  const settings = page.getByRole('complementary', { name: 'Panel settings' })
+  if (test.info().project.name === 'desktop') {
+    // Dragged to the top left: it lands there, and the totals make room.
+    const from = await tray.getByRole('button', { name: '+ Number' }).boundingBox()
+    const grid = await page.locator('.dash-grid').boundingBox()
+    if (!from || !grid) throw new Error('no boxes')
+    await page.mouse.move(from.x + 10, from.y + 10)
+    await page.mouse.down()
+    await page.mouse.move(grid.x + 30, grid.y + 20, { steps: 10 })
+    await expect(page.locator('.drop-ghost')).toBeVisible()
+    await page.mouse.up()
+    await expect(page.locator('.drop-ghost')).toHaveCount(0)
+    await expect(settings).toBeVisible()
+    const panels = await page.locator('.dash-grid > section').evaluateAll((all) => all.map((s) => ({ top: s.getBoundingClientRect().top, chosen: s.classList.contains('chosen') })))
+    const chosen = panels.find((p) => p.chosen)
+    expect(chosen?.top).toBeLessThanOrEqual(Math.min(...panels.map((p) => p.top)) + 1)
+  } else {
+    await tray.getByRole('button', { name: '+ Number' }).click()
+  }
+  // Chosen from lists, not typed blind.
+  await settings.getByLabel('Backend').selectOption('naemon')
+  await expect(settings.locator('#dash-hosts option[value="passive1"]')).toHaveCount(1)
+  await settings.getByLabel('Host').fill('nosuchhost')
+  await expect(settings.getByLabel('Host')).toHaveAttribute('aria-invalid', 'true')
+  await settings.getByLabel('Host').fill('passive1')
+  await expect(settings.getByLabel('Host')).toHaveAttribute('aria-invalid', 'false')
+  await expect(settings.locator('#dash-services option[value="a"]')).toHaveCount(1)
+  await settings.getByLabel('Service').fill('a')
+  await expect(settings.getByLabel('Metric').locator('option')).toHaveText(['First', 'load · 0.5', 'users · 3'])
+  await settings.getByLabel('Metric').selectOption('users')
+  await settings.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByRole('region', { name: 'passive1 / a · users' })).toBeVisible()
+  const url = page.url()
+  await fits(page)
+
+  // From the service's page: a graph of load, onto this dashboard.
+  await page.goto('/service/naemon/passive1/a')
+  await page.getByRole('button', { name: 'Add to dashboard' }).click()
+  const form = page.getByRole('form', { name: 'Add to dashboard' })
+  await form.getByLabel('Dashboard').selectOption({ label: title })
+  await form.getByLabel('Graph').check()
+  await form.getByLabel('Metric').selectOption('load')
+  await form.getByRole('button', { name: 'Add' }).click()
+  await form.getByRole('status').click()
+  await expect(page).toHaveURL(new RegExp(`${new URL(url).pathname}$`))
+  await expect(page.getByRole('region', { name: 'passive1 / a · load' })).toBeVisible()
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.getByRole('button', { name: 'Delete' }).click()
 })

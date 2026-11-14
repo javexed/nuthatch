@@ -42,6 +42,15 @@ the way moves down, and everything rises as far as it can. The gear opens
 a panel's settings. On a narrow screen the panels are one column, in
 order from the top.
 
+A panel is added from the tray above the grid: dragged to where it should
+go (a dashed box shows where it lands), or clicked to go to the first free
+place. Its settings offer the engines' hosts, services and host groups to
+choose from, and a name not among them is marked; a number or graph offers
+the metrics the check reports, with their values now.
+
+**Add to dashboard** on a host's or service's page puts it on a dashboard,
+or a new one: as its status, or one of its metrics as a number or a graph.
+
 Panels: a number of a check's performance data with a line of how it
 went (from the graphs, `[graphs]`), a graph of one number, problems,
 totals by state (of a host group, if given), one host or service, and the
