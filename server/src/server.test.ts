@@ -13,7 +13,7 @@ import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
 import { CATALOGUE_NAMES, catalogueFile, pluginsDir } from './catalogue.ts'
-import { aggregateArgs, aggregateOf, checkGroup, checkHost, groupFile, groupText, hostFile, readGroupFile, readHostFile } from './configadmin.ts'
+import { aggregateArgs, aggregateOf, checkContact, checkGroup, contactText, readContactFile, checkHost, groupFile, groupText, hostFile, readGroupFile, readHostFile } from './configadmin.ts'
 import { discover, hostName, parseTarget, suggest, tailnetMachines } from './discover.ts'
 import { Events } from './events.ts'
 import { Graphs, thin } from './graphs.ts'
@@ -406,6 +406,24 @@ describe('a host to write', () => {
     expect(text).toContain('define host {\n    host_name       web9\n    use             generic-host\n')
     expect(text).toContain('    check_command        check_ping!100,20%!500,60%\n')
     expect(readHostFile(text)).toEqual(JSON.parse(JSON.stringify(checked)))
+  })
+
+  it('keeps contacts, with checkd digests', () => {
+    const timed = { ...choices, commands: ['notify', 'digest'], timeperiods: ['24x7'] }
+    const given = {
+      name: 'ann', alias: 'Ann', email: 'ann@example.test', host_notification_period: '24x7', service_notification_period: '24x7',
+      host_notification_options: 'd,u,r', service_notification_options: 'wcr', host_notification_commands: ['notify'], service_notification_commands: ['notify'],
+      digest: { command: 'digest', wait: 60 },
+    }
+    const contact = checkContact(given, timed, true)
+    expect(contact.service_notification_options).toBe('w,c,r')
+    const text = contactText(contact)
+    expect(text).toMatch(/_CHECKD_DIGEST_COMMAND\s+digest/)
+    expect(readContactFile(text)).toEqual(JSON.parse(JSON.stringify(contact)))
+    for (const bad of [{ email: 'not an address' }, { host_notification_period: 'never' }, { host_notification_options: 'x' }, { service_notification_commands: [] }, { digest: { command: 'nosuch' } }, { digest: { command: 'digest', wait: 0 } }]) {
+      expect(() => checkContact({ ...given, ...bad }, timed, true), JSON.stringify(bad)).toThrow()
+    }
+    expect(() => checkContact(given, timed, false)).toThrow(/only checkd/)
   })
 
   it('keeps groups, in files no host can have', () => {

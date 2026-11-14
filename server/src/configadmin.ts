@@ -16,7 +16,7 @@ import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import type { ConfigChange, ConfigResult, ConfigState, ManagedGroup, ManagedHost, ManagedService } from '@nuthatch/api'
+import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGroup, ManagedHost, ManagedService } from '@nuthatch/api'
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
 import { randomBytes } from 'node:crypto'
@@ -198,6 +198,98 @@ export function groupFile(type: ManagedGroup['type'], name: string): string {
 }
 
 const SERVICE_MEMBER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\/[A-Za-z0-9][A-Za-z0-9 _.:\/+-]{0,62}$/
+
+const CONTACT_FILE = (name: string) => `_contact-${name}.cfg`
+const CONTACT_KEYS = ['contact_name', 'alias', 'email', 'pager', 'host_notification_period', 'service_notification_period', 'host_notification_options',
+  'service_notification_options', 'host_notification_commands', 'service_notification_commands', '_CHECKD_DIGEST_COMMAND', '_CHECKD_DIGEST_WAIT']
+
+/** A contact as it may be written, or the reason it may not. */
+export function checkContact(given: unknown, choices: Choices, extras: boolean): ManagedContact {
+  if (typeof given !== 'object' || given === null) throw new Refused('a contact is needed')
+  const c = given as Record<string, unknown>
+  if (typeof c.name !== 'string' || !NAME.test(c.name)) throw new Refused("a contact's name is letters, digits, '.', '_' and '-', at most 63")
+  const period = (value: unknown, what: string) => {
+    if (typeof value !== 'string' || !(choices.timeperiods ?? []).includes(value)) throw new Refused(`${what}: choose one of the engine's timeperiods`)
+    return value
+  }
+  const letters = (value: unknown, what: string, allowed: string) => {
+    const text = typeof value === 'string' ? value.replace(/[\s,]/g, '') : ''
+    if (text === '' || [...text].some((l) => !allowed.includes(l))) throw new Refused(`${what}: letters of ${allowed}`)
+    return [...new Set(text)].join(',')
+  }
+  const commands = (value: unknown, what: string) => {
+    const list = Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '') : []
+    if (list.length === 0) throw new Refused(`${what}: choose at least one command`)
+    for (const line of list) command(line, what, choices.commands)
+    return list
+  }
+  const email = text(c.email, 'the e-mail')
+  if (email !== undefined && !/^[^\s@,]+@[^\s@,]+$/.test(email)) throw new Refused('the e-mail is not an address')
+  let digest: ManagedContact['digest']
+  if (c.digest !== undefined && c.digest !== null) {
+    if (!extras) throw new Refused('only checkd has digests')
+    const d = c.digest as Record<string, unknown>
+    const name = text(d.command, 'the digest command', true) as string
+    if (!choices.commands.includes(name)) throw new Refused(`the digest command: the engine has no command '${name}'`)
+    const wait = d.wait === undefined || d.wait === null || d.wait === '' ? undefined : Number(d.wait)
+    if (wait !== undefined && (!Number.isInteger(wait) || wait < 1 || wait > 3600)) throw new Refused('the digest wait is 1 to 3600 seconds')
+    digest = { command: name, ...(wait === undefined ? {} : { wait }) }
+  }
+  return {
+    name: c.name,
+    alias: text(c.alias, 'the alias'),
+    email,
+    pager: text(c.pager, 'the pager'),
+    host_notification_period: period(c.host_notification_period, 'host notification period'),
+    service_notification_period: period(c.service_notification_period, 'service notification period'),
+    host_notification_options: letters(c.host_notification_options, 'host notification options', 'durfsn'),
+    service_notification_options: letters(c.service_notification_options, 'service notification options', 'wucrfsn'),
+    host_notification_commands: commands(c.host_notification_commands, 'host notification commands'),
+    service_notification_commands: commands(c.service_notification_commands, 'service notification commands'),
+    ...(digest ? { digest } : {}),
+  }
+}
+
+export function contactText(contact: ManagedContact): string {
+  const attrs: [string, string][] = [['contact_name', contact.name]]
+  put(attrs, 'alias', contact.alias)
+  put(attrs, 'email', contact.email)
+  put(attrs, 'pager', contact.pager)
+  put(attrs, 'host_notification_period', contact.host_notification_period)
+  put(attrs, 'service_notification_period', contact.service_notification_period)
+  put(attrs, 'host_notification_options', contact.host_notification_options)
+  put(attrs, 'service_notification_options', contact.service_notification_options)
+  put(attrs, 'host_notification_commands', contact.host_notification_commands)
+  put(attrs, 'service_notification_commands', contact.service_notification_commands)
+  if (contact.digest) {
+    put(attrs, '_CHECKD_DIGEST_COMMAND', contact.digest.command)
+    if (contact.digest.wait !== undefined) put(attrs, '_CHECKD_DIGEST_WAIT', String(contact.digest.wait))
+  }
+  return writeObjects([{ type: 'contact', attrs }], HEADER)
+}
+
+export function readContactFile(content: string): ManagedContact {
+  const definitions = parseObjects(content)
+  const [d] = definitions
+  if (definitions.length !== 1 || d === undefined || d.type !== 'contact') throw new Error('it does not define exactly one contact')
+  const strange = d.attrs.find(([key]) => !CONTACT_KEYS.includes(key))?.[0]
+  if (strange !== undefined) throw new Error(`its contact has '${strange}', which nuthatch does not edit`)
+  const command = attr(d, '_CHECKD_DIGEST_COMMAND')
+  const wait = attr(d, '_CHECKD_DIGEST_WAIT')
+  return {
+    name: attr(d, 'contact_name') ?? '',
+    alias: attr(d, 'alias'),
+    email: attr(d, 'email'),
+    pager: attr(d, 'pager'),
+    host_notification_period: attr(d, 'host_notification_period') ?? '',
+    service_notification_period: attr(d, 'service_notification_period') ?? '',
+    host_notification_options: attr(d, 'host_notification_options') ?? '',
+    service_notification_options: attr(d, 'service_notification_options') ?? '',
+    host_notification_commands: list(attr(d, 'host_notification_commands')),
+    service_notification_commands: list(attr(d, 'service_notification_commands')),
+    ...(command ? { digest: { command, ...(wait ? { wait: Number(wait) } : {}) } } : {}),
+  }
+}
 
 /** A group as it may be written, or the reason it may not. Whether its members exist is the engine's verifier's to say. */
 export function checkGroup(given: unknown): ManagedGroup {
@@ -388,10 +480,12 @@ export class ConfigAdmin {
     const hosts: ManagedHost[] = []
     const unreadable: ConfigState['unreadable'] = []
     const groups: ManagedGroup[] = []
+    const keptContacts: ManagedContact[] = []
     for (const [file, content] of files) {
       if (file === CATALOGUE_FILE) continue
       try {
-        if (file.startsWith('_')) groups.push(readGroupFile(content))
+        if (file.startsWith('_contact-')) keptContacts.push(readContactFile(content))
+        else if (file.startsWith('_')) groups.push(readGroupFile(content))
         else hosts.push(readHostFile(content))
       } catch (err) {
         unreadable.push({ file, why: err instanceof Error ? err.message : String(err) })
@@ -409,6 +503,7 @@ export class ConfigAdmin {
       revision: this.revision(files),
       hosts: hosts.sort((a, b) => a.name.localeCompare(b.name)),
       groups: groups.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)),
+      contacts: keptContacts.sort((a, b) => a.name.localeCompare(b.name)),
       unreadable,
       templates: { host: templates(main.files, 'host'), service: templates(main.files, 'service') },
       catalogue: catalogueFor(extras),
@@ -501,8 +596,27 @@ export class ConfigAdmin {
       kept = { table: `${change.type}s`, name: change.name }
       name = change.name
       removes.push(groupFile(change.type, change.name))
+    } else if (change.kind === 'put-contact') {
+      const contact = checkContact(change.contact, state.choices, state.extras === true)
+      kept = { table: 'contacts', name: contact.name }
+      name = contact.name
+      const kept_ = state.contacts ?? []
+      const before = typeof change.previous === 'string' ? change.previous : undefined
+      const taken = kept_.some((k) => k.name === contact.name)
+      if (before === undefined && taken) throw new Refused(`nuthatch already keeps a contact '${contact.name}'`)
+      if (before !== undefined && !kept_.some((k) => k.name === before)) throw new Refused(`nuthatch keeps no contact '${before}'`)
+      if (before !== undefined && before !== contact.name) {
+        if (taken) throw new Refused(`nuthatch already keeps a contact '${contact.name}'`)
+        removes.push(CONTACT_FILE(before))
+      }
+      file = CONTACT_FILE(contact.name)
+      writes.set(file, contactText(contact))
+    } else if (change.kind === 'delete-contact' && (state.contacts ?? []).some((k) => k.name === change.name)) {
+      kept = { table: 'contacts', name: change.name }
+      name = change.name
+      removes.push(CONTACT_FILE(change.name))
     } else {
-      throw new Refused('nuthatch keeps no such host or group')
+      throw new Refused('nuthatch keeps no such host, group or contact')
     }
     const text = writes.get(file ?? `${name}.cfg`) ?? ''
 
@@ -535,7 +649,7 @@ export class ConfigAdmin {
     }
     write(writes, removes)
     if (kept.name === '') kept = { table: 'hosts', name }
-    const wanted = change.kind === 'put' || change.kind === 'put-group'
+    const wanted = change.kind === 'put' || change.kind === 'put-group' || change.kind === 'put-contact'
     let shown = false
     let problem = ''
     try {

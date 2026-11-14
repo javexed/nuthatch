@@ -2,7 +2,7 @@
 // that is told its result, one that stands for others, and a downtime for
 // everything that fits a pattern (which works on either engine).
 import { execFileSync } from 'node:child_process'
-import { readdirSync, unlinkSync } from 'node:fs'
+import { readFileSync, readdirSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
@@ -154,4 +154,28 @@ test('New on the Hosts, Services and Groups pages', async ({ page }) => {
   page.once('dialog', (dialog) => void dialog.accept())
   await page.locator('.managed li', { hasText: group }).getByRole('button', { name: 'Take out' }).click()
   await expect(page.getByRole('status')).toContainText(`${group} is taken out.`, { timeout: 90_000 })
+})
+
+test('a contact with a digest, on checkd', async ({ page }) => {
+  const name = `digest-${test.info().project.name}`
+  await login(page, 'admin')
+  await goTo(page, 'Config')
+  await chooseBackend(page, 'checkd')
+  await page.getByRole('button', { name: 'Add a contact' }).click()
+  await page.getByLabel('Name').first().fill(name)
+  await page.getByLabel('E-mail').fill(`${name}@example.test`)
+  await page.getByLabel('Host commands').selectOption(['notify'])
+  await page.getByLabel('Service commands').selectOption(['notify'])
+  await page.getByRole('combobox', { name: 'Digest' }).selectOption('notify')
+  await page.getByLabel('Digest wait').fill('45')
+  await fits(page)
+  await page.getByRole('button', { name: 'Save and apply' }).click()
+  await expect(page.getByRole('status')).toContainText(`${name} is saved, and the engine has it.`, { timeout: 90_000 })
+  expect(await livestatus('checkd', `GET contacts\nColumns: email\nFilter: name = ${name}`)).toEqual([[`${name}@example.test`]])
+  const written = readFileSync(join(dev, 'run', 'checkd', 'managed', `_contact-${name}.cfg`), 'utf8')
+  expect(written).toMatch(/_CHECKD_DIGEST_COMMAND\s+notify/)
+  expect(written).toMatch(/_CHECKD_DIGEST_WAIT\s+45/)
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Take out' }).click()
+  await expect(page.getByRole('status')).toContainText(`${name} is taken out.`, { timeout: 90_000 })
 })

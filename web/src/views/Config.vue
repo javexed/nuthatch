@@ -3,11 +3,12 @@ import { type Changes, compare, portsOf, withGained } from '../lib/rediscover'
 // The hosts and services nuthatch keeps the config of: adding, changing
 // and taking away. Every change is checked by the engine itself before it
 // is written, and the engine then reads its config again.
-import type { ConfigChange, ConfigResult, ConfigState, ManagedGroup, ManagedHost } from '@nuthatch/api'
+import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGroup, ManagedHost } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AddHost from '../components/AddHost.vue'
+import ContactForm from '../components/ContactForm.vue'
 import GroupForm from '../components/GroupForm.vue'
 import HostForm from '../components/HostForm.vue'
 import { useLive } from '../stores/live'
@@ -25,6 +26,8 @@ const error = ref('')
 const editing = ref<ManagedHost | 'new' | null>(null)
 /** The group in its form: one being changed, a new one of a kind, or none. */
 const group = ref<ManagedGroup | { new: ManagedGroup['type'] } | null>(null)
+/** The contact in its form: one being changed, a new one, or none. */
+const contact = ref<ManagedContact | 'new' | null>(null)
 /** Choosing the host a new service goes on. */
 const choosingHost = ref(false)
 /** A new host: looked at first, or in the full form (with what was found, if anything). */
@@ -80,6 +83,21 @@ async function saveGroup(g: ManagedGroup) {
 function checkGroupOnly(g: ManagedGroup) {
   const previous = group.value !== null && 'name' in group.value ? group.value.name : undefined
   return send({ kind: 'put-group', group: g, previous }, true, '')
+}
+
+async function saveContact(k: ManagedContact) {
+  const previous = contact.value !== null && contact.value !== 'new' ? contact.value.name : undefined
+  if (await send({ kind: 'put-contact', contact: k, previous }, false, `${k.name} is saved, and the engine has it.`)) contact.value = null
+}
+
+function checkContactOnly(k: ManagedContact) {
+  const previous = contact.value !== null && contact.value !== 'new' ? contact.value.name : undefined
+  return send({ kind: 'put-contact', contact: k, previous }, true, '')
+}
+
+async function removeContact(k: ManagedContact) {
+  if (!window.confirm(`Take the contact ${k.name} out of the config?`)) return
+  await send({ kind: 'delete-contact', name: k.name }, false, `${k.name} is taken out.`)
 }
 
 async function removeGroup(g: ManagedGroup) {
@@ -198,6 +216,16 @@ async function remove(host: ManagedHost) {
         @save="saveGroup"
         @cancel="group = null"
       />
+      <ContactForm
+        v-else-if="contact !== null"
+        :key="contact === 'new' ? ' new' : contact.name"
+        :state="state"
+        :contact="contact === 'new' ? undefined : contact"
+        :busy="busy"
+        @check="checkContactOnly"
+        @save="saveContact"
+        @cancel="contact = null"
+      />
       <section v-else-if="choosingHost" class="card choose-host" aria-label="Which host">
         <h2>New service on</h2>
         <p v-if="state.hosts.length === 0" class="none">No hosts yet</p>
@@ -276,6 +304,19 @@ async function remove(host: ManagedHost) {
             <div class="actions">
               <button type="button" class="quiet" :disabled="busy" @click="group = g">Change</button>
               <button type="button" class="plain" :disabled="busy" @click="removeGroup(g)">Take out</button>
+            </div>
+          </li>
+        </ul>
+        <h2 class="groups-head">Contacts</h2>
+        <p><button type="button" class="quiet" :disabled="busy" @click="contact = 'new'">Add a contact</button></p>
+        <ul v-if="(state.contacts ?? []).length > 0" class="managed">
+          <li v-for="k in state.contacts" :key="k.name" class="card">
+            <div>
+              <strong>{{ k.name }}</strong> <span class="by">{{ k.email ?? '' }}{{ k.digest ? ' · digest' : '' }}</span>
+            </div>
+            <div class="actions">
+              <button type="button" class="quiet" :disabled="busy" @click="contact = k">Change</button>
+              <button type="button" class="plain" :disabled="busy" @click="removeContact(k)">Take out</button>
             </div>
           </li>
         </ul>

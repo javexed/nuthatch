@@ -775,12 +775,12 @@ export function buildApp(deps: Deps): Hono<Env> {
     const { admin, user } = await configOf(c)
     const backend = c.req.param('backend')
     const sent = await body(c)
-    const change = sent.change as { kind?: string; name?: unknown; host?: { name?: unknown }; group?: { name?: unknown } } | undefined
-    if (typeof change !== 'object' || change === null || !['put', 'delete', 'put-group', 'delete-group'].includes(String(change.kind))) {
+    const change = sent.change as { kind?: string; name?: unknown; host?: { name?: unknown }; group?: { name?: unknown }; contact?: { name?: unknown } } | undefined
+    if (typeof change !== 'object' || change === null || !['put', 'delete', 'put-group', 'delete-group', 'put-contact', 'delete-contact'].includes(String(change.kind))) {
       throw new Refused('a change is a put, a delete, a put-group or a delete-group')
     }
     const dryRun = sent.dry_run === true
-    const what = `${change.kind} ${String(change.kind === 'put' ? change.host?.name : change.kind === 'put-group' ? change.group?.name : change.name)}`
+    const what = `${change.kind} ${String(change.kind === 'put' ? change.host?.name : change.kind === 'put-group' ? change.group?.name : change.kind === 'put-contact' ? change.contact?.name : change.name)}`
     try {
       const result = await admin.change(sent.revision, change as never, dryRun)
       if (!dryRun) deps.store.audit(user, backend, 'config', what)

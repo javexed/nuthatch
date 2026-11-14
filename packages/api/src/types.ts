@@ -187,8 +187,27 @@ export interface ManagedGroup {
   members: string[]
 }
 
+/** A contact that nuthatch keeps the config of. */
+export interface ManagedContact {
+  name: string
+  alias?: string
+  email?: string
+  pager?: string
+  host_notification_period: string
+  service_notification_period: string
+  /** Letters: d, u, r, f, s, n for hosts; w, u, c, r, f, s, n for services. */
+  host_notification_options: string
+  service_notification_options: string
+  host_notification_commands: string[]
+  service_notification_commands: string[]
+  /** checkd: several notifications close together as one run of this command. */
+  digest?: { command: string; wait?: number }
+}
+
 export interface ConfigState {
   backend: string
+  /** The contacts nuthatch keeps. */
+  contacts?: ManagedContact[]
   /** The groups nuthatch keeps. */
   groups?: ManagedGroup[]
   /** What the files are now; sent back with a change, which is refused when they changed in between. */
@@ -250,6 +269,8 @@ export type ConfigChange =
   | { kind: 'delete'; name: string }
   | { kind: 'put-group'; group: ManagedGroup; previous?: string }
   | { kind: 'delete-group'; type: ManagedGroup['type']; name: string }
+  | { kind: 'put-contact'; contact: ManagedContact; previous?: string }
+  | { kind: 'delete-contact'; name: string }
 
 export interface ConfigResult {
   /** Whether the engine's own check took the config. */
