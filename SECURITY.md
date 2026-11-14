@@ -40,7 +40,9 @@ maintainer and no promised time to answer. Only the newest commit of
   code fetches, once and within 15 minutes, a script with the host's
   token in it, without a login; the agent binaries are served to anyone
   too. Each fetch is in the audit log. Commands are made only for an
-  `https` address of nuthatch. See [docs/agents.md](docs/agents.md).
+  `https` address of nuthatch. `[agents] listen` opens a second listener
+  that answers only those two paths; its commands check its certificate
+  by pin. See [docs/agents.md](docs/agents.md).
 
 ## Logging in
 

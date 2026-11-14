@@ -145,12 +145,13 @@ export class Client {
     return this.call('GET', `/api/v1/push-info/${encodeURIComponent(backend)}?${query.toString()}`)
   }
 
-  agents(backend: string): Promise<{ agents: AgentRow[] }> {
+  /** `addresses`: where hosts may reach nuthatch, when it has its own listener for them. */
+  agents(backend: string): Promise<{ agents: AgentRow[]; addresses?: string[] }> {
     return this.call('GET', `/api/v1/agents/${encodeURIComponent(backend)}`)
   }
 
-  installAgent(backend: string, host: string, os: 'linux' | 'windows', nrpe: boolean, plugins: boolean): Promise<AgentInstall> {
-    return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}`, { host, os, nrpe, plugins })
+  installAgent(backend: string, host: string, os: 'linux' | 'windows', nrpe: boolean, plugins: boolean, address?: string): Promise<AgentInstall> {
+    return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}`, { host, os, nrpe, plugins, ...(address ? { address } : {}) })
   }
 
   removeAgent(backend: string, host: string): Promise<Record<string, never>> {

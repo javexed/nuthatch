@@ -4,13 +4,14 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
 import type { AddressInfo } from 'node:net'
 import type { FoundPort, QueryAnswer, Role } from '@nuthatch/api'
 import bcrypt from 'bcryptjs'
 import * as unixcrypt from 'unixcrypt'
 import { describe, expect, it } from 'vitest'
-import { Agents } from './agents.ts'
-import { buildApp } from './app.ts'
+import { Agents, pinOf } from './agents.ts'
+import { buildApp, hostsOnly } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
@@ -1196,7 +1197,7 @@ describe('how a service takes pushes', () => {
 
 describe('agents', () => {
   const urlOf = (command: string) => /'(https?:\/\/[^']+)'/.exec(command)?.[1] ?? ''
-  function site(roles: Record<string, string[]>, agentBase = 'https://nuthatch.example.test') {
+  function site(roles: Record<string, string[]>, agentBase: string | undefined = 'https://nuthatch.example.test', agentListen?: Parameters<typeof buildApp>[0]['agentListen'], engine = 'engine.example.test:4730') {
     const dir = mkdtempSync(join(tmpdir(), 'nuthatch-agents-'))
     mkdirSync(join(dir, 'agents'))
     mkdirSync(join(dir, 'bin'))
@@ -1211,13 +1212,13 @@ describe('agents', () => {
       return []
     })
     let reloads = 0
-    const agents = new Agents(backend, { dir: join(dir, 'agents'), engine: 'engine.example.test:4730', ca: join(dir, 'ca.crt') }, async () => {
+    const agents = new Agents(backend, { dir: join(dir, 'agents'), engine, ca: join(dir, 'ca.crt') }, async () => {
       reloads++
     })
     const store = new Store(':memory:')
     const app = buildApp({
       backends: [backend], store, events: new Events([]), roles: new RolesConfig(roles), limiter: new Limiter(), cookieSecure: false, devUser: 'ops',
-      agents: new Map([['site', agents]]), agentBin: join(dir, 'bin'), agentBase,
+      agents: new Map([['site', agents]]), agentBin: join(dir, 'bin'), agentBase, agentListen,
     })
     const post = (body: unknown) => app.request('/api/v1/agents/site', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify(body) })
     return { dir, app, post, store, reloads: () => reloads }
@@ -1288,5 +1289,56 @@ describe('agents', () => {
     const removed = await editor.app.request('/api/v1/agents/site/web1', { method: 'DELETE', headers: { 'X-Requested-With': 'nuthatch' } })
     expect(removed.status).toBe(200)
     expect(readdirSync(join(editor.dir, 'agents'))).toEqual([])
+  })
+
+  it('on its own listener: pinned commands, the address chosen, and nothing but what hosts fetch', async () => {
+    const certs = mkdtempSync(join(tmpdir(), 'nuthatch-tls-'))
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1', '-subj', '/CN=nuthatch',
+      '-keyout', join(certs, 'key.pem'), '-out', join(certs, 'cert.pem')], { stdio: 'ignore' })
+    const pin = pinOf(readFileSync(join(certs, 'cert.pem'), 'utf8'))
+    expect(pin.cert).toMatch(/^[0-9A-F]{64}$/)
+    const { app, post } = site({ authorized_for_config_edit: ['ops'] }, undefined, { port: 0, addresses: ['127.0.0.1', '192.0.2.7'], pin }, ':4730')
+    const listed = (await (await app.request('/api/v1/agents/site')).json()) as { addresses: string[] }
+    expect(listed.addresses).toEqual(['127.0.0.1', '192.0.2.7'])
+    expect((await post({ host: 'web1', os: 'linux', address: '198.51.100.1' })).status).toBe(400)
+
+    const win = (await (await post({ host: 'win1', os: 'windows', address: '192.0.2.7' })).json()) as { command: string }
+    expect(win.command).toContain(`-eq '${pin.cert}'`)
+    expect(win.command).toMatch(/irm 'https:\/\/192\.0\.2\.7:0\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
+    const winScript = await (await app.request(new URL(urlOf(win.command)).pathname)).text()
+    expect(winScript).toContain('--engine 192.0.2.7:4730')
+    expect(winScript).toContain('ServerCertificateValidationCallback = $null')
+
+    // A real TLS listener, as main.ts starts it.
+    const server = createHttpsServer({ cert: readFileSync(join(certs, 'cert.pem')), key: readFileSync(join(certs, 'key.pem')) })
+    const { getRequestListener } = await import('@hono/node-server')
+    server.on('request', getRequestListener(hostsOnly(app.fetch)))
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+    const port = (server.address() as AddressInfo).port
+    try {
+      const made = (await (await post({ host: 'web1', os: 'linux', nrpe: true })).json()) as { command: string }
+      expect(made.command).toContain(`-k --pinnedpubkey 'sha256//${pin.key}'`)
+      const url = urlOf(made.command).replace(':0/', `:${port}/`)
+      const curl = async (extra: string[], to: string) => {
+        const { execFile } = await import('node:child_process')
+        return new Promise<string>((done, failed) =>
+          execFile('curl', ['-fsS', '--proto', '=https', '-k', ...extra, to], { encoding: 'utf8' }, (err, out) => (err ? failed(err) : done(out))),
+        )
+      }
+      // A wrong pin is refused before anything is sent, and leaves the code.
+      await expect(curl(['--pinnedpubkey', `sha256//${createHash('sha256').update('other').digest('base64')}`], url)).rejects.toThrow()
+      const script = await curl(['--pinnedpubkey', `sha256//${pin.key}`], url)
+      expect(script).toContain('--engine 127.0.0.1:4730 --name web1')
+      expect(script).toContain(`--pinnedpubkey 'sha256//${pin.key}'`)
+      expect(script).toContain("grep -qxF '127.0.0.1'")
+      expect(script).not.toContain('wget')
+      // The binaries; nothing else of the app.
+      expect(await curl(['--pinnedpubkey', `sha256//${pin.key}`], `https://127.0.0.1:${port}/agent/bin/checkd-agent-linux-x86_64`)).toBe('ELF')
+      for (const path of ['/api/v1/agents/site', '/api/v1/session', '/', '/login']) {
+        await expect(curl([], `https://127.0.0.1:${port}${path}`), path).rejects.toThrow()
+      }
+    } finally {
+      server.close()
+    }
   })
 })

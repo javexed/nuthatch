@@ -18,8 +18,13 @@ well, for `check_nrpe` from the engine.
    directory, reloads checkd, and gives a command:
    - Linux, as root:
      `curl -fsSL --proto '=https' 'https://…/agent/install/<code>' | sudo sh`
-   - Windows, in PowerShell as Administrator:
+   - Windows, in Windows PowerShell as Administrator:
      `irm 'https://…/agent/install/<code>' | iex`
+
+   With nuthatch's own listener for hosts (below), the commands also
+   check its certificate: curl by `--pinnedpubkey`, PowerShell by the
+   certificate's SHA-256. Windows PowerShell 5.1 does this; PowerShell 7
+   refuses the certificate.
 3. Run it on the host. The code works once, within 15 minutes. Making a
    new command for a host shuts out the agent it had.
 
@@ -56,6 +61,21 @@ It stays installed on the host.
     engine = "checkd.example.test:4730"  # its workers listener, as hosts reach it
     ca = "/etc/checkd/workers/ca.crt"
     # server_name = "engine"             # the name in the engine's certificate
+
+Or, instead of `url`, a listener of nuthatch's own for hosts, with no
+proxy or public certificate:
+
+    [agents]
+    bin = "/opt/checkd/dist/agent"
+    listen = "0.0.0.0:10444"
+    cert = "/etc/checkd/workers/engine.crt"   # any certificate; checked by its pin
+    key = "/etc/checkd/workers/engine.key"
+    addresses = ["192.0.2.10", "198.51.100.10"]  # this machine, as hosts reach it
+
+It answers `/agent/install/` and `/agent/bin/` only. The page asks which
+address a host should use when there is more than one. With
+`engine = ":4730"` the engine is at that same address; give
+`server_name` the name in the engine's certificate.
 
 nuthatch needs to write `dir`; token files are readable by their group,
 so checkd runs as nuthatch's user or in its group. checkd runs with

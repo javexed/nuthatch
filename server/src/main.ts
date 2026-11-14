@@ -8,13 +8,14 @@
 
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from 'node:fs'
+import { createServer as createHttpsServer } from 'node:https'
 import { isIP } from 'node:net'
 import { join, resolve } from 'node:path'
 import { createAdaptorServer, serve } from '@hono/node-server'
 import { parse } from 'smol-toml'
-import { type Peer, VERSION, buildApp, userName } from './app.ts'
+import { type Peer, VERSION, buildApp, hostsOnly, userName } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers } from './auth.ts'
-import { Agents } from './agents.ts'
+import { Agents, type Pin, pinOf } from './agents.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
 import { pluginsDir } from './catalogue.ts'
 import { ConfigAdmin } from './configadmin.ts'
@@ -149,8 +150,8 @@ function main(): void {
         const { dir, engine, ca, server_name, ...rest } = entry.agents as Record<string, unknown>
         if (Object.keys(rest).length > 0) fail(`${path}: backend ${name}: agents has no setting ${Object.keys(rest).join(', ')}`)
         if (typeof dir !== 'string' || typeof ca !== 'string') fail(`${path}: backend ${name}: agents needs dir (checkd's agents=) and ca (the workers' ca.crt)`)
-        if (typeof engine !== 'string' || !/^([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\]):\d{1,5}$/.test(engine)) {
-          fail(`${path}: backend ${name}: agents.engine is host:port, the engine's worker listener as hosts reach it`)
+        if (typeof engine !== 'string' || !/^([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\])?:\d{1,5}$/.test(engine)) {
+          fail(`${path}: backend ${name}: agents.engine is host:port, the engine's worker listener as hosts reach it, or :port at the address hosts reach nuthatch at`)
         }
         if (server_name !== undefined && (typeof server_name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(server_name))) fail(`${path}: backend ${name}: agents.server_name is a host name`)
         if (!existsSync(dir) || !existsSync(ca)) console.error(`warning: backend ${name}: agents.dir or agents.ca is not there yet`)
@@ -171,8 +172,9 @@ function main(): void {
   // [agents]: where the agent binaries are, and this nuthatch's address as hosts reach it.
   let agentBin: string | undefined
   let agentBase: string | undefined
+  let agentListen: { hostname: string; port: number; addresses: string[]; pin: Pin; cert: string; key: string } | undefined
   if (config.agents !== undefined) {
-    const { bin, url, ...rest } = (typeof config.agents === 'object' && config.agents !== null ? config.agents : {}) as Record<string, unknown>
+    const { bin, url, listen: hostsListen, cert, key, addresses, ...rest } = (typeof config.agents === 'object' && config.agents !== null ? config.agents : {}) as Record<string, unknown>
     if (Object.keys(rest).length > 0) fail(`${path}: [agents] has no setting ${Object.keys(rest).join(', ')}`)
     if (typeof bin !== 'string') fail(`${path}: [agents] bin is the directory of checkd's dist/agent`)
     if (!existsSync(join(bin, 'SHA256SUMS'))) console.error(`warning: [agents] bin: no ${join(bin, 'SHA256SUMS')} yet (checkd's scripts/build-agents.sh)`)
@@ -180,6 +182,25 @@ function main(): void {
     if (url !== undefined) {
       if (typeof url !== 'string' || !/^https?:\/\/[^\s/]+(\/[^\s]*)?$/.test(url)) fail(`${path}: [agents] url is this nuthatch's address, as hosts reach it`)
       agentBase = url.replace(/\/+$/, '')
+    }
+    // nuthatch's own TLS listener for hosts, its certificate checked by pins.
+    if (hostsListen !== undefined) {
+      if (url !== undefined) fail(`${path}: [agents] takes url or listen, not both`)
+      const at = typeof hostsListen === 'string' ? hostsListen.lastIndexOf(':') : -1
+      const hostname = typeof hostsListen === 'string' ? hostsListen.slice(0, at).replace(/^\[|\]$/g, '') : ''
+      const port = typeof hostsListen === 'string' ? Number(hostsListen.slice(at + 1)) : NaN
+      if (at < 0 || isIP(hostname) === 0 || !Number.isInteger(port)) fail(`${path}: [agents] listen is address:port`)
+      if (typeof cert !== 'string' || typeof key !== 'string') fail(`${path}: [agents] listen needs cert and key`)
+      if (!Array.isArray(addresses) || addresses.length === 0 || !addresses.every((a) => typeof a === 'string' && (isIP(a) !== 0 || /^[A-Za-z0-9.-]+$/.test(a)))) {
+        fail(`${path}: [agents] listen needs addresses, this machine's addresses or names as hosts reach it`)
+      }
+      let pin: Pin
+      try {
+        pin = pinOf(readFileSync(cert, 'utf8'))
+      } catch (err) {
+        fail(`${path}: [agents] cert: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      agentListen = { hostname, port, addresses: addresses as string[], pin, cert, key }
     }
   }
 
@@ -264,6 +285,7 @@ function main(): void {
     agents,
     agentBin,
     agentBase,
+    agentListen: agentListen && { port: agentListen.port, addresses: agentListen.addresses, pin: agentListen.pin },
     remotes,
     peers,
     appOrigins: appOrigins as string[],
@@ -290,9 +312,20 @@ function main(): void {
     })
   }
   server.on('error', (err) => fail(`cannot listen at ${listen}: ${err.message}`))
+  // For monitored hosts: the install script and the binaries only, over TLS.
+  let hostsServer: ReturnType<typeof createAdaptorServer> | undefined
+  if (agentListen) {
+    const { hostname: h, port: p, cert, key } = agentListen
+    hostsServer = serve(
+      { fetch: hostsOnly(app.fetch), hostname: h, port: p, createServer: createHttpsServer, serverOptions: { cert: readFileSync(cert), key: readFileSync(key) } },
+      () => console.error(`agents: listening at https://${h.includes(':') ? `[${h}]` : h}:${p}`),
+    )
+    hostsServer.on('error', (err) => fail(`cannot listen at ${h}:${p} for agents: ${err.message}`))
+  }
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       server.close()
+      hostsServer?.close()
       // Open event streams would keep it from ending.
       setTimeout(() => process.exit(0), 200).unref()
     })

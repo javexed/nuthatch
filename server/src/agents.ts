@@ -6,7 +6,7 @@
 // An install command carries a short-lived code, not the token: the code
 // fetches a script with the token in it, once, within a quarter of an hour.
 
-import { randomBytes } from 'node:crypto'
+import { X509Certificate, createHash, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend } from './backend.ts'
@@ -16,7 +16,8 @@ import { Refused } from './policy.ts'
 export interface AgentSettings {
   /** checkd's `agents=` directory, which nuthatch writes token files into. */
   dir: string
-  /** The engine's worker listener as hosts reach it, `host:port`. */
+  /** The engine's worker listener as hosts reach it, `host:port`; `:port` is
+   * the address the host was given for nuthatch. */
   engine: string
   /** The CA of the engine's worker certificate, given to every agent. */
   ca: string
@@ -40,6 +41,44 @@ export interface Install {
   os: 'linux' | 'windows'
   nrpe: boolean
   plugins: boolean
+  /** nuthatch as this host reaches it, `https://address:port`. */
+  base: string
+  /** The address in `base`, for an engine given as `:port`. */
+  address: string
+  /** nuthatch's own certificate, when the host checks it by these. */
+  pin?: Pin
+}
+
+/** A certificate as a host checks it without a CA: curl by its public key,
+ * Windows PowerShell by the whole certificate. */
+export interface Pin {
+  /** base64 SHA-256 of the public key (curl's --pinnedpubkey). */
+  key: string
+  /** Hex SHA-256 of the certificate, upper case. */
+  cert: string
+}
+
+export function pinOf(pem: string): Pin {
+  const cert = new X509Certificate(pem)
+  return {
+    key: createHash('sha256').update(cert.publicKey.export({ type: 'spki', format: 'der' })).digest('base64'),
+    cert: cert.fingerprint256.replace(/:/g, '').toUpperCase(),
+  }
+}
+
+/** The command a host runs, as root or Administrator. */
+export function installCommand(install: Pick<Install, 'os' | 'pin'>, url: string): string {
+  const { os, pin } = install
+  if (os === 'linux') {
+    const tls = url.startsWith('https://') ? ` --proto '=https'${pin ? ` -k --pinnedpubkey 'sha256//${pin.key}'` : ''}` : ''
+    return `curl -fsSL${tls} '${url}' | sudo sh`
+  }
+  if (!pin) return `irm '${url}' | iex`
+  return (
+    "[Net.ServicePointManager]::SecurityProtocol='Tls12';" +
+    `[Net.ServicePointManager]::ServerCertificateValidationCallback={param($s,$c)-join([Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())|%{$_.ToString('X2')}) -eq '${pin.cert}'};` +
+    `irm '${url}' | iex`
+  )
 }
 
 /** A host name that can be an agent's, as checkd takes it. */
@@ -158,9 +197,12 @@ interface ScriptFacts {
   install: Install
   settings: AgentSettings
   ca: string
-  base: string
   sums: Map<string, string>
 }
+
+/** The engine as this host reaches it. */
+const engineOf = (install: Install, settings: AgentSettings) =>
+  settings.engine.startsWith(':') ? `${install.address.includes(':') ? `[${install.address}]` : install.address}${settings.engine}` : settings.engine
 
 const sh = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
 // PowerShell ends a quoted string at any of these quotes, not only '.
@@ -168,12 +210,14 @@ const ps = (text: string) => `'${text.replace(/['\u2018\u2019\u201a\u201b]/g, (q
 const engineHost = (engine: string) => engine.replace(/^\[([^\]]+)\](:\d+)?$/, '$1').replace(/:\d+$/, '')
 
 /** The install script for Linux: run as root, `curl ... | sudo sh`. */
-export function linuxScript({ install, settings, ca, base, sums }: ScriptFacts): string {
+export function linuxScript({ install, settings, ca, sums }: ScriptFacts): string {
+  const { base, pin } = install
+  const engine = engineOf(install, settings)
   const arch = (name: string) => `${base}/agent/bin/${name}`
   const x86 = 'checkd-agent-linux-x86_64'
   const arm = 'checkd-agent-linux-aarch64'
   const args = [
-    '--engine', settings.engine,
+    '--engine', engine,
     '--name', install.host,
     '--token-file', '/etc/checkd-agent/token',
     '--ca', '/etc/checkd-agent/ca.crt',
@@ -203,7 +247,7 @@ packages() {
   fi
 }
 fetch() {
-  if command -v curl >/dev/null; then curl -fsSL "$1" -o "$2"; else wget -q "$1" -O "$2"; fi
+${pin ? `  curl -fsSL --proto '=https' -k --pinnedpubkey ${sh(`sha256//${pin.key}`)} "$1" -o "$2"` : `  if command -v curl >/dev/null; then curl -fsSL "$1" -o "$2"; else wget -q "$1" -O "$2"; fi`}
 }
 ${install.plugins || install.nrpe ? `
 if command -v apt-get >/dev/null; then apt-get update -q >/dev/null; packages monitoring-plugins
@@ -247,7 +291,7 @@ systemctl daemon-reload
 systemctl enable checkd-agent >/dev/null 2>&1
 systemctl restart checkd-agent
 echo "checkd-agent runs for ${install.host}"
-${install.nrpe ? nrpeLinux(engineHost(settings.engine)) : ''}
+${install.nrpe ? nrpeLinux(engineHost(engine)) : ''}
 }
 main "$@"
 `
@@ -276,10 +320,11 @@ echo "NRPE runs, open to ${engine.replace(/[^A-Za-z0-9._:-]/g, '')}"
 }
 
 /** The install script for Windows: an Administrator PowerShell, `irm ... | iex`. */
-export function windowsScript({ install, settings, ca, base, sums }: ScriptFacts): string {
+export function windowsScript({ install, settings, ca, sums }: ScriptFacts): string {
+  const { base, pin } = install
   const file = 'checkd-agent-windows-x86_64.exe'
   const args = [
-    '--engine', settings.engine,
+    '--engine', engineOf(install, settings),
     '--name', install.host,
     '--token-file', '$data\\token',
     '--ca', '$data\\ca.crt',
@@ -318,6 +363,6 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\LOCALSERVICE' -LogonType ServiceAccount
 Register-ScheduledTask -TaskName 'checkd-agent' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName 'checkd-agent'
-Write-Host 'checkd-agent runs for ${install.host}'
+${pin ? '[Net.ServicePointManager]::ServerCertificateValidationCallback = $null\n' : ''}Write-Host 'checkd-agent runs for ${install.host}'
 `
 }

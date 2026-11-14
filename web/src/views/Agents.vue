@@ -12,6 +12,8 @@ const agents = ref<AgentRow[] | null>(null)
 const hosts = ref<string[]>([])
 const error = ref('')
 
+const addresses = ref<string[]>([])
+const address = ref('')
 const host = ref('')
 const os = ref<'linux' | 'windows'>('linux')
 const nrpe = ref(false)
@@ -29,6 +31,8 @@ async function load() {
       api.query({ table: 'hosts', columns: ['name'], sort: [{ column: 'name' }], backends: [backend.value] }),
     ])
     agents.value = list.agents
+    addresses.value = list.addresses ?? []
+    if (!addresses.value.includes(address.value)) address.value = addresses.value[0] ?? ''
     hosts.value = found.rows.map((r) => String(r.name)).filter((name) => /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name))
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -41,7 +45,7 @@ async function make() {
   error.value = ''
   made.value = null
   try {
-    made.value = await api.installAgent(backend.value, host.value, os.value, nrpe.value, plugins.value)
+    made.value = await api.installAgent(backend.value, host.value, os.value, nrpe.value, plugins.value, address.value || undefined)
     await load()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -96,6 +100,12 @@ const until = computed(() => (made.value ? new Date(made.value.until).toLocaleTi
       <label><input v-model="os" type="radio" value="linux" /> Linux</label>
       <label><input v-model="os" type="radio" value="windows" /> Windows</label>
     </fieldset>
+    <label v-if="addresses.length > 1" class="field">
+      Address
+      <select v-model="address">
+        <option v-for="a in addresses" :key="a" :value="a">{{ a }}</option>
+      </select>
+    </label>
     <label><input v-model="plugins" type="checkbox" /> Plugins only</label>
     <label v-if="os === 'linux'"><input v-model="nrpe" type="checkbox" /> NRPE</label>
     <button type="submit" :disabled="busy || !host">Make command</button>
@@ -103,7 +113,7 @@ const until = computed(() => (made.value ? new Date(made.value.until).toLocaleTi
 
   <section v-if="made" class="card" aria-label="Install command">
     <pre class="call"><code>{{ made.command }}</code></pre>
-    <p class="by">{{ os === 'linux' ? 'As root' : 'PowerShell as Administrator' }} · until {{ until }} · once</p>
+    <p class="by">{{ os === 'linux' ? 'As root' : 'Windows PowerShell as Administrator' }} · until {{ until }} · once</p>
     <button type="button" class="quiet" @click="copy(made.command)">{{ copied ? 'Copied' : 'Copy' }}</button>
   </section>
 

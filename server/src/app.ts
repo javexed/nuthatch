@@ -1,15 +1,17 @@
 // The HTTP side: who a request is from, and the routes.
 
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
+import { Readable } from 'node:stream'
 import type { BackendStatus, QueryAnswer, Role, Session as SessionAnswer, StatsAnswer } from '@nuthatch/api'
 import { getConnInfo } from '@hono/node-server/conninfo'
 import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
-import { type Agents, InstallCodes, agentName, binaries, linuxScript, windowsScript } from './agents.ts'
+import { type Agents, InstallCodes, type Pin, agentName, binaries, installCommand, linuxScript, windowsScript } from './agents.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
@@ -65,6 +67,9 @@ export interface Deps {
   agentBin?: string
   /** This nuthatch's address as monitored hosts reach it; else the request's. */
   agentBase?: string
+  /** nuthatch's own TLS listener for hosts: its port, the addresses hosts
+   * reach this machine at, and its certificate's pins. */
+  agentListen?: { port: number; addresses: string[]; pin: Pin }
   /** Sites reached through their own nuthatch. */
   remotes?: RemoteSite[]
   /** The origins of apps served elsewhere (the phone app) that may call the API, with a token. */
@@ -922,7 +927,9 @@ export function buildApp(deps: Deps): Hono<Env> {
   }
   /** Who fetched, for the audit log: behind a proxy, its last X-Forwarded-For. */
   function address(c: Context<Env>): string {
-    if (deps.cookieSecure) {
+    // On nuthatch's own TLS listener nobody stands between: no proxy's header.
+    const direct = (c.env as { incoming?: { socket?: { encrypted?: boolean } } } | undefined)?.incoming?.socket?.encrypted === true
+    if (deps.cookieSecure && !direct) {
       const last = (c.req.header('X-Forwarded-For') ?? '').split(',').pop()?.trim() ?? ''
       if (/^[0-9A-Fa-f:.]{2,45}$/.test(last)) return last
     }
@@ -941,7 +948,7 @@ export function buildApp(deps: Deps): Hono<Env> {
 
   app.get('/api/v1/agents/:backend', async (c) => {
     const { agents } = await agentsOf(c)
-    return c.json({ agents: await agents.list() })
+    return c.json({ agents: await agents.list(), ...(deps.agentListen ? { addresses: deps.agentListen.addresses } : {}) })
   })
 
   app.post('/api/v1/agents/:backend', async (c) => {
@@ -950,20 +957,30 @@ export function buildApp(deps: Deps): Hono<Env> {
     const { host, os } = sent
     if (!agentName(host)) throw new Refused('a host name of letters, digits, ., - and _')
     if (os !== 'linux' && os !== 'windows') throw new Refused('os is linux or windows')
-    // The script carries a token and is run as root: never over plain
-    // HTTP, but to this machine itself.
-    const base = baseOf(c)
-    const secure = base.startsWith('https://')
-    if (!secure && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(base)) {
-      throw new Refused('install commands need nuthatch at an https address: set url under [agents]')
-    }
-    if (!/^https?:\/\/[A-Za-z0-9.:[\]-]+(\/[A-Za-z0-9._~/-]*)?$/.test(base)) throw new Refused('this address cannot go into a command; set url under [agents]')
     const nrpe = os === 'linux' && sent.nrpe === true
+    let base: string
+    let at: string
+    const listen = deps.agentListen
+    if (listen) {
+      // nuthatch's own listener, its certificate checked by its pins.
+      at = typeof sent.address === 'string' && sent.address !== '' ? sent.address : (listen.addresses[0] ?? '')
+      if (!listen.addresses.includes(at)) throw new Refused(`address is one of ${listen.addresses.join(', ')}`)
+      base = `https://${at.includes(':') ? `[${at}]` : at}:${listen.port}`
+    } else {
+      // The script carries a token and is run as root: never over plain
+      // HTTP, but to this machine itself.
+      base = baseOf(c)
+      if (!base.startsWith('https://') && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(base)) {
+        throw new Refused('install commands need nuthatch at an https address: set url or listen under [agents]')
+      }
+      if (!/^https?:\/\/[A-Za-z0-9.:[\]-]+(\/[A-Za-z0-9._~/-]*)?$/.test(base)) throw new Refused('this address cannot go into a command; set url under [agents]')
+      at = new URL(base).hostname.replace(/^\[|\]$/g, '')
+    }
     const token = await agents.add(host)
-    const { code, until } = codes.make({ backend: agents.backend.name, host, token, os, nrpe, plugins: sent.plugins === true })
-    const url = `${base}/agent/install/${code}`
+    const install = { backend: agents.backend.name, host, token, os, nrpe, plugins: sent.plugins === true, base, address: at, ...(listen ? { pin: listen.pin } : {}) } as const
+    const { code, until } = codes.make(install)
     deps.store.audit(user, agents.backend.name, 'agent', `${host} (${os}${nrpe ? ', nrpe' : ''})`)
-    return c.json({ until, command: os === 'linux' ? `curl -fsSL${secure ? " --proto '=https'" : ''} '${url}' | sudo sh` : `irm '${url}' | iex` })
+    return c.json({ until, command: installCommand(install, `${base}/agent/install/${code}`) })
   })
 
   app.delete('/api/v1/agents/:backend/:host', async (c) => {
@@ -984,7 +1001,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     const install = codes.take(c.req.param('code'))
     const agents = install && deps.agents?.get(install.backend)
     if (!install || !agents || !deps.agentBin) return c.text('This install code is used or has expired. Make a new one in nuthatch.\n', 404)
-    const facts = { install, settings: agents.settings, ca: agents.ca(), base: baseOf(c), sums: binaries(deps.agentBin) }
+    const facts = { install, settings: agents.settings, ca: agents.ca(), sums: binaries(deps.agentBin) }
     deps.store.audit('', install.backend, 'agent install fetched', `${install.host} from ${address(c)}`)
     return c.text(install.os === 'linux' ? linuxScript(facts) : windowsScript(facts), 200, { 'Cache-Control': 'no-store' })
   })
@@ -992,8 +1009,10 @@ export function buildApp(deps: Deps): Hono<Env> {
   app.get('/agent/bin/:file', async (c) => {
     const file = c.req.param('file')
     if (!deps.agentBin || !binaries(deps.agentBin).has(file)) return c.text('not found\n', 404)
-    const data = await readFile(join(deps.agentBin, file))
-    return c.body(new Uint8Array(data), 200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-cache' })
+    const path = join(deps.agentBin, file)
+    const { size } = await stat(path)
+    const data = Readable.toWeb(createReadStream(path)) as ReadableStream<Uint8Array>
+    return c.body(data, 200, { 'Content-Type': 'application/octet-stream', 'Content-Length': String(size), 'Cache-Control': 'no-cache' })
   })
 
   // The interface's files hold nothing secret and are served to anyone,
@@ -1021,4 +1040,14 @@ export function buildApp(deps: Deps): Hono<Env> {
     })
   }
   return app
+}
+
+/** What nuthatch's own listener for hosts answers: the install script and
+ * the binaries, and nothing else of the app. */
+export function hostsOnly(fetch: (request: Request, env?: unknown) => Response | Promise<Response>) {
+  return (request: Request, env?: unknown): Response | Promise<Response> => {
+    const { pathname } = new URL(request.url)
+    const wanted = (request.method === 'GET' || request.method === 'HEAD') && /^\/agent\/(install|bin)\/[A-Za-z0-9._-]+$/.test(pathname)
+    return wanted ? fetch(request, env) : new Response('not found\n', { status: 404 })
+  }
 }
