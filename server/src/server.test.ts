@@ -1395,4 +1395,23 @@ describe('agents', () => {
       metrics.close()
     }
   })
+
+  it('over SSH: a login is checked before anything happens, and is kept nowhere', async () => {
+    const { app } = site({ authorized_for_config_edit: ['ops'] })
+    const ssh = (login: Record<string, unknown>) =>
+      app.request('/api/v1/agents/site/ssh', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify({ host: 'web1', os: 'linux', ssh: login }) })
+    const base = { address: '127.0.0.1', port: 1, user: 'admin', password: 'secret-pass', fingerprint: 'SHA256:x' }
+    for (const bad of [{ ...base, user: '-oProxyCommand=x' }, { ...base, address: '-oProxyCommand=x' }, { ...base, port: 70000 }, { ...base, password: undefined }, { ...base, key: 'k' }]) {
+      expect((await ssh(bad)).status, JSON.stringify(bad)).toBe(400)
+    }
+    // Nothing answers there: no key to match, so no login is tried.
+    const nobody = await ssh(base)
+    expect(nobody.status).toBe(400)
+    expect(await nobody.text()).toContain('not the one shown')
+    const keys = await app.request('/api/v1/agents/site/ssh-keys', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify({ address: '127.0.0.1', port: 1 }) })
+    expect(keys.status).toBe(400)
+    expect((await app.request('/api/v1/agents/jobs/nope')).status).toBe(404)
+    const viewer = site({})
+    expect((await viewer.app.request('/api/v1/agents/site/ssh-keys', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify({ address: '127.0.0.1' }) })).status).toBe(403)
+  })
 })

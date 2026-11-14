@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow } from './types.ts'
+import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -152,6 +152,20 @@ export class Client {
 
   installAgent(backend: string, host: string, os: 'linux' | 'windows', nrpe: boolean, plugins: boolean, address?: string): Promise<AgentInstall> {
     return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}`, { host, os, nrpe, plugins, ...(address ? { address } : {}) })
+  }
+
+  /** The keys of the SSH server at an address, to be shown before logging in. */
+  sshKeys(backend: string, address: string, port: number): Promise<{ keys: { type: string; fingerprint: string }[] }> {
+    return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}/ssh-keys`, { address, port })
+  }
+
+  /** Installs over SSH, with a login for this run alone; the answer is a job to follow. */
+  installAgentOverSsh(backend: string, install: { host: string; os: 'linux' | 'windows'; nrpe: boolean; plugins: boolean; address?: string }, ssh: SshLogin): Promise<{ job: string }> {
+    return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}/ssh`, { ...install, ssh })
+  }
+
+  agentJob(id: string): Promise<{ done: boolean; ok: boolean; output: string }> {
+    return this.call('GET', `/api/v1/agents/jobs/${encodeURIComponent(id)}`)
   }
 
   removeAgent(backend: string, host: string): Promise<Record<string, never>> {

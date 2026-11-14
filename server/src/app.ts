@@ -1,6 +1,6 @@
 // The HTTP side: who a request is from, and the routes.
 
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
@@ -11,7 +11,8 @@ import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
-import { type Agents, InstallCodes, type Pin, agentName, binaries, installCommand, linuxScript, windowsScript } from './agents.ts'
+import { type Agents, InstallCodes, type Pin, agentName, binaries, installCommand, linuxScript, sshCommand, windowsScript } from './agents.ts'
+import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
@@ -917,6 +918,15 @@ export function buildApp(deps: Deps): Hono<Env> {
 
   // Agents: for the role config_edit, on this site's own backends.
   const codes = new InstallCodes()
+  /** Installs over SSH under way or just done, by id: in memory, an hour. */
+  interface Job {
+    owner: string
+    output: string
+    done: boolean
+    ok: boolean
+    at: number
+  }
+  const jobs = new Map<string, Job>()
   async function agentsOf(c: Context<Env>): Promise<{ agents: Agents; user: string }> {
     const { user, peer } = c.get('identity')
     if (peer) throw new Forbidden('agents are added at their own site')
@@ -951,9 +961,8 @@ export function buildApp(deps: Deps): Hono<Env> {
     return c.json({ agents: await agents.list(), ...(deps.agentListen ? { addresses: deps.agentListen.addresses } : {}) })
   })
 
-  app.post('/api/v1/agents/:backend', async (c) => {
-    const { agents, user } = await agentsOf(c)
-    const sent = await body(c)
+  /** What an install is for, checked, and nuthatch's address for the host. */
+  function planOf(c: Context<Env>, agents: Agents, sent: Record<string, unknown>) {
     const { host, os } = sent
     if (!agentName(host)) throw new Refused('a host name of letters, digits, ., - and _')
     if (os !== 'linux' && os !== 'windows') throw new Refused('os is linux or windows')
@@ -977,11 +986,89 @@ export function buildApp(deps: Deps): Hono<Env> {
       if (!/^https?:\/\/[A-Za-z0-9.:[\]-]+(\/[A-Za-z0-9._~/-]*)?$/.test(base)) throw new Refused('this address cannot go into a command; set url under [agents]')
       at = new URL(base).hostname.replace(/^\[|\]$/g, '')
     }
-    const token = await agents.add(host)
-    const install = { backend: agents.backend.name, host, token, os, nrpe, plugins: sent.plugins === true, base, address: at, ...(listen ? { pin: listen.pin } : {}) } as const
+    return { host, os, nrpe, plugins: sent.plugins === true, base, at, pin: listen?.pin } as const
+  }
+
+  /** A new token and a one-use code for a planned install. */
+  async function issue(agents: Agents, plan: ReturnType<typeof planOf>) {
+    const token = await agents.add(plan.host)
+    const install = { backend: agents.backend.name, host: plan.host, token, os: plan.os, nrpe: plan.nrpe, plugins: plan.plugins, base: plan.base, address: plan.at, ...(plan.pin ? { pin: plan.pin } : {}) }
     const { code, until } = codes.make(install)
-    deps.store.audit(user, agents.backend.name, 'agent', `${host} (${os}${nrpe ? ', nrpe' : ''})`)
-    return c.json({ until, command: installCommand(install, `${base}/agent/install/${code}`) })
+    return { install, until, url: `${plan.base}/agent/install/${code}` }
+  }
+
+  app.post('/api/v1/agents/:backend', async (c) => {
+    const { agents, user } = await agentsOf(c)
+    const plan = planOf(c, agents, await body(c))
+    const { install, until, url } = await issue(agents, plan)
+    deps.store.audit(user, agents.backend.name, 'agent', `${plan.host} (${plan.os}${plan.nrpe ? ', nrpe' : ''})`)
+    return c.json({ until, command: installCommand(install, url) })
+  })
+
+  // Over SSH: nuthatch logs in to the host and runs the command itself,
+  // with a login given for this run alone and kept nowhere.
+  app.post('/api/v1/agents/:backend/ssh-keys', async (c) => {
+    await agentsOf(c)
+    const sent = await body(c)
+    const port = sent.port === undefined ? 22 : sent.port
+    if (!sshAddress(sent.address) || typeof port !== 'number') throw new Refused('an address, and a port')
+    const keys = await hostKeys(sent.address, port)
+    if (keys.length === 0) throw new Refused(`no SSH server answered at ${sent.address}:${port}`)
+    return c.json({ keys: keys.map(({ type, fingerprint }) => ({ type, fingerprint })) })
+  })
+
+  app.post('/api/v1/agents/:backend/ssh', async (c) => {
+    const { agents, user } = await agentsOf(c)
+    const sent = await body(c)
+    const plan = planOf(c, agents, sent)
+    const login = (typeof sent.ssh === 'object' && sent.ssh !== null ? sent.ssh : {}) as Record<string, unknown>
+    const port = login.port === undefined ? 22 : login.port
+    const text = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined)
+    if (!sshAddress(login.address) || typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) throw new Refused('an SSH address and port')
+    if (!sshUser(login.user)) throw new Refused('an SSH user')
+    const password = text(login.password)
+    const key = text(login.key)
+    if (!password === !key) throw new Refused('a password or a key')
+    const seenKeys = (await hostKeys(login.address, port)).filter((k) => k.fingerprint === login.fingerprint)
+    if (seenKeys.length === 0) throw new Refused("the host's key is not the one shown: look again")
+    const { install, url } = await issue(agents, plan)
+    const sudo = text(login.sudo_password) ?? password ?? ''
+    const id = randomBytes(12).toString('base64url')
+    const job: Job = { owner: user, output: '', done: false, ok: false, at: Date.now() }
+    for (const [old, held] of jobs) if (Date.now() - held.at > 3600_000) jobs.delete(old)
+    jobs.set(id, job)
+    const where = `${login.user}@${login.address}:${port}`
+    deps.store.audit(user, agents.backend.name, 'agent over ssh', `${plan.host} (${plan.os}${plan.nrpe ? ', nrpe' : ''}) as ${where}`)
+    void runOver(
+      { address: login.address, port, user: login.user, password, key, passphrase: text(login.passphrase) },
+      seenKeys,
+      sshCommand(install, url, login.user),
+      plan.os === 'linux' && login.user !== 'root' ? `${sudo}\n` : '',
+      (more) => {
+        job.output = (job.output + more).slice(-65536)
+      },
+    )
+      .then((code) => {
+        job.ok = code === 0
+        if (/Host key verification failed/.test(job.output)) job.output = "The host's key is not the one shown."
+        else if (code === 255 && /kex_exchange_identification|Connection reset by/.test(job.output)) job.output += '\nThe SSH server refused the connection. After a wrong login it may refuse for a while: try again in a minute.'
+        else if (code !== 0) job.output += `\n(exit ${code})`
+      })
+      .catch((err: unknown) => {
+        job.output += `\n${err instanceof Error ? err.message : String(err)}`
+      })
+      .finally(() => {
+        job.done = true
+        deps.store.audit(user, agents.backend.name, job.ok ? 'agent over ssh done' : 'agent over ssh failed', `${plan.host} as ${where}`)
+      })
+    return c.json({ job: id })
+  })
+
+  app.get('/api/v1/agents/jobs/:id', async (c) => {
+    const { user } = c.get('identity')
+    const job = jobs.get(c.req.param('id'))
+    if (!job || job.owner !== user) return c.json({ error: 'no such job' }, 404)
+    return c.json({ done: job.done, ok: job.ok, output: job.output })
   })
 
   app.delete('/api/v1/agents/:backend/:host', async (c) => {

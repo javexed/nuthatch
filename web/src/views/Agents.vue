@@ -2,7 +2,7 @@
 // checkd-agent on monitored hosts: the command that installs one, and
 // the agents there are.
 import type { AgentInstall, AgentRow } from '@nuthatch/api'
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { api, useSession } from '../stores/session'
 
 const session = useSession()
@@ -10,6 +10,8 @@ const backends = computed(() => session.session?.agent_backends ?? [])
 const backend = ref(backends.value[0] ?? '')
 const agents = ref<AgentRow[] | null>(null)
 const hosts = ref<string[]>([])
+/** Each host's address, for SSH. */
+const hostAddress = ref(new Map<string, string>())
 const error = ref('')
 
 const addresses = ref<string[]>([])
@@ -28,12 +30,13 @@ async function load() {
   try {
     const [list, found] = await Promise.all([
       api.agents(backend.value),
-      api.query({ table: 'hosts', columns: ['name'], sort: [{ column: 'name' }], backends: [backend.value] }),
+      api.query({ table: 'hosts', columns: ['name', 'address'], sort: [{ column: 'name' }], backends: [backend.value] }),
     ])
     agents.value = list.agents
     addresses.value = list.addresses ?? []
     if (!addresses.value.includes(address.value)) address.value = addresses.value[0] ?? ''
     hosts.value = found.rows.map((r) => String(r.name)).filter((name) => /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name))
+    hostAddress.value = new Map(found.rows.map((r) => [String(r.name), String(r.address ?? '')]))
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
@@ -50,6 +53,76 @@ async function make() {
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
+    busy.value = false
+  }
+}
+
+// Over SSH: nuthatch logs in and installs. The login is sent once and
+// kept nowhere; the fields are emptied as soon as it is sent.
+const how = ref<'command' | 'ssh'>('command')
+const ssh = ref({ address: '', port: 22, user: '', login: 'password' as 'password' | 'key', password: '', key: '', passphrase: '', sudo: '' })
+const hostKey = ref<{ type: string; fingerprint: string } | null>(null)
+const job = ref<{ id: string; done: boolean; ok: boolean; output: string } | null>(null)
+watch(host, (name) => {
+  ssh.value.address = hostAddress.value.get(name) ?? ''
+  hostKey.value = null
+})
+watch(() => [ssh.value.address, ssh.value.port], () => (hostKey.value = null))
+
+async function lookUp() {
+  error.value = ''
+  hostKey.value = null
+  try {
+    const { keys } = await api.sshKeys(backend.value, ssh.value.address.trim(), Number(ssh.value.port))
+    // The key ssh will use: Ed25519 when there is one.
+    hostKey.value = keys.find((k) => k.type === 'ssh-ed25519') ?? keys[0] ?? null
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+let following: ReturnType<typeof setInterval> | undefined
+onUnmounted(() => clearInterval(following))
+async function installOverSsh() {
+  if (!hostKey.value) return
+  busy.value = true
+  error.value = ''
+  job.value = null
+  clearInterval(following)
+  const s = ssh.value
+  const login = {
+    address: s.address.trim(),
+    port: Number(s.port),
+    user: s.user.trim(),
+    fingerprint: hostKey.value.fingerprint,
+    ...(s.login === 'password' ? { password: s.password } : { key: s.key, ...(s.passphrase ? { passphrase: s.passphrase } : {}) }),
+    ...(s.sudo ? { sudo_password: s.sudo } : {}),
+  }
+  s.password = ''
+  s.key = ''
+  s.passphrase = ''
+  s.sudo = ''
+  try {
+    const { job: id } = await api.installAgentOverSsh(backend.value, { host: host.value, os: os.value, nrpe: nrpe.value, plugins: plugins.value, address: address.value || undefined }, login)
+    job.value = { id, done: false, ok: false, output: '' }
+    clearInterval(following)
+    following = setInterval(async () => {
+      if (!job.value) return
+      try {
+        const now = await api.agentJob(job.value.id)
+        job.value = { id: job.value.id, ...now }
+        if (now.done) {
+          clearInterval(following)
+          busy.value = false
+          await load()
+        }
+      } catch {
+        // The next look.
+      }
+    }, 1000)
+    await load()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
     busy.value = false
   }
 }
@@ -108,10 +181,42 @@ const until = computed(() => (made.value ? new Date(made.value.until).toLocaleTi
     </label>
     <label><input v-model="plugins" type="checkbox" /> Plugins only</label>
     <label v-if="os === 'linux'"><input v-model="nrpe" type="checkbox" /> NRPE</label>
-    <button type="submit" :disabled="busy || !host">Make command</button>
+    <fieldset class="field">
+      <legend>Install</legend>
+      <label><input v-model="how" type="radio" value="command" /> Command</label>
+      <label><input v-model="how" type="radio" value="ssh" /> Over SSH</label>
+    </fieldset>
+    <button v-if="how === 'command'" type="submit" :disabled="busy || !host">Make command</button>
   </form>
 
-  <section v-if="made" class="card" aria-label="Install command">
+  <form v-if="how === 'ssh'" class="card agent-form" aria-label="Over SSH" @submit.prevent="installOverSsh">
+    <label class="field">SSH address <input v-model="ssh.address" name="ssh-address" required autocapitalize="none" /></label>
+    <label class="field">Port <input v-model.number="ssh.port" name="ssh-port" type="number" min="1" max="65535" class="port" /></label>
+    <label class="field">User <input v-model="ssh.user" name="ssh-user" required autocapitalize="none" autocomplete="off" /></label>
+    <fieldset class="field">
+      <legend>Login</legend>
+      <label><input v-model="ssh.login" type="radio" value="password" /> Password</label>
+      <label><input v-model="ssh.login" type="radio" value="key" /> Key</label>
+    </fieldset>
+    <label v-if="ssh.login === 'password'" class="field">Password <input v-model="ssh.password" name="ssh-password" type="password" required autocomplete="off" /></label>
+    <template v-else>
+      <label class="field wide">Private key <textarea v-model="ssh.key" name="ssh-key" required rows="4" spellcheck="false" autocomplete="off"></textarea></label>
+      <label class="field">Passphrase <input v-model="ssh.passphrase" name="ssh-passphrase" type="password" autocomplete="off" /></label>
+    </template>
+    <label v-if="os === 'linux' && ssh.user !== 'root' && ssh.login === 'key'" class="field">sudo password <input v-model="ssh.sudo" name="ssh-sudo" type="password" autocomplete="off" /></label>
+    <button v-if="!hostKey" type="button" :disabled="!host || !ssh.address" @click="lookUp">Look up host key</button>
+    <template v-else>
+      <p class="by host-key">{{ hostKey.type }} {{ hostKey.fingerprint }}</p>
+      <button type="submit" :disabled="busy">Install</button>
+    </template>
+  </form>
+
+  <section v-if="job && how === 'ssh'" class="card" aria-label="Install over SSH">
+    <p role="status">{{ !job.done ? 'Installing…' : job.ok ? 'Done' : 'Failed' }}</p>
+    <pre class="call"><code>{{ job.output }}</code></pre>
+  </section>
+
+  <section v-if="made && how === 'command'" class="card" aria-label="Install command">
     <pre class="call"><code>{{ made.command }}</code></pre>
     <p class="by">{{ os === 'linux' ? 'As root' : 'Windows PowerShell as Administrator' }} · until {{ until }} · once</p>
     <button type="button" class="quiet" @click="copy(made.command)">{{ copied ? 'Copied' : 'Copy' }}</button>
@@ -141,6 +246,19 @@ const until = computed(() => (made.value ? new Date(made.value.until).toLocaleTi
 }
 .call {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-form .wide {
+  flex-basis: 100%;
+}
+.agent-form textarea {
+  width: 100%;
+  font-family: monospace;
+}
+.port {
+  width: 6rem;
+}
+.host-key {
   overflow-wrap: anywhere;
 }
 fieldset.field {

@@ -31,6 +31,32 @@ the agent connects, its token becomes the host's, checkd reloads, and the
 host's service checks go to it; an agent it had before is shut out. A
 command never run is taken back after an hour.
 
+### Over SSH
+
+**Over SSH** has nuthatch log in to the host and run the command itself.
+Give the SSH address (the host's address to start with), port and user,
+and a password or a private key (with its passphrase, if it has one);
+**Look up host key** shows the key the host's SSH server offers, and
+**Install** goes ahead only with that key. The output follows on the page.
+
+- On Linux the user is root, or one sudo lets run commands; sudo is given
+  the password (or, with a key, the sudo password). On Windows the user is
+  an administrator and the SSH server is Windows' OpenSSH; Windows
+  PowerShell runs the command.
+- The login is sent once, for that run, and kept nowhere: not in the
+  store, the audit log, a file or the browser. ssh gets a password through
+  `SSH_ASKPASS` from its own environment, and a key through an ssh-agent
+  of that run alone, given the key on a pipe; the agent ends with the run.
+  The page empties the fields when it sends them.
+- nuthatch uses the OpenSSH client of its machine (`ssh`, `ssh-keyscan`,
+  `ssh-agent`, `ssh-add`), never its own keys or agent, nor its user's
+  `~/.ssh/config`.
+- The host must still reach nuthatch and the engine, as with a command.
+- After a wrong login, OpenSSH servers may refuse the address for a while
+  (`PerSourcePenalties`); the page says so.
+- The audit log has who installed which host, as which SSH user, and
+  whether it worked.
+
 On Linux the script downloads the agent for the machine (x86_64 or
 aarch64), checks it against `SHA256SUMS`, puts the token and the engine's
 CA in `/etc/checkd-agent`, makes the user `checkd-agent`, and starts the

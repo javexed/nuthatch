@@ -72,13 +72,16 @@ export function pinOf(pem: string): Pin {
   }
 }
 
+/** The curl that fetches a Linux host's script. */
+function fetchScript(pin: Pin | undefined, url: string): string {
+  const tls = url.startsWith('https://') ? ` --proto '=https'${pin ? ` -k --pinnedpubkey 'sha256//${pin.key}'` : ''}` : ''
+  return `curl -fsSL${tls} '${url}'`
+}
+
 /** The command a host runs, as root or Administrator. */
 export function installCommand(install: Pick<Install, 'os' | 'pin'>, url: string): string {
   const { os, pin } = install
-  if (os === 'linux') {
-    const tls = url.startsWith('https://') ? ` --proto '=https'${pin ? ` -k --pinnedpubkey 'sha256//${pin.key}'` : ''}` : ''
-    return `curl -fsSL${tls} '${url}' | sudo sh`
-  }
+  if (os === 'linux') return `${fetchScript(pin, url)} | sudo sh`
   // Windows PowerShell 5.1 may offer only TLS 1.0 unless told.
   const tls12 = "[Net.ServicePointManager]::SecurityProtocol='Tls12';"
   if (!pin) return `${url.startsWith('https://') ? tls12 : ''}irm '${url}' | iex`
@@ -253,6 +256,19 @@ const sh = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
 // PowerShell ends a quoted string at any of these quotes, not only '.
 const ps = (text: string) => `'${text.replace(/['\u2018\u2019\u201a\u201b]/g, (q) => q + q)}'`
 const engineHost = (engine: string) => engine.replace(/^\[([^\]]+)\](:\d+)?$/, '$1').replace(/:\d+$/, '')
+
+/** The same, run over SSH as `user`: on Linux through sudo, its password
+ * (if it asks) the first line of standard input, which nothing else reads;
+ * on Windows by Windows PowerShell, the command encoded so that the shell
+ * of the SSH server leaves it alone. */
+export function sshCommand(install: Pick<Install, 'os' | 'pin'>, url: string, user: string): string {
+  if (install.os === 'linux') {
+    const both = `${fetchScript(install.pin, url)} | sh`
+    return user === 'root' ? `sh -c ${sh(both)}` : `sudo -S -p '' sh -c ${sh(both)}`
+  }
+  const encoded = Buffer.from(installCommand(install, url), 'utf16le').toString('base64')
+  return `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`
+}
 
 /** The install script for Linux: run as root, `curl ... | sudo sh`. */
 export function linuxScript({ install, settings, ca, sums }: ScriptFacts): string {

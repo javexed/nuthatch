@@ -363,6 +363,20 @@ export interface AgentRow {
   waiting?: boolean
 }
 
+/** A login for one install over SSH: sent once, kept nowhere. */
+export interface SshLogin {
+  address: string
+  port: number
+  user: string
+  password?: string
+  key?: string
+  passphrase?: string
+  /** For sudo, when it is not the password. */
+  sudo_password?: string
+  /** The host key the user was shown. */
+  fingerprint: string
+}
+
 export interface AgentInstall {
   /** When the code in the command stops working, ms since 1970. */
   until: number

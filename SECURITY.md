@@ -42,7 +42,10 @@ maintainer and no promised time to answer. Only the newest commit of
   too. Each fetch is in the audit log. Commands are made only for an
   `https` address of nuthatch. `[agents] listen` opens a second listener
   that answers only those two paths; its commands check its certificate
-  by pin. See [docs/agents.md](docs/agents.md).
+  by pin. **Over SSH**, nuthatch logs in to a host with a password or
+  key given for that run and kept nowhere (not stored, logged or written
+  to a file), and only to the host key the user was shown. See
+  [docs/agents.md](docs/agents.md).
 
 ## Logging in
 
