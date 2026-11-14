@@ -33,3 +33,15 @@ Much of the code is written by Claude, which may have seen Thruk, Naemon or
 Nagios source in its training data. The rule above still applies to how
 the work is done. Whether that supports a clean-room claim is a legal
 question that has not been checked.
+
+## Before the first commit
+
+    scripts/install-hooks.sh
+
+turns on the hooks of `.githooks`: before a commit and before a push,
+`scripts/leak-scan.sh` looks at what is new for things that look like
+secrets and for private addresses that are not plainly made up
+(documentation addresses such as 192.0.2.1 are fine). The same check runs
+on every pull request. A line that must show such a thing, as a test
+fixture, says so with the marker `leak-scan-allow`.
+

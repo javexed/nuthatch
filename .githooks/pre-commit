@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Leak gate on what is staged, before the commit exists. Quick and local;
+# `--no-verify` passes it by, and the pre-push hook and CI are behind it.
+# Where the private list of names is comes from scripts/leak-scan.sh alone.
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+exec bash "$ROOT/scripts/leak-scan.sh" --staged

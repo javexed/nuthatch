@@ -1,0 +1,40 @@
+# The leak gate, where it cannot be passed by: secrets, private addresses
+# and, on runs that may read the secret LEAK_PATTERNS, the maintainer's
+# private list of names. A fork's pull request cannot read secrets, and
+# gets the general checks, which is right: nobody leaks names they do not
+# know. See scripts/leak-scan.sh.
+name: leak gate
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  leak-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The gate's own test (a guard only ever seen to pass is no guard)
+        run: bash scripts/leak-scan.sh --selftest
+      - name: The range this adds to main
+        id: r
+        run: |
+          if git rev-parse --verify -q origin/main >/dev/null; then
+            mb=$(git merge-base origin/main HEAD 2>/dev/null || true)
+            [ -n "$mb" ] && [ "$mb" != "$(git rev-parse HEAD)" ] && echo "range=${mb}..HEAD" >> "$GITHUB_OUTPUT" || echo "range=" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: The commits this adds (added lines and messages)
+        if: steps.r.outputs.range != ''
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+          LEAK_REQUIRE_OPERATOR_TIER: ${{ github.event.pull_request.head.repo.fork && '0' || (secrets.LEAK_PATTERNS != '' && '1' || '0') }}
+        run: bash scripts/leak-scan.sh --range "${{ steps.r.outputs.range }}"
+      - name: The whole tree
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: bash scripts/leak-scan.sh --tree .

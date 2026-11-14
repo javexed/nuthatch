@@ -1,27 +1,67 @@
+<img src="docs/logo.svg" alt="nuthatch logo" width="128" align="right">
+
 # nuthatch
 
-A web interface for monitoring engines of the Nagios family: it shows the
-state of hosts and services and lets people act on them. It talks
-Livestatus, so it works with [Naemon](https://www.naemon.io/) and with
-checkd, the engine it is written beside. It aims to do what Thruk does,
-written anew.
+A web interface for monitoring engines of the Nagios family. It shows
+the state of hosts and services, and lets people act on them: check now,
+acknowledge, schedule a downtime, comment. It talks Livestatus, so it
+works with [Naemon](https://www.naemon.io/) and with checkd, the engine
+it is written beside. It covers the ground Thruk covers, written anew,
+and is made to be used on a phone as much as at a desk.
 
-**Status: the six phases of the plan below are done.** People can log in and see what is
-theirs to see: an overview, problems, hosts and services with filters,
-sorting and pages, host and service groups, and a page for each host and
-service. From there they can check now, acknowledge, schedule downtimes,
-comment, and turn notifications and checks off and on, for one object or
-for several ticked in a list. There is the history of alerts and
-notifications, and availability over a span of time, with a CSV file.
-Those with the role for it add, change and take out hosts and services,
-which the engine checks before anything is written. There are
-dashboards, one's own or shared. One nuthatch can show the engines of
-several sites, each through the nuthatch at its site. The interface also
-builds as an app that logs in at a server for a token; wrapped for
-Android it is built and tried in an emulator, not on a real phone, and
-there is no iOS build ([mobile/README.md](mobile/README.md)).
+## Status: young, and honest about it
 
-It has been run on a demo site with invented hosts only, on one machine.
+- **One installation.** nuthatch runs one small site, its author's, and
+  a demo site with invented hosts. It has not been run with many users
+  or on a large site.
+- **Tested on both engines.** Every kind of user against every table and
+  command, and the pages in a browser at desk and phone width, on Naemon
+  Core 1.5.2 and on checkd (below). Nagios Core itself has not been
+  tried: it needs a Livestatus module of its own.
+- **Much of the code was written by an AI model** (Claude), directed and
+  reviewed by one person: see [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Version 0.0.0**, not packaged, no releases. The config file's keys
+  may change.
+- The phone app is built for Android and tried in an emulator and on one
+  phone; there is no iOS build. Installed from the browser, as a PWA, it
+  works on both.
+
+## What it does
+
+- **See:** an overview, the problems, hosts and services with filters,
+  sorting and pages, groups, and a page for each host and service with
+  its numbers drawn over time. A page shows a change when the engine has
+  it, without being reloaded.
+- **Act:** check now, acknowledge, schedule downtimes (for one, for
+  several ticked in a list, or for everything that fits a pattern),
+  comment, turn notifications and checks off and on.
+- **Look back:** the history of alerts and notifications, and
+  availability over a span of time, with a CSV file.
+- **Change the config:** those with the role for it add, change and take
+  out hosts and services, by looking at a host first and choosing among
+  what answers there; the engine checks every change before it is
+  written ([docs/config.md](docs/config.md)).
+- **Each to their own:** people see and may act on what their contact
+  sees, as in Thruk, with roles for more
+  ([docs/permissions.md](docs/permissions.md)); dashboards of one's own
+  or shared ([docs/dashboards.md](docs/dashboards.md)).
+- **Several sites** in one interface, each through the nuthatch at its
+  site ([docs/sites.md](docs/sites.md)).
+- **On a phone:** installable from the browser, with notifications
+  pushed to it ([docs/notifications.md](docs/notifications.md)).
+
+With checkd as the engine there is more in the config form: services a
+job elsewhere tells its result, services that stand for others, and
+downtimes that come round. Naemon has none of those.
+
+## What it is trusted with
+
+nuthatch sends the engine external commands for the people logged in,
+and for one role writes the engine's config, which is as much as running
+programs as the engine's user. It keeps sessions, API tokens and an audit
+log in a file of its own, and nothing about what is monitored. See
+[SECURITY.md](SECURITY.md) for who may do what, what leaves the machine,
+and how to report a problem.
 
 ## How it fits together
 
@@ -46,8 +86,11 @@ Everything is TypeScript, in one pnpm workspace:
 
 ## Try it
 
+Node 22 or later, pnpm, and Docker for the demo site on Naemon.
+
     dev/up naemon            # in one terminal: the demo site on Naemon, in a container
-    dev/up checkd            # in another: the same on checkd (built from ../checkd)
+    dev/up checkd            # in another: the same on checkd (built from a checkout
+                             # of checkd beside this one, or $CHECKD)
     dev/users                # users admin, ops, viewer, nobody, stranger; password nuthatch-dev
     pnpm install && pnpm build
     pnpm start dev/nuthatch.toml
@@ -193,22 +236,13 @@ Node runs the TypeScript as it is; nothing is compiled to install it.
 
 The last two need `dev/up naemon` and `dev/up checkd` running.
 
-## Plan
-
-0. Foundations and permissions (done)
-1. Status views and actions (done)
-2. History and availability (done)
-3. Adding and changing hosts and services (done)
-4. Dashboards (done)
-5. One interface over several sites (done)
-6. Phone app (done for Android, in an emulator; no iOS build)
-
-Each phase ends with a test that must pass on both engines.
-
 ## Licence
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
 
-This is a clean-room project: nothing is taken from Thruk's source. See
-[CONTRIBUTING.md](CONTRIBUTING.md) before changing anything.
+This is a clean-room project: nothing is taken from Thruk's source, which
+is GPL. See [CONTRIBUTING.md](CONTRIBUTING.md) before changing anything.
+
+Nagios is a trademark of Nagios Enterprises; Naemon and Thruk are their
+projects' names. nuthatch is not affiliated with any of them.
