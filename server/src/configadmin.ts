@@ -20,7 +20,7 @@ import type { ConfigChange, ConfigResult, ConfigState, ManagedHost, ManagedServi
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
 import { randomBytes } from 'node:crypto'
-import { AGGREGATE_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, PUSHED_COMMAND, catalogueFile } from './catalogue.ts'
+import { AGGREGATE_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, PUSHED_COMMAND, catalogueFile, catalogueFor } from './catalogue.ts'
 import { Refused } from './policy.ts'
 import { now } from './store.ts'
 
@@ -53,8 +53,8 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
 const DESCRIPTION = /^[A-Za-z0-9][A-Za-z0-9 _.:/+-]{0,62}$/
 const ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:_-]{0,254}$/
 const MEMBER = /^[A-Za-z0-9][A-Za-z0-9 _.@-]{0,62}$/
-const HOST_KEYS = ['host_name', 'use', 'alias', 'address', 'check_command', 'hostgroups', 'contacts', 'contact_groups', 'notes', '_DOWNTIME_PERIOD']
-const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes', '_DOWNTIME_PERIOD']
+const HOST_KEYS = ['host_name', 'use', 'alias', 'address', 'check_command', 'hostgroups', 'contacts', 'contact_groups', 'notes', '_CHECKD_DOWNTIME_PERIOD']
+const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes', '_CHECKD_DOWNTIME_PERIOD']
 const TOKEN = /^[A-Za-z0-9_-]{16,64}$/
 /** A host, a pattern or `@group`; or the same, `/`, and a service or a pattern for one. */
 const AGGREGATE_MEMBER = /^[A-Za-z0-9@*?][A-Za-z0-9._*?@-]{0,62}(\/[A-Za-z0-9*?][A-Za-z0-9 _.:+*?-]{0,62})?$/
@@ -208,7 +208,7 @@ export function hostFile(host: ManagedHost): string {
   put(attrs, 'contacts', host.contacts)
   put(attrs, 'contact_groups', host.contact_groups)
   put(attrs, 'notes', host.notes)
-  put(attrs, '_DOWNTIME_PERIOD', host.downtime_period)
+  put(attrs, '_CHECKD_DOWNTIME_PERIOD', host.downtime_period)
   definitions.push({ type: 'host', attrs })
   for (const service of host.services) {
     const attrs: [string, string][] = [['host_name', host.name], ['service_description', service.description], ['use', service.use]]
@@ -217,11 +217,15 @@ export function hostFile(host: ManagedHost): string {
     put(attrs, 'contacts', service.contacts)
     put(attrs, 'contact_groups', service.contact_groups)
     put(attrs, 'notes', service.notes)
-    put(attrs, '_DOWNTIME_PERIOD', service.downtime_period)
+    put(attrs, '_CHECKD_DOWNTIME_PERIOD', service.downtime_period)
     if (service.push) {
       // Told its result, never checked.
-      attrs.push(['active_checks_enabled', '0'], ['_PUSH_TOKEN', service.push.token])
-      if (service.push.every !== undefined) attrs.push(['_PUSH_EVERY', String(service.push.every)])
+      // Told its result, never checked but when freshness finds nothing
+      // came in time (checkd and Naemon alike), which the command answers
+      // CRITICAL.
+      attrs.push(['active_checks_enabled', '0'])
+      if (service.push.every !== undefined) attrs.push(['check_freshness', '1'], ['freshness_threshold', String(service.push.every)])
+      attrs.push(['_CHECKD_PUSH_TOKEN', service.push.token])
     }
     // Worked out by the engine, which costs nothing: every minute.
     if (service.aggregate) attrs.push(['check_interval', '1'])
@@ -248,12 +252,12 @@ export function readHostFile(content: string): ManagedHost {
     if (d.type !== 'service') throw new Error(`it defines a ${d.type}`)
     if (attr(d, 'host_name') !== name) throw new Error('it has a service of another host')
     const command = attr(d, 'check_command')
-    const token = attr(d, '_PUSH_TOKEN')
-    const every = attr(d, '_PUSH_EVERY')
+    const token = attr(d, '_CHECKD_PUSH_TOKEN')
+    const every = attr(d, 'check_freshness') === '1' ? attr(d, 'freshness_threshold') : undefined
     const aggregate = command?.startsWith(`${AGGREGATE_COMMAND}!`) ? aggregateOf(command.slice(AGGREGATE_COMMAND.length + 1)) : undefined
     const push = token !== undefined && command === PUSHED_COMMAND ? { token, ...(every !== undefined ? { every: Number(every) } : {}) } : undefined
     // The further settings are nuthatch's only on a service of those two kinds, as it writes them.
-    const extra = push ? ['_PUSH_TOKEN', '_PUSH_EVERY', 'active_checks_enabled'] : aggregate ? ['check_interval'] : []
+    const extra = push ? ['_CHECKD_PUSH_TOKEN', 'check_freshness', 'freshness_threshold', 'active_checks_enabled'] : aggregate ? ['check_interval'] : []
     if (strange(d, [...SERVICE_KEYS, ...extra]) !== undefined) {
       throw new Error(`a service has '${strange(d, [...SERVICE_KEYS, ...extra])}', which nuthatch does not edit`)
     }
@@ -268,7 +272,7 @@ export function readHostFile(content: string): ManagedHost {
       contacts: list(attr(d, 'contacts')),
       contact_groups: list(attr(d, 'contact_groups')),
       notes: attr(d, 'notes'),
-      downtime_period: attr(d, '_DOWNTIME_PERIOD'),
+      downtime_period: attr(d, '_CHECKD_DOWNTIME_PERIOD'),
     })
   }
   return {
@@ -281,7 +285,7 @@ export function readHostFile(content: string): ManagedHost {
     contacts: list(attr(first, 'contacts')),
     contact_groups: list(attr(first, 'contact_groups')),
     notes: attr(first, 'notes'),
-    downtime_period: attr(first, '_DOWNTIME_PERIOD'),
+    downtime_period: attr(first, '_CHECKD_DOWNTIME_PERIOD'),
     services,
   }
 }
@@ -354,10 +358,10 @@ export class ConfigAdmin {
       hosts: hosts.sort((a, b) => a.name.localeCompare(b.name)),
       unreadable,
       templates: { host: templates(main.files, 'host'), service: templates(main.files, 'service') },
-      catalogue: CATALOGUE_NAMES,
+      catalogue: catalogueFor(extras),
       extras,
       // nuthatch's own commands may be chosen too: written when needed.
-      choices: { commands: [...new Set([...(commands ?? []), ...CATALOGUE_NAMES])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [], timeperiods: timeperiods ?? [] },
+      choices: { commands: [...new Set([...(commands ?? []), ...catalogueFor(extras)])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [], timeperiods: timeperiods ?? [] },
     }
   }
 
@@ -411,7 +415,7 @@ export class ConfigAdmin {
       // nuthatch's own commands, when the host uses one: written, or
       // written anew when this version of nuthatch has them otherwise.
       const used = [host.check_command, ...host.services.map((s) => s.check_command)].map((line) => line?.split('!')[0])
-      const catalogue = catalogueFile(this.settings.plugins ?? '$USER1$')
+      const catalogue = catalogueFile(this.settings.plugins ?? '$USER1$', state.extras === true)
       const current = this.files().get(CATALOGUE_FILE)
       if (used.some((name) => name !== undefined && CATALOGUE_NAMES.includes(name)) && current !== catalogue) writes.set(CATALOGUE_FILE, catalogue)
     } else if (change.kind === 'delete' && typeof change.name === 'string' && state.hosts.some((h) => h.name === change.name)) {

@@ -568,9 +568,20 @@ export function buildApp(deps: Deps): Hono<Env> {
     )
     const [names, values, last] = (found[0] ?? []) as [unknown, unknown, unknown]
     const variable = (name: string) => (Array.isArray(names) && Array.isArray(values) ? values[names.indexOf(name)] : undefined)
-    const token = names instanceof Array && names.includes('PUSH_TOKEN') ? String(variable('PUSH_TOKEN')) : undefined
+    const token = names instanceof Array && names.includes('CHECKD_PUSH_TOKEN') ? String(variable('CHECKD_PUSH_TOKEN')) : undefined
     if (token === undefined) return c.json({ takes: false })
-    const every = Number(variable('PUSH_EVERY'))
+    // Within how long a push is expected is the service's freshness
+    // threshold, which Livestatus does not give: known for a service
+    // nuthatch keeps.
+    let every = 0
+    const admin = deps.config?.get(backend.name)
+    if (admin) {
+      try {
+        every = (await admin.state()).hosts.find((h) => h.name === host)?.services.find((s) => s.description === service)?.push?.every ?? 0
+      } catch {
+        // Then it is not said.
+      }
+    }
     const base = deps.pushUrls?.get(backend.name)
     return c.json({
       takes: true,
@@ -749,7 +760,7 @@ export function buildApp(deps: Deps): Hono<Env> {
   })
 
   // Notifications pushed to this user's browsers.
-  app.get('/api/v1/push', (c) => {
+  app.get('/api/v1/notifications', (c) => {
     const { user } = c.get('identity')
     if (!deps.pusher) return c.json({ enabled: false, devices: [] })
     return c.json({
@@ -759,9 +770,9 @@ export function buildApp(deps: Deps): Hono<Env> {
     })
   })
 
-  app.post('/api/v1/push', async (c) => {
+  app.post('/api/v1/notifications', async (c) => {
     const { user } = c.get('identity')
-    if (!deps.pusher) throw new Refused('notifications are not set up on this server ([push] in its config)')
+    if (!deps.pusher) throw new Refused('notifications are not set up on this server ([notifications] in its config)')
     const sent = await body(c)
     let subscription
     try {
@@ -779,14 +790,14 @@ export function buildApp(deps: Deps): Hono<Env> {
     return c.json({})
   })
 
-  app.post('/api/v1/push/remove', async (c) => {
+  app.post('/api/v1/notifications/remove', async (c) => {
     const { user } = c.get('identity')
     const { endpoint } = await body(c)
     if (typeof endpoint !== 'string' || !deps.store.removePush(endpoint, user)) throw new Refused('no such subscription')
     return c.json({})
   })
 
-  app.post('/api/v1/push/test', async (c) => {
+  app.post('/api/v1/notifications/test', async (c) => {
     const { user } = c.get('identity')
     if (!deps.pusher) throw new Refused('notifications are not set up on this server')
     const counts = await deps.pusher.toUser(user, { title: 'nuthatch', body: 'Notifications reach this device.', url: '', tag: 'nuthatch-test' }, false)

@@ -23,14 +23,21 @@ const COMMANDS: [string, string][] = [
   ['nuthatch_smtp', '{plugins}/check_smtp -H $HOSTADDRESS$ -p $ARG1$'],
   ['nuthatch_imap', '{plugins}/check_imap -H $HOSTADDRESS$ -p $ARG1$'],
   ['nuthatch_imaps', '{plugins}/check_imap -H $HOSTADDRESS$ -p $ARG1$ -S'],
-  // checkd only. A service that stands for others; and the command of a
-  // service that takes pushes, which every service must have and this
-  // one never runs.
+  // checkd only. A service that stands for others; and the check of a
+  // service that takes pushes, run when freshness finds nothing came.
   [AGGREGATE_COMMAND, 'checkd:aggregate $ARG1$'],
-  [PUSHED_COMMAND, 'checkd:aggregate --never-run'],
+  [PUSHED_COMMAND, 'checkd:dummy 2 "nothing was pushed in time"'],
 ]
 
+/** nuthatch's commands that only checkd can run. */
+export const CHECKD_ONLY = [AGGREGATE_COMMAND, PUSHED_COMMAND]
+
 export const CATALOGUE_NAMES = COMMANDS.map(([name]) => name)
+
+/** The catalogue's commands an engine can run: checkd's only for checkd. */
+export function catalogueFor(checkd: boolean): string[] {
+  return CATALOGUE_NAMES.filter((name) => checkd || !CHECKD_ONLY.includes(name))
+}
 
 /** The plugins' directory as a config may give it: `$USER1$`-like, or an absolute path. */
 export function pluginsDir(value: unknown): string {
@@ -41,8 +48,8 @@ export function pluginsDir(value: unknown): string {
   return value
 }
 
-export function catalogueFile(plugins: string): string {
-  const definitions: Definition[] = COMMANDS.map(([name, line]) => ({
+export function catalogueFile(plugins: string, checkd = true): string {
+  const definitions: Definition[] = COMMANDS.filter(([name]) => checkd || !CHECKD_ONLY.includes(name)).map(([name, line]) => ({
     type: 'command',
     attrs: [
       ['command_name', name],

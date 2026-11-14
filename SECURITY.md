@@ -80,7 +80,7 @@ maintainer and no promised time to answer. Only the newest commit of
 
 ## What leaves the machine
 
-- **Pushed notifications**, with `[push]`: for each notification the
+- **Pushed notifications**, with `[notifications]`: for each notification the
   engine logs for a user, an encrypted message goes to the push service
   of that user's browser (Google, Apple, Mozilla or Microsoft; no other
   address is sent to). The push service sees which browser, when, how

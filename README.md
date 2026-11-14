@@ -216,7 +216,7 @@ here and in the Android app, are made from `docs/logo.svg` by
 - `app_origins`: see [mobile/README.md](mobile/README.md).
 - `[graphs]`: a short history of the checks' numbers, see
   [docs/graphs.md](docs/graphs.md).
-- `[push]`: notifications on phones and desktops, see
+- `[notifications]`: on phones and desktops, see
   [docs/notifications.md](docs/notifications.md).
 
 ## Dependencies

@@ -182,22 +182,22 @@ export class Client {
     return this.call('GET', `/api/v1/graph?${query.toString()}`)
   }
 
-  push(): Promise<PushState> {
-    return this.call('GET', '/api/v1/push')
+  notifications(): Promise<PushState> {
+    return this.call('GET', '/api/v1/notifications')
   }
 
   /** Subscribes a browser, as its PushSubscription's toJSON() gives it. */
-  subscribePush(subscription: unknown, name: string): Promise<void> {
-    return this.call('POST', '/api/v1/push', { subscription, name })
+  subscribeNotifications(subscription: unknown, name: string): Promise<void> {
+    return this.call('POST', '/api/v1/notifications', { subscription, name })
   }
 
-  removePush(endpoint: string): Promise<void> {
-    return this.call('POST', '/api/v1/push/remove', { endpoint })
+  removeNotifications(endpoint: string): Promise<void> {
+    return this.call('POST', '/api/v1/notifications/remove', { endpoint })
   }
 
   /** Sends a test notification to all of this user's browsers. */
-  testPush(): Promise<{ sent: number; gone: number; failed: number }> {
-    return this.call('POST', '/api/v1/push/test', {})
+  testNotifications(): Promise<{ sent: number; gone: number; failed: number }> {
+    return this.call('POST', '/api/v1/notifications/test', {})
   }
 
   /** Looks at a host before it is added: its ports, and the checks suggested. */

@@ -428,7 +428,9 @@ describe('a host to write', () => {
     expect(kept?.push).toEqual({ token: 'abcdefghijklmnop' })
     expect(site?.check_command).toBe("nuthatch_aggregate!--min 2 web*/http @web 'db1/disk space'")
     const text = hostFile(checked)
-    expect(text).toContain('_PUSH_EVERY')
+    expect(text).toMatch(/check_freshness\s+1/)
+    expect(text).toMatch(/freshness_threshold\s+90000/)
+    expect(text).toContain('_CHECKD_PUSH_TOKEN')
     expect(text).toMatch(/active_checks_enabled\s+0/)
     expect(readHostFile(text)).toEqual(JSON.parse(JSON.stringify(checked)))
     expect(aggregateOf(aggregateArgs({ members: ['a', 'b/d e'], min: '50%' }))).toEqual({ members: ['a', 'b/d e'], min: '50%' })
@@ -444,14 +446,14 @@ describe('a host to write', () => {
     // A downtime that comes round: a timeperiod the engine has, on checkd only.
     const timed = { ...choices, timeperiods: ['nights'] }
     const round = checkHost({ ...host, downtime_period: 'nights', services: [service({ downtime_period: 'nights' })] }, timed, known)
-    expect(hostFile(round)).toMatch(/_DOWNTIME_PERIOD\s+nights[\s\S]*_DOWNTIME_PERIOD\s+nights/)
+    expect(hostFile(round)).toMatch(/_CHECKD_DOWNTIME_PERIOD\s+nights[\s\S]*_CHECKD_DOWNTIME_PERIOD\s+nights/)
     expect(readHostFile(hostFile(round))).toEqual(JSON.parse(JSON.stringify(round)))
     expect(() => checkHost({ ...host, downtime_period: 'never-heard-of' }, timed, known)).toThrow(/no timeperiod/)
     expect(() => checkHost({ ...host, downtime_period: 'nights' }, timed, known, false)).toThrow(/only checkd/)
     // Only checkd has them.
     expect(bad({ push: { token: '' } }, false)).toThrow(/only checkd/)
     // A file with such settings on a service of another kind is not nuthatch's to edit.
-    expect(() => readHostFile(hostFile(checkHost(host, choices, known)).replace('check_command ', '_PUSH_TOKEN abcdefghijklmnop\n    check_command '))).toThrow(/does not edit/)
+    expect(() => readHostFile(hostFile(checkHost(host, choices, known)).replace('check_command ', '_CHECKD_PUSH_TOKEN abcdefghijklmnop\n    check_command '))).toThrow(/does not edit/)
   })
 
   it('cannot carry a definition of its own, or what the engine has not', () => {
@@ -773,6 +775,11 @@ describe('looking at a host before adding it', () => {
     const defined = parseObjects(text)
     expect(defined.map((d) => d.attrs[0]?.[1])).toEqual(CATALOGUE_NAMES)
     expect(text).toContain('/usr/lib/monitoring-plugins/check_ssh -H $HOSTADDRESS$ -p $ARG1$')
+    // checkd's own commands are not written for Naemon, nor offered there.
+    const forNaemon = parseObjects(catalogueFile('/usr/lib/monitoring-plugins', false)).map((d) => d.attrs[0]?.[1])
+    expect(forNaemon).not.toContain('nuthatch_aggregate')
+    expect(forNaemon).not.toContain('nuthatch_pushed')
+    expect(forNaemon).toContain('nuthatch_ssh')
     expect(pluginsDir(undefined)).toBe('$USER1$')
     for (const bad of ['relative/path', '/x;y', '$USER1$/x', '/usr/lib/plugins/']) expect(() => pluginsDir(bad)).toThrow()
     // No host may take the file's name.
@@ -925,17 +932,17 @@ describe('notifications pushed to browsers', () => {
     const call = (app: ReturnType<typeof make>, method: string, path: string, body?: unknown) => app.request(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
     const { subscription } = browser()
 
-    expect(await (await call(make(false), 'GET', '/api/v1/push')).json()).toEqual({ enabled: false, devices: [] })
-    expect((await call(make(false), 'POST', '/api/v1/push', { subscription })).status).toBe(400)
+    expect(await (await call(make(false), 'GET', '/api/v1/notifications')).json()).toEqual({ enabled: false, devices: [] })
+    expect((await call(make(false), 'POST', '/api/v1/notifications', { subscription })).status).toBe(400)
 
     const app = make(true)
-    expect((await call(app, 'POST', '/api/v1/push', { subscription: { ...subscription, endpoint: 'https://evil.example.test/x' } })).status).toBe(400)
-    expect((await call(app, 'POST', '/api/v1/push', { subscription, name: 'my phone' })).status).toBe(200)
-    const state = (await (await call(app, 'GET', '/api/v1/push')).json()) as { enabled: boolean; key: string; devices: { name: string; endpoint: string }[] }
+    expect((await call(app, 'POST', '/api/v1/notifications', { subscription: { ...subscription, endpoint: 'https://evil.example.test/x' } })).status).toBe(400)
+    expect((await call(app, 'POST', '/api/v1/notifications', { subscription, name: 'my phone' })).status).toBe(200)
+    const state = (await (await call(app, 'GET', '/api/v1/notifications')).json()) as { enabled: boolean; key: string; devices: { name: string; endpoint: string }[] }
     expect(state).toMatchObject({ enabled: true, key: pusher.keys.publicKey, devices: [{ name: 'my phone', endpoint: subscription.endpoint }] })
-    expect(await (await call(app, 'POST', '/api/v1/push/test')).json()).toEqual({ sent: 1, gone: 0, failed: 0 })
+    expect(await (await call(app, 'POST', '/api/v1/notifications/test')).json()).toEqual({ sent: 1, gone: 0, failed: 0 })
     expect(sent).toEqual([subscription.endpoint])
-    expect((await call(app, 'POST', '/api/v1/push/remove', { endpoint: subscription.endpoint })).status).toBe(200)
+    expect((await call(app, 'POST', '/api/v1/notifications/remove', { endpoint: subscription.endpoint })).status).toBe(200)
     expect(store.pushOf('ann')).toHaveLength(0)
   })
 })
@@ -1129,7 +1136,7 @@ describe('how a service takes pushes', () => {
     const backend = fake('site', (request) => {
       if (request.startsWith('GET contactgroups')) return []
       if (request.startsWith('GET services\nColumns: custom_variable_names')) {
-        return request.includes('description = backup') ? [[['OWNER', 'PUSH_TOKEN', 'PUSH_EVERY'], ['ann', 'abcdefghijklmnop', '90000'], 1700000000]] : [[[], [], 0]]
+        return request.includes('description = backup') ? [[['OWNER', 'CHECKD_PUSH_TOKEN'], ['ann', 'abcdefghijklmnop'], 1700000000]] : [[[], [], 0]]
       }
       return []
     })
@@ -1138,9 +1145,9 @@ describe('how a service takes pushes', () => {
     const path = '/api/v1/push-info/site?host=nas&service=backup'
     expect((await app({}).request(path)).status).toBe(403)
     const known = await app({ authorized_for_configuration_information: ['ops'] }, new Map([['site', 'https://checkd.example.test/']])).request(path)
-    expect(await known.json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', url: 'https://checkd.example.test/api/v1/push/abcdefghijklmnop', every: 90000, last: 1700000000 })
+    expect(await known.json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', url: 'https://checkd.example.test/api/v1/push/abcdefghijklmnop', last: 1700000000 })
     const plain = app({ authorized_for_config_edit: ['ops'] })
-    expect(await (await plain.request(path)).json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', every: 90000, last: 1700000000 })
+    expect(await (await plain.request(path)).json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', last: 1700000000 })
     expect(await (await plain.request('/api/v1/push-info/site?host=nas&service=disk')).json()).toEqual({ takes: false })
   })
 })

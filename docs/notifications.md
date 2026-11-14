@@ -30,7 +30,7 @@ subscribed.
 
 In nuthatch's config:
 
-    [push]
+    [notifications]
     subject = "mailto:ops@example.test"
 
 `subject` is whom a push service may reach about this server, as the
@@ -52,7 +52,7 @@ big it is, and the `subject` above, but not the host, the service or the
 output. nuthatch sends only to those four services' addresses; a
 subscription that names another is refused.
 
-The server's key pair is made at the first start with `[push]` and kept
+The server's key pair is made at the first start with `[notifications]` and kept
 in nuthatch's store; browsers subscribe to it. A subscription the push
 service says is gone is forgotten.
 

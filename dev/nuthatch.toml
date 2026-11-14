@@ -11,7 +11,7 @@ htpasswd = "dev/run/htpasswd"
 # admin may do everything. Everyone in the contact group admins sees all
 # hosts and services; viewer, who is in it, may change nothing.
 # Notifications pushed to browsers (docs/notifications.md).
-[push]
+[notifications]
 subject = "mailto:ops@example.test"
 
 # A short history of performance data, for graphs (docs/graphs.md).

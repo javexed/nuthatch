@@ -26,7 +26,7 @@ import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'push', 'graphs', 'roles', 'backend', 'peer', 'app_origins']
+const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'notifications', 'graphs', 'roles', 'backend', 'peer', 'app_origins']
 
 function fail(message: string): never {
   console.error(message)
@@ -191,13 +191,13 @@ function main(): void {
   const webRoot = text(config, 'web_root')
 
   const store = new Store(storePath)
-  // [push]: notifications to browsers, through their push services.
+  // [notifications]: to browsers, through their push services.
   let pusher: Pusher | undefined
-  if (config.push !== undefined) {
-    const { subject, ...rest } = (typeof config.push === 'object' && config.push !== null ? config.push : {}) as Record<string, unknown>
-    if (Object.keys(rest).length > 0) fail(`${path}: [push] has no setting ${Object.keys(rest).join(', ')}`)
+  if (config.notifications !== undefined) {
+    const { subject, ...rest } = (typeof config.notifications === 'object' && config.notifications !== null ? config.notifications : {}) as Record<string, unknown>
+    if (Object.keys(rest).length > 0) fail(`${path}: [notifications] has no setting ${Object.keys(rest).join(', ')}`)
     if (typeof subject !== 'string' || !/^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/.test(subject)) {
-      fail(`${path}: [push] needs subject = "mailto:..." or "https://...": whom a push service may reach about this server`)
+      fail(`${path}: [notifications] needs subject = "mailto:..." or "https://...": whom a push service may reach about this server`)
     }
     pusher = new Pusher(store, subject, backends)
   }

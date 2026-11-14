@@ -168,7 +168,9 @@ timeperiod holds**: the form offers the engine's timeperiods (checkd's
 purpose goes in the engine's own files.
 
 Naemon has none of these, and its form does not offer them. In the files these
-are a service with `_PUSH_TOKEN` and the command `nuthatch_pushed`, and
+are a service with `_CHECKD_PUSH_TOKEN`, `check_freshness` and the command
+`nuthatch_pushed` (which answers CRITICAL when freshness finds nothing
+came in time), and
 one with the command `nuthatch_aggregate`.
 
 ## A downtime for many

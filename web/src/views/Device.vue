@@ -25,7 +25,7 @@ function fail(err: unknown) {
 
 async function load() {
   try {
-    state.value = await api.push()
+    state.value = await api.notifications()
     if (supported) mine.value = (await (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription())?.endpoint ?? null
   } catch (err) {
     fail(err)
@@ -52,7 +52,7 @@ async function turnOn() {
     if (permission !== 'granted') return
     const registration = await navigator.serviceWorker.ready
     const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: state.value.key })
-    await api.subscribePush(subscription.toJSON(), deviceName())
+    await api.subscribeNotifications(subscription.toJSON(), deviceName())
     await load()
     notice.value = 'Notifications are on for this device.'
   } catch (err) {
@@ -68,7 +68,7 @@ async function turnOff(endpoint: string) {
   notice.value = ''
   try {
     if (endpoint === mine.value) await (await (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription())?.unsubscribe()
-    await api.removePush(endpoint)
+    await api.removeNotifications(endpoint)
     await load()
   } catch (err) {
     fail(err)
@@ -81,7 +81,7 @@ async function test() {
   busy.value = true
   error.value = ''
   try {
-    const counts = await api.testPush()
+    const counts = await api.testNotifications()
     notice.value = counts.sent > 0 ? `A test was sent to ${counts.sent} device${counts.sent === 1 ? '' : 's'}.` : 'The test could not be sent.'
     if (counts.gone > 0) await load()
   } catch (err) {
@@ -100,7 +100,7 @@ async function test() {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <template v-if="state">
-      <p v-if="!state.enabled" class="none">Notifications are not set up on this server (<code>[push]</code> in its config).</p>
+      <p v-if="!state.enabled" class="none">Notifications are not set up on this server (<code>[notifications]</code> in its config).</p>
       <template v-else>
         <p>
           What the engine notifies you of, as the contact <strong>{{ session.session?.user }}</strong>, is also sent to the devices listed here: problems,
