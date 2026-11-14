@@ -435,6 +435,13 @@ describe('a host to write', () => {
     expect(bad({ aggregate: { members: ["a'; rm"] } })).toThrow(/not a member/)
     expect(bad({ aggregate: { members: ['a'], min: 'most' } })).toThrow(/number/)
     expect(bad({ push: { token: '' }, aggregate: { members: ['a'] } })).toThrow(/not both/)
+    // A downtime that comes round: a timeperiod the engine has, on checkd only.
+    const timed = { ...choices, timeperiods: ['nights'] }
+    const round = checkHost({ ...host, downtime_period: 'nights', services: [service({ downtime_period: 'nights' })] }, timed, known)
+    expect(hostFile(round)).toMatch(/_DOWNTIME_PERIOD\s+nights[\s\S]*_DOWNTIME_PERIOD\s+nights/)
+    expect(readHostFile(hostFile(round))).toEqual(JSON.parse(JSON.stringify(round)))
+    expect(() => checkHost({ ...host, downtime_period: 'never-heard-of' }, timed, known)).toThrow(/no timeperiod/)
+    expect(() => checkHost({ ...host, downtime_period: 'nights' }, timed, known, false)).toThrow(/only checkd/)
     // Only checkd has them.
     expect(bad({ push: { token: '' } }, false)).toThrow(/only checkd/)
     // A file with such settings on a service of another kind is not nuthatch's to edit.

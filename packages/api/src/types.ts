@@ -119,6 +119,8 @@ export interface ManagedService {
   contacts: string[]
   contact_groups: string[]
   notes?: string
+  /** A timeperiod: the service is in a downtime whenever it holds (checkd). */
+  downtime_period?: string
   /**
    * A service that is not checked but told its result (checkd): a job
    * elsewhere calls a URL with the token. An empty token asks for a new
@@ -171,6 +173,8 @@ export interface ManagedHost {
   contacts: string[]
   contact_groups: string[]
   notes?: string
+  /** A timeperiod: the host is in a downtime whenever it holds (checkd). */
+  downtime_period?: string
   services: ManagedService[]
 }
 
@@ -183,7 +187,7 @@ export interface ConfigState {
   unreadable: { file: string; why: string }[]
   templates: { host: string[]; service: string[] }
   /** What the engine has, to choose from. */
-  choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[] }
+  choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[]; timeperiods?: string[] }
   /** The check commands nuthatch can add itself when a host uses one (its own, for suggested checks). */
   catalogue?: string[]
   /** Whether the engine is checkd, which has services that take pushes and services that stand for others. */

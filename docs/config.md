@@ -162,7 +162,12 @@ beside its template and its check command: how its state is found.
   percentage; without it, the service is as bad as its worst member
   (checkd's `docs/aggregate.md`).
 
-Naemon has neither, and its form does not offer them. In the files these
+A host or a service can also be put **in a downtime whenever a
+timeperiod holds**: the form offers the engine's timeperiods (checkd's
+`docs/downtimes.md`). nuthatch does not make timeperiods; one for the
+purpose goes in the engine's own files.
+
+Naemon has none of these, and its form does not offer them. In the files these
 are a service with `_PUSH_TOKEN` and the command `nuthatch_pushed`, and
 one with the command `nuthatch_aggregate`.
 

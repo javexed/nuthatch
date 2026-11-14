@@ -53,8 +53,8 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
 const DESCRIPTION = /^[A-Za-z0-9][A-Za-z0-9 _.:/+-]{0,62}$/
 const ADDRESS = /^[A-Za-z0-9][A-Za-z0-9.:_-]{0,254}$/
 const MEMBER = /^[A-Za-z0-9][A-Za-z0-9 _.@-]{0,62}$/
-const HOST_KEYS = ['host_name', 'use', 'alias', 'address', 'check_command', 'hostgroups', 'contacts', 'contact_groups', 'notes']
-const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes']
+const HOST_KEYS = ['host_name', 'use', 'alias', 'address', 'check_command', 'hostgroups', 'contacts', 'contact_groups', 'notes', '_DOWNTIME_PERIOD']
+const SERVICE_KEYS = ['host_name', 'service_description', 'use', 'check_command', 'servicegroups', 'contacts', 'contact_groups', 'notes', '_DOWNTIME_PERIOD']
 const TOKEN = /^[A-Za-z0-9_-]{16,64}$/
 /** A host, a pattern or `@group`; or the same, `/`, and a service or a pattern for one. */
 const AGGREGATE_MEMBER = /^[A-Za-z0-9@*?][A-Za-z0-9._*?@-]{0,62}(\/[A-Za-z0-9*?][A-Za-z0-9 _.:+*?-]{0,62})?$/
@@ -119,6 +119,14 @@ function names(value: unknown, what: string, known: string[]): string[] {
   return [...new Set(value as string[])]
 }
 
+/** A timeperiod in which the object is in a downtime, of those the engine has. */
+function period(value: unknown, what: string, known: string[] | undefined, extras: boolean): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (!extras) throw new Refused(`${what}: only checkd has downtimes that come round`)
+  if (typeof value !== 'string' || !(known ?? []).includes(value)) throw new Refused(`${what}: the engine has no timeperiod '${String(value)}'`)
+  return value
+}
+
 function command(value: unknown, what: string, known: string[]): string | undefined {
   const line = text(value, what)
   if (line === undefined) return undefined
@@ -164,6 +172,7 @@ export function checkHost(given: unknown, choices: Choices, known: Templates, ex
       contacts: names(given.contacts, `${what}: contacts`, choices.contacts),
       contact_groups: names(given.contact_groups, `${what}: contact groups`, choices.contactgroups),
       notes: text(given.notes, `${what}: notes`),
+      downtime_period: period(given.downtime_period, `${what}: the downtime's timeperiod`, choices.timeperiods, extras),
       ...(push ? { push } : {}),
       ...(aggregate ? { aggregate } : {}),
     })
@@ -178,6 +187,7 @@ export function checkHost(given: unknown, choices: Choices, known: Templates, ex
     contacts: names(h.contacts, 'contacts', choices.contacts),
     contact_groups: names(h.contact_groups, 'contact groups', choices.contactgroups),
     notes: text(h.notes, 'notes'),
+    downtime_period: period(h.downtime_period, "the downtime's timeperiod", choices.timeperiods, extras),
     services,
   }
 }
@@ -198,6 +208,7 @@ export function hostFile(host: ManagedHost): string {
   put(attrs, 'contacts', host.contacts)
   put(attrs, 'contact_groups', host.contact_groups)
   put(attrs, 'notes', host.notes)
+  put(attrs, '_DOWNTIME_PERIOD', host.downtime_period)
   definitions.push({ type: 'host', attrs })
   for (const service of host.services) {
     const attrs: [string, string][] = [['host_name', host.name], ['service_description', service.description], ['use', service.use]]
@@ -206,6 +217,7 @@ export function hostFile(host: ManagedHost): string {
     put(attrs, 'contacts', service.contacts)
     put(attrs, 'contact_groups', service.contact_groups)
     put(attrs, 'notes', service.notes)
+    put(attrs, '_DOWNTIME_PERIOD', service.downtime_period)
     if (service.push) {
       // Told its result, never checked.
       attrs.push(['active_checks_enabled', '0'], ['_PUSH_TOKEN', service.push.token])
@@ -256,6 +268,7 @@ export function readHostFile(content: string): ManagedHost {
       contacts: list(attr(d, 'contacts')),
       contact_groups: list(attr(d, 'contact_groups')),
       notes: attr(d, 'notes'),
+      downtime_period: attr(d, '_DOWNTIME_PERIOD'),
     })
   }
   return {
@@ -268,6 +281,7 @@ export function readHostFile(content: string): ManagedHost {
     contacts: list(attr(first, 'contacts')),
     contact_groups: list(attr(first, 'contact_groups')),
     notes: attr(first, 'notes'),
+    downtime_period: attr(first, '_DOWNTIME_PERIOD'),
     services,
   }
 }
@@ -328,8 +342,8 @@ export class ConfigAdmin {
       }
     }
     const main = readMain(this.settings.main, this.settings.paths)
-    const [commands, contacts, contactgroups, hostgroups, servicegroups] = await Promise.all(
-      ['commands', 'contacts', 'contactgroups', 'hostgroups', 'servicegroups'].map((table) => this.names(table)),
+    const [commands, contacts, contactgroups, hostgroups, servicegroups, timeperiods] = await Promise.all(
+      ['commands', 'contacts', 'contactgroups', 'hostgroups', 'servicegroups', 'timeperiods'].map((table) => this.names(table)),
     )
     // checkd says who it is beside the version it answers as.
     const version = await this.backend.query('GET status\nColumns: program_version').catch(() => [])
@@ -343,7 +357,7 @@ export class ConfigAdmin {
       catalogue: CATALOGUE_NAMES,
       extras,
       // nuthatch's own commands may be chosen too: written when needed.
-      choices: { commands: [...new Set([...(commands ?? []), ...CATALOGUE_NAMES])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [] },
+      choices: { commands: [...new Set([...(commands ?? []), ...CATALOGUE_NAMES])].sort(), contacts: contacts ?? [], contactgroups: contactgroups ?? [], hostgroups: hostgroups ?? [], servicegroups: servicegroups ?? [], timeperiods: timeperiods ?? [] },
     }
   }
 

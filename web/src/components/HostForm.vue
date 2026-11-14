@@ -124,6 +124,13 @@ function result(): ManagedHost {
         </select>
       </label>
       <label>Notes <input v-model="form.notes" name="notes" maxlength="400" /></label>
+      <label v-if="state.extras && (state.choices.timeperiods ?? []).length > 0">
+        In a downtime whenever this timeperiod holds
+        <select v-model="form.downtime_period" name="downtime-period">
+          <option :value="undefined">never</option>
+          <option v-for="name in state.choices.timeperiods" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </label>
     </div>
 
     <h3>Services</h3>
@@ -187,6 +194,13 @@ function result(): ManagedHost {
           </label>
           <p class="by wide">A host (web1, web*, @group for a host group), or host/service. As bad as the worst member; with a number or a percentage, OK while that many are.</p>
         </template>
+ <label v-if="state.extras && (state.choices.timeperiods ?? []).length > 0">
+          In a downtime whenever this timeperiod holds
+          <select v-model="service.downtime_period" :name="`service-${n}-downtime-period`">
+            <option :value="undefined">never</option>
+            <option v-for="name in state.choices.timeperiods" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </label>
         <label>
           Service groups
           <select v-model="service.servicegroups" :name="`service-${n}-groups`" multiple>
