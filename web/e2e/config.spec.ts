@@ -113,6 +113,15 @@ for (const engine of ENGINES) {
     // nuthatch wrote the command it brings, beside the host's file.
     expect(readdirSync(join(dev, 'run', engine, 'managed')).sort()).toContain('nuthatch-commands.cfg')
 
+    // Looked at again: what answers there beside what is checked, and never the check it has.
+    const item = page.locator('.managed li', { hasText: name })
+    await item.getByRole('button', { name: 'Look again' }).click()
+    const again = item.locator('.again')
+    await expect(again).toContainText(/Nothing has changed|Answers now, and is not checked/, { timeout: 30_000 })
+    await expect(again.locator('li', { hasText: /^HTTP / })).toHaveCount(0)
+    await expect(again).not.toContainText('nothing answers there now')
+    await fits(page)
+
     page.once('dialog', (dialog) => void dialog.accept())
     await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Take out' }).click()
     await expect(page.getByRole('status')).toContainText(`${name} is taken out.`, { timeout: 90_000 })

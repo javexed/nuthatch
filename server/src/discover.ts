@@ -351,7 +351,8 @@ export function suggest(target: Target, found: FoundPort[], pinged: boolean | nu
 }
 
 /** Looks at what was typed, and suggests a host and its checks. */
-export async function discover(given: unknown): Promise<Discovery> {
+/** `also`: further ports to try, those a host's checks are of, so that one that is checked is not taken for gone. */
+export async function discover(given: unknown, also: unknown = []): Promise<Discovery> {
   const target = parseTarget(given)
   let addresses: string[]
   try {
@@ -365,6 +366,8 @@ export async function discover(given: unknown): Promise<Discovery> {
 
   const ports = [...PORTS]
   if (target.url && !ports.some((p) => p.port === target.url?.port)) ports.push({ port: target.url.port, service: `Web ${target.url.port}`, kind: 'web' })
+  if (!Array.isArray(also) || also.length > 30 || also.some((p) => !Number.isInteger(p) || p < 1 || p > 65535)) throw new Refused('the further ports are up to 30 port numbers')
+  for (const port of also as number[]) if (!ports.some((p) => p.port === port)) ports.push({ port, service: `Port ${port}`, kind: 'open' })
   const [pinged, open] = await Promise.all([ping(address), inTurn(ports, async (p) => ((await connected(address, p.port)) ? p : null))])
   const serverName = isIP(target.host) === 0 ? target.host : undefined
   const found: FoundPort[] = await inTurn(

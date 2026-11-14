@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { type Changes, compare, portsOf, withGained } from '../lib/rediscover'
 // The hosts and services nuthatch keeps the config of: adding, changing
 // and taking away. Every change is checked by the engine itself before it
 // is written, and the engine then reads its config again.
@@ -76,6 +77,26 @@ const check = (host: ManagedHost) => {
   return send({ kind: 'put', host, previous }, true, '')
 }
 
+/** A host looked at again: what it has gained and lost, by its name. */
+const again = ref<Record<string, { looking: boolean; changes?: Changes; error?: string }>>({})
+
+async function lookAgain(host: ManagedHost) {
+  again.value[host.name] = { looking: true }
+  try {
+    again.value[host.name] = { looking: false, changes: compare(host, await api.discover(backend.value, host.address, portsOf(host))) }
+  } catch (err) {
+    again.value[host.name] = { looking: false, error: err instanceof ApiError ? err.message : 'The server cannot be reached.' }
+  }
+}
+
+/** Opens the form with the gained checks added, to look over and save. */
+function addGained(host: ManagedHost) {
+  const gained = again.value[host.name]?.changes?.gained ?? []
+  editing.value = withGained(host, gained, state.value?.templates.service[0] ?? '')
+  // Saved under the name it has.
+  delete again.value[host.name]
+}
+
 function startAdding() {
   adding.value = { step: 'look' }
   report.value = null
@@ -148,8 +169,34 @@ async function remove(host: ManagedHost) {
             <div>
               <strong>{{ host.name }}</strong> <span class="by">{{ host.address }} · {{ host.use }}</span>
               <p v-if="host.services.length > 0" class="by">Services: {{ host.services.map((s) => s.description).join(', ') }}</p>
+              <div v-if="again[host.name] && !again[host.name]!.looking" class="again" aria-live="polite">
+                <p v-if="again[host.name]!.error" class="error">{{ again[host.name]!.error }}</p>
+                <template v-else-if="again[host.name]!.changes">
+                  <p v-if="again[host.name]!.changes!.gained.length === 0 && again[host.name]!.changes!.lost.length === 0">
+                    Nothing has changed: what answers there is what is checked.
+                  </p>
+                  <template v-if="again[host.name]!.changes!.gained.length > 0">
+                    <p><strong>Answers now, and is not checked:</strong></p>
+                    <ul>
+                      <li v-for="s in again[host.name]!.changes!.gained" :key="s.check_command">{{ s.description }} <span class="by">{{ s.why }}</span></li>
+                    </ul>
+                    <button type="button" :disabled="busy" @click="addGained(host)">
+                      Add {{ again[host.name]!.changes!.gained.length === 1 ? 'this check' : `these ${again[host.name]!.changes!.gained.length} checks` }}…
+                    </button>
+                  </template>
+                  <template v-if="again[host.name]!.changes!.lost.length > 0">
+                    <p><strong>Checked, and nothing answers there now:</strong></p>
+                    <ul>
+                      <li v-for="l in again[host.name]!.changes!.lost" :key="l.description">{{ l.description }} <span class="by">port {{ l.port }}</span></li>
+                    </ul>
+                  </template>
+                </template>
+              </div>
             </div>
             <div class="actions">
+              <button type="button" class="quiet" :disabled="busy || again[host.name]?.looking" @click="lookAgain(host)">
+                {{ again[host.name]?.looking ? 'Looking…' : 'Look again' }}
+              </button>
               <button type="button" class="quiet" :disabled="busy" @click="editing = host">Change</button>
               <button type="button" class="plain" :disabled="busy" @click="remove(host)">Take out</button>
             </div>

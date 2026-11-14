@@ -181,3 +181,14 @@ checkd. A user whose rights are a contact's covers what that contact
 sees; at most 500 at a time; one line in the audit log. It is set at
 the site's own nuthatch, not through another.
 
+## Looking at a host again
+
+Each host nuthatch keeps has "Look again": the same look as before it
+was added, at its address, now also at the ports its own checks are of.
+It says what answers there and is not checked, with a button that opens
+the form with those checks added, to look over and save; and which
+checks are of a port where nothing answers now. Nothing is changed by
+looking. It is done when asked, not on a timer, and only for the checks
+nuthatch suggests itself (a port, a web page, a certificate): a check by
+a command of your own is left out of it.
+

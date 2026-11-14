@@ -201,8 +201,9 @@ export class Client {
   }
 
   /** Looks at a host before it is added: its ports, and the checks suggested. */
-  discover(backend: string, target: string): Promise<Discovery> {
-    return this.call('POST', `/api/v1/config/${encodeURIComponent(backend)}/discover`, { target })
+  /** `also`: further ports to try, beside the well-known ones. */
+  discover(backend: string, target: string, also: number[] = []): Promise<Discovery> {
+    return this.call('POST', `/api/v1/config/${encodeURIComponent(backend)}/discover`, { target, also })
   }
 
   /** The tailnet's machines that the backend's engine has no host for yet. */

@@ -780,11 +780,11 @@ export function buildApp(deps: Deps): Hono<Env> {
   // site's nuthatch looks for a backend of that site.
   app.post('/api/v1/config/:backend/discover', async (c) => {
     const far = await configSite(c)
-    const { target } = await body(c)
-    if (far) return c.json(await far.site.call(c.get('identity').user, 'POST', `${far.path}/discover`, { target }))
+    const { target, also } = await body(c)
+    if (far) return c.json(await far.site.call(c.get('identity').user, 'POST', `${far.path}/discover`, { target, also }))
     const { user } = await configOf(c)
     deps.store.audit(user, c.req.param('backend'), 'looked at a host', String(target).slice(0, 200))
-    return c.json(await discover(target))
+    return c.json(await discover(target, also ?? []))
   })
 
   // The tailnet's machines that the engine has no host for yet, to add one

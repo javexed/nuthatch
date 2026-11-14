@@ -401,3 +401,5 @@ tr.flash > td { animation: flash 1.6s ease-out; }
 .fields select, .fields input { max-width: 100%; min-width: 0; }
 /* A dialog longer than the screen scrolls within itself. */
 .dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.managed .again { margin-top: 0.5rem; }
+.managed .again ul { margin: 0.2rem 0 0.5rem; padding-left: 1.2rem; }
