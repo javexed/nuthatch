@@ -27,15 +27,24 @@ maintainer and no promised time to answer. Only the newest commit of
   and written to the audit log. Give that role to those you would give a
   shell as the engine's user.
 - **The same role can look at the network.** "Look before adding a host"
-  connects from the server to about forty well-known ports of the one
-  address typed, and pings it. It is for `config_edit` only, and each
-  look is in the audit log. It reaches what the server can reach,
+  pings the one address typed and connects from the server to about
+  forty well-known ports of it, to the port of a URL that was typed, and
+  to up to thirty further ports the request names (those a host's
+  checks are of). Where a web server answers it asks for one page, the
+  path of the URL typed or `/`, and gives back the status, the page's
+  title and where it redirects to. It is for `config_edit` only, and
+  each look is in the audit log. It reaches what the server can reach,
   including addresses the browser cannot.
 
 ## Logging in
 
 - Passwords are in an htpasswd file (bcrypt; SHA-crypt and `$apr1$` are
-  read). Logins are rate-limited. A session is a cookie; anything that
+  read). Failed logins are counted by user name and by address, five in
+  five minutes; behind a proxy the address is the last one in
+  `X-Forwarded-For`, which the proxy must set, and without that header
+  they are counted by user name only. Taking a user out of the htpasswd
+  file does not end that user's sessions (up to seven days) or tokens
+  (until deleted): see below. A session is a cookie; anything that
   changes something also needs the session's CSRF value. The phone app
   and scripts use tokens, made and taken away on the "This device" page.
 - nuthatch speaks plain HTTP and refuses to listen beyond the machine
@@ -51,9 +60,18 @@ maintainer and no promised time to answer. Only the newest commit of
 
 ## What it keeps
 
-- Its store (SQLite): sessions, hashed API tokens, preferences,
-  dashboards, browsers subscribed for notifications, and the audit log
-  of logins, commands sent and refused, and config changes.
+- Its store (SQLite): sessions and API tokens (as hashes), preferences,
+  dashboards, the browsers subscribed for notifications with their keys,
+  the server's own key pair for pushed notifications (not hashed: it has
+  to be used), and the audit log of logins, commands sent and refused,
+  and config changes, which names hosts and holds comment texts. The
+  file is made with the permissions the service's umask gives: keep its
+  directory to the service's user.
+- A user who has left keeps working sessions and tokens until they are
+  removed from the store; there is no page for that yet. With the
+  service stopped: `sqlite3 <store> "DELETE FROM sessions WHERE user =
+  'name'; DELETE FROM tokens WHERE user = 'name'; DELETE FROM push WHERE
+  user = 'name';"`.
 - With `[graphs]`: a second file with the numbers checks return, by host
   and service name, for the days configured.
 - Nothing else of what is monitored: pages ask the engine each time. The
@@ -76,5 +94,9 @@ maintainer and no promised time to answer. Only the newest commit of
 ## Not yet looked at by anyone else
 
 No outside review or audit has been done. The permission rules are
-tested for every kind of user against every table and command on both
-engines (`dev/matrix`); that shows what was thought of, not what was not.
+tested on both engines for five kinds of user against twelve of the
+seventeen tables and a set of the commands (`dev/matrix`,
+[docs/permissions.md](docs/permissions.md)); the other five tables
+(state history, downtimes and the three by service group) were tried by
+hand to show an unknown user nothing. That shows what was thought of,
+not what was not.

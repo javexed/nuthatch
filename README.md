@@ -14,9 +14,10 @@ and is made to be used on a phone as much as at a desk.
 - **One installation.** nuthatch runs one small site, its author's, and
   a demo site with invented hosts. It has not been run with many users
   or on a large site.
-- **Tested on both engines.** Every kind of user against every table and
-  command, and the pages in a browser at desk and phone width, on Naemon
-  Core 1.5.2 and on checkd (below). Nagios Core itself has not been
+- **Tested on both engines.** Five kinds of user against the tables and
+  a set of the commands, and the pages in a browser at desk and phone
+  width, on Naemon Core 1.5.2 and on checkd (below). Those tests are run
+  by hand; CI runs the types and the unit tests. Nagios Core itself has not been
   tried: it needs a Livestatus module of its own.
 - **Much of the code was written by an AI model** (Claude), directed and
   reviewed by one person: see [CONTRIBUTING.md](CONTRIBUTING.md).

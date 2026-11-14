@@ -1,5 +1,6 @@
-# The leak gate, where it cannot be passed by: secrets, private addresses
-# and, on runs that may read the secret LEAK_PATTERNS, the maintainer's
+# The leak gate, where no local switch passes it by: secrets and private
+# addresses in the whole tree, and in what a push or pull request adds
+# also, on runs that may read the secret LEAK_PATTERNS, the maintainer's
 # private list of names. A fork's pull request cannot read secrets, and
 # gets the general checks, which is right: nobody leaks names they do not
 # know. See scripts/leak-scan.sh.
@@ -22,7 +23,12 @@ jobs:
       - name: The range this adds to main
         id: r
         run: |
-          if git rev-parse --verify -q origin/main >/dev/null; then
+          # A push to main: what the push added, from where main was.
+          # A pull request: what its branch adds to main.
+          before="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = push ] && [ -n "$before" ] && [ "$before" != 0000000000000000000000000000000000000000 ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+            echo "range=${before}..HEAD" >> "$GITHUB_OUTPUT"
+          elif git rev-parse --verify -q origin/main >/dev/null; then
             mb=$(git merge-base origin/main HEAD 2>/dev/null || true)
             [ -n "$mb" ] && [ "$mb" != "$(git rev-parse HEAD)" ] && echo "range=${mb}..HEAD" >> "$GITHUB_OUTPUT" || echo "range=" >> "$GITHUB_OUTPUT"
           else

@@ -129,7 +129,11 @@ export class Refused extends Error {}
  * custom variables. They need the role configuration_information.
  */
 export function secretColumn(name: string): boolean {
-  return ['custom_variable', 'check_command', 'event_handler', 'command_line'].some((part) => name.includes(part))
+  if (['custom_variable', 'check_command', 'event_handler', 'command_line'].some((part) => name.includes(part))) return true
+  // What is a contact's own: its e-mail, pager and further addresses,
+  // also where another table brings them along (the log's
+  // `current_contact_email`). A host's `address` is not one of them.
+  return /(^|_)(email|pager)$/.test(name) || /(^|_)address[1-6]$/.test(name) || /^current_contact_(?!name$|alias$)/.test(name)
 }
 
 export function columnName(name: string): boolean {

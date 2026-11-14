@@ -218,7 +218,17 @@ export function buildApp(deps: Deps): Hono<Env> {
     } catch {
       // Not asked over a socket (a test).
     }
-    const keys = [`user:${String(user)}`, `addr:${address}`]
+    // Behind a proxy every request comes from the proxy: counting failures
+    // by that address would let anyone's five wrong passwords lock all
+    // out. The client is then the last address the proxy wrote into
+    // X-Forwarded-For, and without one failures count by user only.
+    let client: string | undefined = address
+    if (deps.cookieSecure) {
+      const last = (c.req.header('X-Forwarded-For') ?? '').split(',').pop()?.trim() ?? ''
+      client = /^[0-9A-Fa-f:.]{2,45}$/.test(last) ? last : undefined
+      if (client !== undefined) address = client
+    }
+    const keys = [`user:${String(user)}`, ...(client === undefined ? [] : [`addr:${client}`])]
     if (deps.limiter.blocked(keys)) return c.json({ error: 'too many failed logins; wait five minutes' }, 429)
     if (!userName(user) || typeof password !== 'string' || !(await deps.htpasswd.check(user, password))) {
       deps.limiter.failed(keys)
@@ -297,6 +307,13 @@ export function buildApp(deps: Deps): Hono<Env> {
     }
     if (!identity) return c.json({ error: 'log in first' }, 401)
     const changes = c.req.method !== 'GET' && c.req.method !== 'HEAD'
+    // What changes something is sent as JSON, which a page of another
+    // site cannot send here without asking first (and is then refused):
+    // it matters where no session's value is asked for, as with dev_user.
+    const sends = Number(c.req.header('Content-Length') ?? 0) > 0 || c.req.header('Transfer-Encoding') !== undefined
+    if (changes && sends && !(c.req.header('Content-Type') ?? '').toLowerCase().startsWith('application/json')) {
+      return c.json({ error: 'what changes something is sent as application/json' }, 415)
+    }
     if (changes && identity.csrf !== undefined && c.req.header(CSRF_HEADER) !== identity.csrf) {
       return c.json({ error: `the header ${CSRF_HEADER} is missing or wrong` }, 403)
     }

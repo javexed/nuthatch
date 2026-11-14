@@ -26,7 +26,9 @@ export interface Notice {
 
 /** A notification line of the log: who was told what. Not one: null. */
 export function parseNotice(message: string): Notice | null {
-  const match = message.match(/^(HOST|SERVICE) NOTIFICATION: (.*)$/s)
+  // The engines give a log line as it is in the log file, its time in
+  // front: `[1700000000] SERVICE NOTIFICATION: ...`.
+  const match = message.replace(/^\[\d+\] /, '').match(/^(HOST|SERVICE) NOTIFICATION: (.*)$/s)
   if (!match) return null
   const fields = (match[2] ?? '').split(';')
   // contact;host;[service;]state;command;output[;author;comment]

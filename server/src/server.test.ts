@@ -130,6 +130,12 @@ describe('the policy', () => {
     expect(() => checkHeaders(['Stats: avg latency'], true, roles())).toThrow()
     expect(() => checkColumns(['name', 'check_command'], roles())).toThrow()
     expect(() => checkColumns(['name', 'state'], roles())).not.toThrow()
+    // A contact's own details, also where another table brings them along; a host's address is not one.
+    for (const column of ['email', 'pager', 'address1', 'current_contact_email', 'current_contact_pager', 'current_contact_address3', 'current_contact_host_notification_period']) {
+      expect(() => checkColumns([column], roles()), column).toThrow(/configuration_information/)
+      expect(() => checkColumns([column], roles('configuration_information')), column).not.toThrow()
+    }
+    expect(() => checkColumns(['address', 'host_address', 'current_contact_name', 'current_contact_alias'], roles())).not.toThrow()
     expect(() => checkColumns(['name\nCOMMAND'], roles())).toThrow()
   })
 })
@@ -609,6 +615,39 @@ describe('one nuthatch over the nuthatch of a site', () => {
 })
 
 describe('an app served from elsewhere', () => {
+  it('takes what changes something as JSON only, so that a page of another site cannot send it', async () => {
+    const backend = fake('site', () => [[1]])
+    const app = buildApp({ backends: [backend], store: new Store(':memory:'), events: new Events([]), roles: new RolesConfig({ authorized_for_all_host_commands: ['admin'] }), limiter: new Limiter(), cookieSecure: false, devUser: 'admin' })
+    const body = JSON.stringify({ backend: 'site', command: 'DISABLE_HOST_NOTIFICATIONS', args: ['web1'] })
+    // As a form or a no-cors fetch of another site's page would send it.
+    for (const type of ['text/plain', 'application/x-www-form-urlencoded', undefined]) {
+      const answer = await app.request('/api/v1/command', { method: 'POST', headers: { 'Content-Length': String(body.length), ...(type ? { 'Content-Type': type } : {}) }, body })
+      expect(answer.status, String(type)).toBe(415)
+    }
+    expect(backend.sent).toEqual([])
+    expect((await app.request('/api/v1/command', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': String(body.length) }, body })).status).toBe(200)
+    expect(backend.sent).toHaveLength(1)
+  })
+
+  it('counts failed logins by the client behind a proxy, not by the proxy', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nuthatch-proxy-'))
+    writeFileSync(join(dir, 'htpasswd'), `ann:${bcrypt.hashSync('s3cret', 4)}\nbob:${bcrypt.hashSync('hunter22', 4)}\n`)
+    const app = buildApp({ backends: [], store: new Store(':memory:'), events: new Events([]), roles: new RolesConfig(), limiter: new Limiter(), htpasswd: new Htpasswd(join(dir, 'htpasswd')), cookieSecure: true })
+    const login = (user: string, password: string, forwarded?: string) =>
+      app.request('/api/v1/login', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(forwarded ? { 'X-Forwarded-For': forwarded } : {}) }, body: JSON.stringify({ user, password }) })
+    // Someone guesses at five names from one address; the first hop is theirs to write, the last is the proxy's.
+    for (const name of ['a1', 'a2', 'a3', 'a4', 'a5']) expect((await login(name, 'wrong', '198.51.100.7, 203.0.113.9')).status).toBe(401)
+    expect((await login('a6', 'wrong', '192.0.2.99, 203.0.113.9')).status).toBe(429)
+    // Everyone else still logs in, from another address and with no address at all.
+    expect((await login('ann', 's3cret', '203.0.113.50')).status).toBe(200)
+    expect((await login('bob', 'hunter22')).status).toBe(200)
+    // Without an address, failures count against the user tried, and nobody else.
+    for (let n = 0; n < 5; n++) expect((await login('ann', 'wrong')).status).toBe(401)
+    expect((await login('ann', 's3cret')).status).toBe(429)
+    expect((await login('bob', 'hunter22')).status).toBe(200)
+    rmSync(dir, { recursive: true })
+  })
+
   it('may call with a token when its origin is listed, and logs in for one', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'nuthatch-app-'))
     writeFileSync(join(dir, 'htpasswd'), `ann:${bcrypt.hashSync('s3cret', 4)}\n`)
@@ -814,6 +853,9 @@ describe('notifications pushed to browsers', () => {
     expect(parseNotice('SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-by-mail;Connection refused; really')).toEqual({ contact: 'ann', host: 'web1', service: 'http', state: 'CRITICAL', output: 'Connection refused' })
     expect(parseNotice('HOST NOTIFICATION: ann;web1;DOWN;notify-host;PING CRITICAL')).toEqual({ contact: 'ann', host: 'web1', service: '', state: 'DOWN', output: 'PING CRITICAL' })
     expect(parseNotice('SERVICE NOTIFICATION: ann;web1;http;ACKNOWLEDGEMENT (CRITICAL);n;out;bob;on it')?.state).toBe('ACKNOWLEDGEMENT (CRITICAL)')
+    // As the engines give it: the time of the log file in front.
+    expect(parseNotice('[1794584351] HOST NOTIFICATION: ann;web1;DOWN;notify-host;PING CRITICAL')).toEqual({ contact: 'ann', host: 'web1', service: '', state: 'DOWN', output: 'PING CRITICAL' })
+    expect(parseNotice('[1794584351] SERVICE ALERT: web1;http;CRITICAL;HARD;3;x')).toBeNull()
     expect(parseNotice('SERVICE ALERT: web1;http;CRITICAL;HARD;3;x')).toBeNull()
     expect(parseNotice('HOST NOTIFICATION: ;web1;DOWN;n;x')).toBeNull()
     expect(messageOf('site a', { contact: 'ann', host: 'web1', service: 'disk /', state: 'WARNING', output: 'x' })).toEqual({
@@ -841,9 +883,9 @@ describe('notifications pushed to browsers', () => {
       return new Response('', { status: 201 })
     }) as typeof fetch
     let log: [number, string][] = [
-      [100, 'SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-desktop;refused'],
-      [100, 'SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-mail;refused'],
-      [100, 'HOST NOTIFICATION: nobody;web1;DOWN;n;x'],
+      [100, '[100] SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-desktop;refused'],
+      [100, '[100] SERVICE NOTIFICATION: ann;web1;http;CRITICAL;notify-mail;refused'],
+      [100, '[100] HOST NOTIFICATION: nobody;web1;DOWN;n;x'],
     ]
     const backend = fake('site', (request) => (request.startsWith('GET log') ? log : []))
     const pusher = new Pusher(store, 'mailto:ops@example.test', [backend], 0, service)

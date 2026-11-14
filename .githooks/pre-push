@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Leak gate on what is being pushed: secrets, private addresses and, where
 # a private list is declared, the names on it, before anything leaves the
-# machine. Only `git push --no-verify` passes it by.
+# machine. Only `git push --no-verify` passes it by. A range is looked at
+# as what it adds in all: something added in one commit and taken out in a
+# later one of the same push is not seen.
 set -uo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 REMOTE="${1:-origin}"
@@ -14,8 +16,22 @@ while read -r _lref lsha _rref _rsha; do
   # What this branch adds to main: right for a new branch, an update, and a
   # push after a rebase alike.
   base=$(git merge-base "$REMOTE/main" "$lsha" 2>/dev/null || true)
-  [ -n "$base" ] && range="$base..$lsha" || range="$lsha"
-  bash "$ROOT/scripts/leak-scan.sh" --range "$range" || status=1
+  if [ -n "$base" ]; then
+    bash "$ROOT/scripts/leak-scan.sh" --range "$base..$lsha" || status=1
+  else
+    # A remote that has no main yet: everything goes, so everything is
+    # looked at. The first commit as a tree, and all that came after it as
+    # a range (a bare commit is no range: it would compare the commit with
+    # the working tree and look at nothing).
+    first=$(git rev-list --max-parents=0 "$lsha" | tail -1)
+    out=$(mktemp -d)
+    git archive "$first" | tar -x -C "$out"
+    bash "$ROOT/scripts/leak-scan.sh" --tree "$out" || status=1
+    rm -rf "${out:?}"
+    if [ "$first" != "$lsha" ]; then
+      bash "$ROOT/scripts/leak-scan.sh" --range "$first..$lsha" || status=1
+    fi
+  fi
 done
 [ "$status" -eq 0 ] || { echo "pre-push: the leak gate stopped the push." >&2; exit 1; }
 exit 0
