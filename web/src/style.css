@@ -408,3 +408,8 @@ tr.flash > td { animation: flash 1.6s ease-out; }
 a.button { display: inline-block; padding: 0.55rem 1rem; border: 1px solid var(--accent); border-radius: 0.4rem; background: var(--accent); color: var(--card); text-decoration: none; font-weight: 600; }
 .groups-head { margin-top: 1.5rem; }
 .choose-host .chips { margin: 0.6rem 0; }
+
+a.button.quiet { background: none; color: var(--accent); }
+.members ul, .filling { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+.members li, .filling li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.filling { padding: 0.8rem 1rem; }

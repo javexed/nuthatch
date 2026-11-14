@@ -10,6 +10,7 @@ export const router = createRouter({
     { path: '/problems', name: 'problems', component: () => import('./views/Problems.vue') },
     { path: '/hosts', name: 'hosts', component: () => import('./views/Hosts.vue') },
     { path: '/services', name: 'services', component: () => import('./views/Services.vue') },
+    { path: '/pushed', name: 'pushed', component: () => import('./views/Pushed.vue') },
     { path: '/hostgroups', name: 'hostgroups', component: () => import('./views/Groups.vue'), props: { kind: 'host' } },
     { path: '/servicegroups', name: 'servicegroups', component: () => import('./views/Groups.vue'), props: { kind: 'service' } },
     { path: '/history', name: 'history', component: () => import('./views/History.vue') },

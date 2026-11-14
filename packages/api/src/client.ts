@@ -130,6 +130,16 @@ export class Client {
     return this.call('POST', '/api/v1/downtime-many', downtime)
   }
 
+  /** The members of a service that stands for others; `aggregate: false` for any other. */
+  aggregate(backend: string, host: string, service: string): Promise<{ aggregate: boolean; min?: string; members?: { host: string; service?: string; state: number; checked: boolean }[] }> {
+    const query = new URLSearchParams({ host, service })
+    return this.call('GET', `/api/v1/aggregate/${encodeURIComponent(backend)}?${query.toString()}`)
+  }
+
+  pushed(): Promise<{ services: { backend: string; host: string; service: string; state: number; last: number; output: string }[] }> {
+    return this.call('GET', '/api/v1/pushed')
+  }
+
   pushInfo(backend: string, host: string, service: string): Promise<PushInfo> {
     const query = new URLSearchParams({ host, service })
     return this.call('GET', `/api/v1/push-info/${encodeURIComponent(backend)}?${query.toString()}`)

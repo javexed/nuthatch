@@ -68,6 +68,13 @@ test('a service that takes pushes and one that stands for others, on checkd', as
   // The one that stands for others says how many are OK, once it is worked out.
   await page.goto(`/service/checkd/${name}/web servers`)
   await expect(page.locator('main')).toContainText(/AGGREGATE \w+ - \d of 3 are OK, 2 needed/, { timeout: 90_000 })
+  const members = page.getByRole('region', { name: 'Members' })
+  await expect(members).toContainText('min 2')
+  for (const name of ['web1', 'web2', 'db1']) await expect(members.getByRole('link', { name, exact: true })).toBeVisible()
+  // The pushed one is in the list of them.
+  await page.goto('/pushed')
+  await expect(page.locator('table.rows')).toContainText(`${name} / backup`)
+  await expect(page.locator('table.rows')).toContainText('42 files copied')
 
   // It opens again as what it is, and keeps its address.
   await page.goto('/config')

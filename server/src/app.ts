@@ -17,9 +17,9 @@ import { type TailnetMachine, askTailscale, discover } from './discover.ts'
 import type { Events } from './events.ts'
 import type { Graphs } from './graphs.ts'
 import type { Pusher } from './push.ts'
-import { ROLES, Refused, type Roles, type RolesConfig, TABLES, checkHeaders } from './policy.ts'
+import { ROLES, Refused, type Roles, type RolesConfig, TABLES, access, checkHeaders } from './policy.ts'
 import { checkSubscription } from './webpush.ts'
-import { Forbidden, combine, combineStats, rows, stats } from './query.ts'
+import { Forbidden, combine, combineStats, limits, rows, stats } from './query.ts'
 import { RemoteError, type RemoteSite } from './remote.ts'
 import { type Store, now } from './store.ts'
 
@@ -556,6 +556,64 @@ export function buildApp(deps: Deps): Hono<Env> {
    * How a service takes pushes, for those who may see the engine's
    * config: the token is all a caller needs.
    */
+  /**
+   * The members of a service that stands for others (`checkd:aggregate`),
+   * each with its state, as far as the user sees them.
+   */
+  app.get('/api/v1/aggregate/:backend', async (c) => {
+    const { user } = c.get('identity')
+    const backend = deps.backends.find((b) => b.name === c.req.param('backend'))
+    const [host, service] = [c.req.query('host') ?? '', c.req.query('service') ?? '']
+    if (!backend || /[\n\r]/.test(host + service) || host === '' || service === '') return c.json({ aggregate: false })
+    const { roles } = await who(user)
+    const how = access('services', roles)
+    if (how.kind === 'limited' && !(await sees(backend, user, { kind: 'service', host, service }))) throw new Forbidden("not one of this user's services")
+    const [row] = await backend.query(`GET services\nColumns: check_command\nFilter: host_name = ${host}\nFilter: description = ${service}`)
+    const [name = '', ...args] = String(row?.[0] ?? '').split('!')
+    if (/[\n\r]/.test(name) || name === '') return c.json({ aggregate: false })
+    const [command] = await backend.query(`GET commands\nColumns: line\nFilter: name = ${name}`)
+    const line = String(command?.[0] ?? '').replace(/\$ARG(\d+)\$/g, (_, n: string) => args[Number(n) - 1] ?? '').trim()
+    if (!line.startsWith('checkd:aggregate')) return c.json({ aggregate: false })
+    const words = [...line.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3] ?? '').slice(1)
+    const min = words[0] === '--min' ? words[1] : undefined
+    const patterns = (min === undefined ? words : words.slice(2)).slice(0, 40)
+    const whole = (glob: string) => `^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`
+    const members: { host: string; service?: string; state: number; checked: boolean }[] = []
+    for (const pattern of patterns) {
+      if (/[\n\r]/.test(pattern)) continue
+      const [hosts = '', services = ''] = pattern.split(/\/(.*)/s)
+      const hostFilter = hosts.startsWith('@') ? `Filter: ${services ? 'host_groups' : 'groups'} >= ${hosts.slice(1)}` : `Filter: ${services ? 'host_name' : 'name'} ~ ${whole(hosts)}`
+      const request = services
+        ? `GET services\nColumns: host_name description state has_been_checked\n${hostFilter}\nFilter: description ~ ${whole(services)}\n${limits('services', how, user)}Limit: 200`
+        : `GET hosts\nColumns: name state has_been_checked\n${hostFilter}\n${limits('hosts', access('hosts', roles), user)}Limit: 200`
+      for (const r of await backend.query(request)) {
+        const member = services
+          ? { host: String(r[0]), service: String(r[1]), state: Number(r[2]), checked: r[3] === 1 }
+          : { host: String(r[0]), state: Number(r[1]), checked: r[2] === 1 }
+        if (member.host === host && member.service === service) continue
+        if (!members.some((m) => m.host === member.host && m.service === member.service)) members.push(member)
+      }
+    }
+    return c.json({ aggregate: true, ...(min ? { min } : {}), members })
+  })
+
+  /** The services that take pushes, for those who may see the config. */
+  app.get('/api/v1/pushed', async (c) => {
+    const { user } = c.get('identity')
+    const { roles } = await who(user)
+    if (!roles.has('config_edit') && !roles.has('configuration_information')) throw new Forbidden('needs the role config_edit or configuration_information')
+    const out: { backend: string; host: string; service: string; state: number; last: number; output: string }[] = []
+    for (const backend of deps.backends) {
+      try {
+        const found = await backend.query('GET services\nColumns: host_name description state last_check plugin_output\nFilter: custom_variable_names >= CHECKD_PUSH_TOKEN')
+        for (const r of found) out.push({ backend: backend.name, host: String(r[0]), service: String(r[1]), state: Number(r[2]), last: Number(r[3]) || 0, output: String(r[4] ?? '') })
+      } catch {
+        // A backend that does not answer has none to show.
+      }
+    }
+    return c.json({ services: out.sort((a, b) => a.host.localeCompare(b.host) || a.service.localeCompare(b.service)) })
+  })
+
   app.get('/api/v1/push-info/:backend', async (c) => {
     const { user } = c.get('identity')
     const { roles } = await who(user)
