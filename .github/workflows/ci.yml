@@ -1,0 +1,13 @@
+# Types, unit tests and the build. The tests that need the engines
+# (dev/matrix and the browser tests) are run by hand for now.
+name: check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: node:22
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable && pnpm install --frozen-lockfile && pnpm build && pnpm test
