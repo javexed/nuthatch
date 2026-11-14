@@ -724,9 +724,9 @@ export function buildApp(deps: Deps): Hono<Env> {
     const { user } = c.get('identity')
     const id = Number(c.req.param('id'))
     const draft = checkDraft(await body(c))
-    // Only its owner changes a dashboard, shared or not.
+    // Its owner, or anyone for a shared one.
     if (!Number.isInteger(id) || !deps.store.saveDashboard(user, id, draft.title, draft.shared, JSON.stringify(draft.widgets))) {
-      return c.json({ error: 'no such dashboard of yours' }, 404)
+      return c.json({ error: 'not found' }, 404)
     }
     const row = deps.store.dashboard(user, id)
     return row ? c.json(fromRow(row)) : c.json({ error: 'not kept' }, 500)

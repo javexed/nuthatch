@@ -283,18 +283,31 @@ export interface ConfigResult {
   output: string
 }
 
-/** A box on a dashboard. What it shows is asked as the one who looks. */
-export type Widget =
+/** Where a panel sits on the dashboard's grid of 12 columns. */
+export interface Layout {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** A panel on a dashboard. What it shows is asked as the one who looks. */
+export type Widget = (
   | { type: 'totals'; title?: string; of: 'hosts' | 'services'; /** Of this host group only. */ hostgroup?: string }
   | { type: 'problems'; title?: string; of: 'hosts' | 'services'; unhandled?: boolean; hostgroup?: string; limit?: number }
   | { type: 'object'; title?: string; backend: string; host: string; service?: string }
   | { type: 'log'; title?: string; lines: 'alerts' | 'notifications'; hours?: number; limit?: number }
+  /** A number of a check's performance data, now, with how it went. */
+  | { type: 'stat'; title?: string; backend: string; host: string; service?: string; label?: string; hours?: number }
+  /** A number of a check's performance data over time. */
+  | { type: 'graph'; title?: string; backend: string; host: string; service?: string; label?: string; hours?: number }
+) & { layout?: Layout }
 
 export interface Dashboard {
   id: number
   owner: string
   title: string
-  /** Shown to everyone who logs in; changed by its owner only. */
+  /** Shown to everyone who logs in, and changed by anyone; deleted by its owner only. */
   shared: boolean
   widgets: Widget[]
   updated: number

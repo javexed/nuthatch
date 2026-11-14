@@ -198,9 +198,13 @@ export class Store {
     return Number(made.lastInsertRowid)
   }
 
-  /** Changes a dashboard of the user's own. */
-  saveDashboard(owner: string, id: number, title: string, shared: boolean, widgets: string): boolean {
-    return this.db.prepare('UPDATE dashboards SET title = ?, shared = ?, widgets = ?, updated = ? WHERE id = ? AND owner = ?').run(title, shared ? 1 : 0, widgets, now(), id, owner).changes > 0
+  /** Changes a dashboard: the user's own, or a shared one, which stays shared. */
+  saveDashboard(user: string, id: number, title: string, shared: boolean, widgets: string): boolean {
+    return (
+      this.db
+        .prepare('UPDATE dashboards SET title = ?, shared = CASE WHEN owner = ? THEN ? ELSE 1 END, widgets = ?, updated = ? WHERE id = ? AND (owner = ? OR shared = 1)')
+        .run(title, user, shared ? 1 : 0, widgets, now(), id, user).changes > 0
+    )
   }
 
   deleteDashboard(owner: string, id: number): boolean {

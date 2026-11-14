@@ -8,14 +8,15 @@ import { type Point, nearest, shape, short } from '../lib/graph'
 import { useLoader } from '../stores/live'
 import { api } from '../stores/session'
 
-const props = defineProps<{ backend: string; host: string; service?: string }>()
+/** `label`: one number only; `fixed`: these hours, with no choice of range, and no frame (a dashboard's panel). */
+const props = defineProps<{ backend: string; host: string; service?: string; label?: string; fixed?: number }>()
 
 const RANGES = [
   { hours: 6, label: '6 hours' },
   { hours: 24, label: '24 hours' },
   { hours: 168, label: '7 days' },
 ]
-const hours = ref(24)
+const hours = ref(props.fixed ?? 24)
 const { data } = useLoader(() => api.graph(props.backend, props.host, props.service, hours.value), [() => props.backend, () => props.host, () => props.service, hours])
 
 const now = computed(() => {
@@ -24,7 +25,7 @@ const now = computed(() => {
   return Date.now() / 1000
 })
 const graphs = computed(() =>
-  (data.value?.series ?? []).map((series: GraphSeries) => {
+  (data.value?.series ?? []).filter((series: GraphSeries) => !props.label || series.label === props.label).map((series: GraphSeries) => {
     const to = now.value
     // Where the history is shorter than the range asked for, the graph
     // begins where the history does, not with hours of nothing.
@@ -51,8 +52,8 @@ const value = (v: number, unit: string) => `${short(v)}${unit === '' ? '' : unit
 </script>
 
 <template>
-  <section v-if="data?.enabled && graphs.length > 0" class="card graphs" aria-label="Graphs">
-    <div class="graphs-head">
+  <section v-if="data?.enabled && graphs.length > 0" :class="fixed ? 'graphs bare' : 'card graphs'" aria-label="Graphs">
+    <div v-if="!fixed" class="graphs-head">
       <h2>Over time</h2>
       <div class="chips" role="group" aria-label="Range">
         <button v-for="range in RANGES" :key="range.hours" type="button" :class="['chip', { on: hours === range.hours }]" :aria-pressed="hours === range.hours" @click="hours = range.hours">

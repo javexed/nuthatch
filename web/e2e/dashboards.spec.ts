@@ -22,26 +22,44 @@ test('a shared dashboard shows each user their own, and follows a result', async
   await goTo(page, 'Dashboards')
   await page.getByLabel('A new dashboard').fill(title)
   await page.getByRole('button', { name: 'Make it' }).click()
-  await expect(page.getByRole('heading', { name: 'Change the dashboard' })).toBeVisible()
+  await expect(page.getByLabel('Title')).toHaveValue(title)
 
-  await page.getByLabel('Add a box').selectOption('problems')
-  await page.getByRole('button', { name: 'Add', exact: true }).click()
-  await page.getByLabel('Add a box').selectOption('object')
-  await page.getByRole('button', { name: 'Add', exact: true }).click()
-  const box = page.getByRole('group', { name: /Box 4/ })
-  await box.getByLabel('Backend').selectOption('naemon')
-  await box.getByLabel('Host').fill('passive1')
-  await box.getByLabel('Service').fill('a')
-  await page.getByLabel('Add a box').selectOption('log')
-  await page.getByRole('button', { name: 'Add', exact: true }).click()
-  await page.getByRole('group', { name: /Box 5/ }).getByRole('button', { name: 'Move up' }).click()
-  await expect(page.getByRole('group', { name: /Box 4/ })).toContainText('The latest alerts')
+  const addPanel = async (kind: string) => {
+    await page.getByLabel('Panel', { exact: true }).selectOption(kind)
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+  }
+  await addPanel('problems')
+  await addPanel('object')
+  const settings = page.getByRole('complementary', { name: 'Panel settings' })
+  await settings.getByLabel('Backend').selectOption('naemon')
+  await settings.getByLabel('Host').fill('passive1')
+  await settings.getByLabel('Service').fill('a')
+  await settings.getByRole('button', { name: 'Done' }).click()
+  await addPanel('log')
+  await settings.getByRole('button', { name: 'Done' }).click()
   await page.getByLabel(/Shared/).check()
   await fits(page)
+  if (test.info().project.name === 'desktop') {
+    // The log is dragged by its grip to the top left, and the others make room.
+    await page.setViewportSize({ width: 1280, height: 1600 })
+    const grip = page.getByRole('region', { name: 'Alerts' }).locator('.grip')
+    const to = page.locator('.dash-grid').boundingBox()
+    const from = await grip.boundingBox()
+    const target = await to
+    if (from && target) {
+      await page.mouse.move(from.x + 4, from.y + 4)
+      await page.mouse.down()
+      await page.mouse.move(target.x + 10, target.y + 10, { steps: 8 })
+      await page.mouse.up()
+    }
+    const log = await page.getByRole('region', { name: 'Alerts' }).boundingBox()
+    const others = await page.locator('.dash-grid > section').evaluateAll((all) => all.map((s) => s.getBoundingClientRect().top))
+    expect(log?.y).toBeLessThanOrEqual(Math.min(...others) + 1)
+  }
   await page.getByRole('button', { name: 'Save' }).click()
 
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
-  await expect(page.locator('.dashboard > section')).toHaveCount(5)
+  await expect(page.locator('.dash-grid > section')).toHaveCount(5)
   await expect.poll(() => sum(page, 'Hosts')).toBe(hosts)
   const object = page.getByRole('region', { name: 'passive1 / a' })
   await expect(object.locator('.badge')).toHaveText('OK')
@@ -53,6 +71,11 @@ test('a shared dashboard shows each user their own, and follows a result', async
   await expect(object).toContainText('broken for the dashboard')
   await expect(page.getByRole('region', { name: 'Unhandled service problems' })).toContainText('passive1')
   await expect(page.getByRole('region', { name: 'Alerts' })).toContainText('broken for the dashboard')
+  // On a wall, the panels alone.
+  await page.getByRole('button', { name: 'Wall' }).click()
+  await expect(page.locator('header.bar')).toBeHidden()
+  await page.getByRole('button', { name: 'Exit' }).click()
+  await expect(page.locator('header.bar')).toBeVisible()
   const url = page.url()
   await logout(page)
 
@@ -66,7 +89,9 @@ test('a shared dashboard shows each user their own, and follows a result', async
   expect(opsHosts).toBeLessThan(hosts)
   await expect(page.getByRole('region', { name: 'passive1 / a' })).toContainText('Not found')
   await expect(page.getByRole('region', { name: 'Unhandled service problems' })).not.toContainText('passive1')
-  await expect(page.getByRole('button', { name: 'Change' })).toHaveCount(0)
+  // Shared: ops may change it, and not delete it.
+  await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Delete' })).toHaveCount(0)
   await fits(page)
   await logout(page)
 

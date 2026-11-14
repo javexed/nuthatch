@@ -33,3 +33,22 @@ dashboards means deleting them there.
 
 A free canvas, maps, business processes, graphs of performance data over
 time, and sharing with some users only.
+
+## The grid
+
+Panels sit on a grid of 12 columns. In edit mode a panel is moved by the
+grip in its header and resized by its lower right corner; whatever is in
+the way moves down, and everything rises as far as it can. The gear opens
+a panel's settings. On a narrow screen the panels are one column, in
+order from the top.
+
+Panels: a number of a check's performance data with a line of how it
+went (from the graphs, `[graphs]`), a graph of one number, problems,
+totals by state (of a host group, if given), one host or service, and the
+latest alerts or notifications.
+
+A shared dashboard is changed by anyone who can open it, and stays
+shared; only its owner deletes it or stops sharing it.
+
+Wall shows the panels alone, full screen; Escape leaves it.
+

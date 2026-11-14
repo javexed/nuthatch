@@ -4,6 +4,8 @@ import type { Widget } from '@nuthatch/api'
 import { computed } from 'vue'
 import EventLog from './EventLog.vue'
 import ObjectCard from './ObjectCard.vue'
+import PerfGraphs from './PerfGraphs.vue'
+import Sparkline from './Sparkline.vue'
 import StatusList from './StatusList.vue'
 import Totals from './Totals.vue'
 
@@ -21,6 +23,9 @@ const title = computed(() => {
       return w.service ? `${w.host} / ${w.service}` : w.host
     case 'log':
       return w.lines === 'alerts' ? 'Alerts' : 'Notifications'
+    case 'stat':
+    case 'graph':
+      return `${w.service ? `${w.host} / ${w.service}` : w.host}${w.label ? ` · ${w.label}` : ''}`
   }
   return ''
 })
@@ -32,7 +37,7 @@ const farAhead = since + 365 * 86400
 
 <template>
   <section class="card widget" :aria-label="title">
-    <h2>{{ title }}</h2>
+    <h2><slot name="handle" />{{ title }}<slot name="tools" /></h2>
     <Totals v-if="widget.type === 'totals'" :kind="widget.of === 'hosts' ? 'host' : 'service'" :hostgroup="widget.hostgroup" />
     <StatusList
       v-else-if="widget.type === 'problems'"
@@ -48,6 +53,8 @@ const farAhead = since + 365 * 86400
       empty="None"
     />
     <ObjectCard v-else-if="widget.type === 'object'" :backend="widget.backend" :host="widget.host" :service="widget.service" />
+    <Sparkline v-else-if="widget.type === 'stat'" :backend="widget.backend" :host="widget.host" :service="widget.service" :label="widget.label" :hours="widget.hours" />
+    <PerfGraphs v-else-if="widget.type === 'graph'" :backend="widget.backend" :host="widget.host" :service="widget.service" :label="widget.label" :fixed="widget.hours ?? 24" />
     <EventLog v-else-if="widget.type === 'log'" :from="since - (widget.hours ?? 24) * 3600" :to="farAhead" :lines="widget.lines" :page-size="widget.limit ?? 10" />
   </section>
 </template>
