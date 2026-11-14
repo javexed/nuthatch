@@ -7,13 +7,14 @@
 // interface's files.
 
 import { createHash } from 'node:crypto'
-import { chmodSync, lstatSync, readFileSync, unlinkSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from 'node:fs'
 import { isIP } from 'node:net'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createAdaptorServer, serve } from '@hono/node-server'
 import { parse } from 'smol-toml'
 import { type Peer, VERSION, buildApp, userName } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers } from './auth.ts'
+import { Agents } from './agents.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
 import { pluginsDir } from './catalogue.ts'
 import { ConfigAdmin } from './configadmin.ts'
@@ -26,7 +27,7 @@ import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'notifications', 'graphs', 'roles', 'backend', 'peer', 'app_origins']
+const KEYS = ['agents', 'listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'notifications', 'graphs', 'roles', 'backend', 'peer', 'app_origins']
 
 function fail(message: string): never {
   console.error(message)
@@ -90,6 +91,7 @@ function main(): void {
   const backends: Backend[] = []
   const admins = new Map<string, ConfigAdmin>()
   const pushUrls = new Map<string, string>()
+  const agents = new Map<string, Agents>()
   const remotes: RemoteSite[] = []
   const keyOf = (file: unknown, what: string): string => {
     if (typeof file !== 'string') fail(`${path}: ${what} needs key_file, the file that holds its key`)
@@ -142,11 +144,44 @@ function main(): void {
           new ConfigAdmin(backend, { dir: c.dir, main: c.main, verify: c.verify, reload: c.reload, paths: new PathMap((c.paths ?? {}) as Record<string, string>), plugins: pluginsDir(c.plugins) }),
         )
       }
+      // [backend.agents]: checkd's agents directory, and how hosts reach the engine.
+      if (entry.agents !== undefined) {
+        const { dir, engine, ca, server_name, ...rest } = entry.agents as Record<string, unknown>
+        if (Object.keys(rest).length > 0) fail(`${path}: backend ${name}: agents has no setting ${Object.keys(rest).join(', ')}`)
+        if (typeof dir !== 'string' || typeof ca !== 'string') fail(`${path}: backend ${name}: agents needs dir (checkd's agents=) and ca (the workers' ca.crt)`)
+        if (typeof engine !== 'string' || !/^([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\]):\d{1,5}$/.test(engine)) {
+          fail(`${path}: backend ${name}: agents.engine is host:port, the engine's worker listener as hosts reach it`)
+        }
+        if (server_name !== undefined && (typeof server_name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(server_name))) fail(`${path}: backend ${name}: agents.server_name is a host name`)
+        if (!existsSync(dir) || !existsSync(ca)) console.error(`warning: backend ${name}: agents.dir or agents.ca is not there yet`)
+        const admin = admins.get(name)
+        agents.set(
+          name,
+          new Agents(backend, { dir, engine, ca, serverName: server_name as string | undefined, metrics: pushUrls.get(name) }, () =>
+            admin ? admin.reload() : backend.command(`[${Math.floor(Date.now() / 1000)}] RESTART_PROGRAM`),
+          ),
+        )
+      }
     } catch (err) {
       fail(`${path}: backend ${name}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
   if (backends.length === 0 && remotes.length === 0) fail(`${path}: no [[backend]]`)
+
+  // [agents]: where the agent binaries are, and this nuthatch's address as hosts reach it.
+  let agentBin: string | undefined
+  let agentBase: string | undefined
+  if (config.agents !== undefined) {
+    const { bin, url, ...rest } = (typeof config.agents === 'object' && config.agents !== null ? config.agents : {}) as Record<string, unknown>
+    if (Object.keys(rest).length > 0) fail(`${path}: [agents] has no setting ${Object.keys(rest).join(', ')}`)
+    if (typeof bin !== 'string') fail(`${path}: [agents] bin is the directory of checkd's dist/agent`)
+    if (!existsSync(join(bin, 'SHA256SUMS'))) console.error(`warning: [agents] bin: no ${join(bin, 'SHA256SUMS')} yet (checkd's scripts/build-agents.sh)`)
+    agentBin = bin
+    if (url !== undefined) {
+      if (typeof url !== 'string' || !/^https?:\/\/[^\s/]+(\/[^\s]*)?$/.test(url)) fail(`${path}: [agents] url is this nuthatch's address, as hosts reach it`)
+      agentBase = url.replace(/\/+$/, '')
+    }
+  }
 
   // Other nuthatches that may ask here for their users.
   const peers: Peer[] = []
@@ -226,6 +261,9 @@ function main(): void {
     webRoot: webRoot === undefined ? undefined : resolve(webRoot),
     config: admins,
     pushUrls,
+    agents,
+    agentBin,
+    agentBase,
     remotes,
     peers,
     appOrigins: appOrigins as string[],

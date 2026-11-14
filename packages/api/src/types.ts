@@ -39,6 +39,8 @@ export interface Session {
   backends: BackendStatus[]
   /** The backends whose config can be changed here, by those with the role config_edit. */
   config_backends: string[]
+  /** Backends whose agents this user may add here. */
+  agent_backends?: string[]
 }
 
 export interface Sort {
@@ -347,4 +349,17 @@ export interface TailnetMachine {
   online: boolean
   /** Someone else's, shared with this tailnet. */
   shared: boolean
+}
+
+/** A host's checkd-agent. */
+export interface AgentRow {
+  host: string
+  /** Connected now; absent when it cannot be told. */
+  connected?: boolean
+}
+
+export interface AgentInstall {
+  /** When the code in the command stops working, ms since 1970. */
+  until: number
+  command: string
 }

@@ -74,6 +74,7 @@ const MORE = computed(() => [
   { name: 'history', label: 'History' },
   { name: 'availability', label: 'Availability' },
   ...(session.session && session.session.config_backends.length > 0 ? [{ name: 'config', label: 'Config' }] : []),
+  ...((session.session?.agent_backends ?? []).length > 0 ? [{ name: 'agents', label: 'Agents' }] : []),
   { name: 'device', label: 'This device' },
 ])
 const logo = `${import.meta.env.BASE_URL}favicon.svg`
@@ -85,6 +86,7 @@ const logo = `${import.meta.env.BASE_URL}favicon.svg`
     <nav class="pages" aria-label="Pages">
       <RouterLink v-for="page in PAGES" :key="page.name" :to="{ name: page.name }">{{ page.label }}</RouterLink>
       <RouterLink v-if="session.session.config_backends.length > 0" :to="{ name: 'config' }">Config</RouterLink>
+      <RouterLink v-if="(session.session.agent_backends ?? []).length > 0" :to="{ name: 'agents' }">Agents</RouterLink>
     </nav>
     <ConnectionDot />
     <RouterLink :to="{ name: 'device' }" class="who" title="This device: notifications">{{ session.session.user }}</RouterLink>

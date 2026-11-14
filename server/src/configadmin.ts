@@ -526,7 +526,7 @@ export class ConfigAdmin {
     return rows.length === 1
   }
 
-  private async reload(): Promise<void> {
+  async reload(): Promise<void> {
     if (this.settings.reload) {
       const { code, output } = await run(this.settings.reload, 60_000)
       if (code !== 0) throw new Error(`the reload command failed: ${output.trim()}`)

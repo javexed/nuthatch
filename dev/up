@@ -56,8 +56,13 @@ naemon)
 checkd)
     checkd=${CHECKD:-$here/../../checkd/target/debug/checkd}
     if [ -z "${CHECKD:-}" ]; then
-        (cd "$here/../../checkd" && cargo build --quiet -p checkd)
+        (cd "$here/../../checkd" && cargo build --quiet -p checkd --features workers)
     fi
+    # Agents (docs/agents.md): a workers listener on this machine, with
+    # the agents directory nuthatch writes.
+    mkdir -p "$run/workers/agents"
+    [ -f "$run/workers/ca.crt" ] || "$checkd" make-certs "$run/workers" localhost 127.0.0.1 >/dev/null
+    printf 'listen=127.0.0.1:4731\ncert=engine.crt\nkey=engine.key\nagents=agents\n' > "$run/workers/workers.cfg"
     mkdir -p "$run/checkresults"
     main "$here" "$run" > "$run/naemon.cfg"
     echo "\$USER1\$=$here/plugins" > "$run/resource.cfg"
@@ -66,7 +71,8 @@ checkd)
     # For dev/restart.
     echo $$ > "$run/pid"
     # --http: where services that take pushes are told their results.
-    exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" --http 127.0.0.1:6560 "$run/naemon.cfg"
+    exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" --http 127.0.0.1:6560 \
+        --workers "$run/workers/workers.cfg" "$run/naemon.cfg"
     ;;
 *)
     echo "usage: dev/up naemon|checkd" >&2

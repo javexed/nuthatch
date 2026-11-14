@@ -35,6 +35,12 @@ maintainer and no promised time to answer. Only the newest commit of
   title and where it redirects to. It is for `config_edit` only, and
   each look is in the audit log. It reaches what the server can reach,
   including addresses the browser cannot.
+- **The same role installs agents.** It writes agent tokens into
+  checkd's agents directory and makes install commands. A command's
+  code fetches, once and within 15 minutes, a script with the host's
+  token in it, without a login; the agent binaries are served to anyone
+  too. Each fetch is in the audit log. Commands are made only for an
+  `https` address of nuthatch. See [docs/agents.md](docs/agents.md).
 
 ## Logging in
 
@@ -89,6 +95,8 @@ maintainer and no promised time to answer. Only the newest commit of
 - **Other sites' nuthatch**, with `nuthatch = "https://..."` under a
   backend: requests for the logged-in user, with a key for that site
   ([docs/sites.md](docs/sites.md)).
+- **checkd's `/metrics`**, with `[backend.agents]` and `push_url`: read to
+  show which agents are connected.
 - The page loads nothing from anywhere but the server itself.
 
 ## Not yet looked at by anyone else

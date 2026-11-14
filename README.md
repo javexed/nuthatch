@@ -50,6 +50,9 @@ and is made to be used on a phone as much as at a desk.
   site ([docs/sites.md](docs/sites.md)).
 - **On a phone:** installable from the browser, with notifications
   pushed to it ([docs/notifications.md](docs/notifications.md)).
+- **Agents** (checkd): a one-line command installs checkd's agent on a
+  Linux or Windows host, and NRPE if wanted
+  ([docs/agents.md](docs/agents.md)).
 
 With checkd as the engine there is more in the config form: services a
 job elsewhere tells its result, services that stand for others, and
@@ -83,7 +86,8 @@ Everything is TypeScript, in one pnpm workspace:
   [history and availability](docs/history.md),
   [changing the config](docs/config.md),
   [dashboards](docs/dashboards.md),
-  [several sites](docs/sites.md).
+  [several sites](docs/sites.md),
+  [agents](docs/agents.md).
 
 ## Try it
 
@@ -218,6 +222,7 @@ here and in the Android app, are made from `docs/logo.svg` by
   [docs/graphs.md](docs/graphs.md).
 - `[notifications]`: on phones and desktops, see
   [docs/notifications.md](docs/notifications.md).
+- `[agents]` and `[backend.agents]`: see [docs/agents.md](docs/agents.md).
 
 ## Dependencies
 

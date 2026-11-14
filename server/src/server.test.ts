@@ -1,5 +1,6 @@
 import { createDecipheriv, createECDH, createHash, hkdfSync, randomBytes, verify as cryptoVerify } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -8,6 +9,7 @@ import type { FoundPort, QueryAnswer, Role } from '@nuthatch/api'
 import bcrypt from 'bcryptjs'
 import * as unixcrypt from 'unixcrypt'
 import { describe, expect, it } from 'vitest'
+import { Agents } from './agents.ts'
 import { buildApp } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
@@ -1189,5 +1191,102 @@ describe('how a service takes pushes', () => {
     const plain = app({ authorized_for_config_edit: ['ops'] })
     expect(await (await plain.request(path)).json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', last: 1700000000 })
     expect(await (await plain.request('/api/v1/push-info/site?host=nas&service=disk')).json()).toEqual({ takes: false })
+  })
+})
+
+describe('agents', () => {
+  const urlOf = (command: string) => /'(https?:\/\/[^']+)'/.exec(command)?.[1] ?? ''
+  function site(roles: Record<string, string[]>, agentBase = 'https://nuthatch.example.test') {
+    const dir = mkdtempSync(join(tmpdir(), 'nuthatch-agents-'))
+    mkdirSync(join(dir, 'agents'))
+    mkdirSync(join(dir, 'bin'))
+    writeFileSync(join(dir, 'ca.crt'), '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n')
+    writeFileSync(join(dir, 'bin', 'checkd-agent-linux-x86_64'), 'ELF')
+    writeFileSync(join(dir, 'bin', 'notes.txt'), 'not served')
+    const sum = createHash('sha256').update('ELF').digest('hex')
+    writeFileSync(join(dir, 'bin', 'SHA256SUMS'), `${sum}  checkd-agent-linux-x86_64\n${sum}  checkd-agent-windows-x86_64.exe\n`)
+    const backend = fake('site', (request) => {
+      if (request.startsWith('GET contactgroups')) return []
+      if (request.startsWith('GET hosts\nColumns: name\nFilter: name = ')) return request.endsWith('= web1') || request.endsWith('= win1') ? [[request.split('= ')[1]]] : []
+      return []
+    })
+    let reloads = 0
+    const agents = new Agents(backend, { dir: join(dir, 'agents'), engine: 'engine.example.test:4730', ca: join(dir, 'ca.crt') }, async () => {
+      reloads++
+    })
+    const store = new Store(':memory:')
+    const app = buildApp({
+      backends: [backend], store, events: new Events([]), roles: new RolesConfig(roles), limiter: new Limiter(), cookieSecure: false, devUser: 'ops',
+      agents: new Map([['site', agents]]), agentBin: join(dir, 'bin'), agentBase,
+    })
+    const post = (body: unknown) => app.request('/api/v1/agents/site', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify(body) })
+    return { dir, app, post, store, reloads: () => reloads }
+  }
+
+  it('makes a token, reloads, and gives a command whose code works once', async () => {
+    const { dir, app, post, reloads } = site({ authorized_for_config_edit: ['ops'] })
+    const made = await post({ host: 'web1', os: 'linux', nrpe: true, plugins: true })
+    expect(made.status).toBe(200)
+    const { command } = (await made.json()) as { command: string }
+    expect(command).toMatch(/^curl -fsSL --proto '=https' 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]{24}' \| sudo sh$/)
+    expect(reloads()).toBe(1)
+    const token = readFileSync(join(dir, 'agents', 'web1.token'), 'utf8').trim()
+    expect(token).toMatch(/^[A-Za-z0-9_-]{32}$/)
+    expect(statSync(join(dir, 'agents', 'web1.token')).mode & 0o777).toBe(0o640)
+    const path = new URL(urlOf(command)).pathname
+    // A look ahead leaves the code as it is.
+    expect((await app.request(path, { method: 'HEAD' })).status).toBe(200)
+    const script = await app.request(path)
+    expect(script.status).toBe(200)
+    const text = await script.text()
+    expect(text).toContain(token)
+    expect(text).toContain('--engine engine.example.test:4730 --name web1')
+    expect(text).toContain('--restrict-path /usr/lib/nagios/plugins')
+    expect(text).toContain('nagios-nrpe-server')
+    expect(text).toContain(createHash('sha256').update('ELF').digest('hex'))
+    // A shell reads it.
+    const file = join(dir, 'install.sh')
+    writeFileSync(file, text)
+    expect(execFileSync('sh', ['-n', file]).toString()).toBe('')
+    // Once only.
+    expect((await app.request(path)).status).toBe(404)
+    const listed = await app.request('/api/v1/agents/site')
+    expect(await listed.json()).toEqual({ agents: [{ host: 'web1' }] })
+  })
+
+  it('writes a PowerShell script for Windows', async () => {
+    const { app, post } = site({ authorized_for_config_edit: ['ops'] })
+    const { command } = (await (await post({ host: 'win1', os: 'windows', nrpe: true, plugins: false })).json()) as { command: string }
+    expect(command).toMatch(/^irm 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
+    const text = await (await app.request(new URL(urlOf(command)).pathname)).text()
+    expect(text).toContain('Register-ScheduledTask')
+    expect(text).toContain("-UserId 'NT AUTHORITY\\LOCALSERVICE'")
+    expect(text).not.toContain('SYSTEM')
+    expect(text).toContain('--token-file `"$data\\token`"')
+    expect(text).not.toContain('NSClient')
+    expect(text).not.toContain('--restrict-path')
+  })
+
+  it('serves only the listed binaries, and is for config_edit only', async () => {
+    const plain = site({ authorized_for_config_edit: ['ops'] }, 'http://nuthatch.example.test')
+    expect((await plain.post({ host: 'web1', os: 'linux' })).status).toBe(400)
+    expect(readdirSync(join(plain.dir, 'agents'))).toEqual([])
+    const local = site({ authorized_for_config_edit: ['ops'] }, 'http://127.0.0.1:8092')
+    expect((await local.post({ host: 'web1', os: 'linux' })).status).toBe(200)
+    const { app, post, dir } = site({})
+    expect((await app.request('/agent/bin/checkd-agent-linux-x86_64')).status).toBe(200)
+    expect((await app.request('/agent/bin/notes.txt')).status).toBe(404)
+    expect((await app.request('/agent/bin/..%2Fca.crt')).status).toBe(404)
+    expect((await post({ host: 'web1', os: 'linux' })).status).toBe(403)
+    expect((await app.request('/api/v1/agents/site')).status).toBe(403)
+    const editor = site({ authorized_for_config_edit: ['ops'] })
+    for (const bad of [{ host: 'nope', os: 'linux' }, { host: 'web1;x', os: 'linux' }, { host: '../x', os: 'linux' }, { host: 'web1', os: 'mac' }]) {
+      expect((await editor.post(bad)).status, JSON.stringify(bad)).toBe(400)
+    }
+    expect(readdirSync(join(dir, 'agents'))).toEqual([])
+    expect((await editor.post({ host: 'web1', os: 'linux' })).status).toBe(200)
+    const removed = await editor.app.request('/api/v1/agents/site/web1', { method: 'DELETE', headers: { 'X-Requested-With': 'nuthatch' } })
+    expect(removed.status).toBe(200)
+    expect(readdirSync(join(editor.dir, 'agents'))).toEqual([])
   })
 })

@@ -9,6 +9,7 @@ import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
+import { type Agents, InstallCodes, agentName, binaries, linuxScript, windowsScript } from './agents.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
 import { type ConfigAdmin, Conflict, Unverified } from './configadmin.ts'
@@ -58,6 +59,12 @@ export interface Deps {
   config?: Map<string, ConfigAdmin>
   /** By backend: where its engine takes pushes (checkd's HTTP API), as jobs elsewhere reach it. */
   pushUrls?: Map<string, string>
+  /** By backend: checkd's agents, which nuthatch adds and installs. */
+  agents?: Map<string, Agents>
+  /** The agent binaries, checkd's dist/agent. */
+  agentBin?: string
+  /** This nuthatch's address as monitored hosts reach it; else the request's. */
+  agentBase?: string
   /** Sites reached through their own nuthatch. */
   remotes?: RemoteSite[]
   /** The origins of apps served elsewhere (the phone app) that may call the API, with a token. */
@@ -374,6 +381,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       tables: TABLES,
       backends,
       config_backends: configBackends,
+      agent_backends: roles.has('config_edit') && deps.agentBin ? [...(deps.agents?.keys() ?? [])] : [],
     }
     return c.json(answer)
   })
@@ -902,7 +910,91 @@ export function buildApp(deps: Deps): Hono<Env> {
     }),
   )
 
+  // Agents: for the role config_edit, on this site's own backends.
+  const codes = new InstallCodes()
+  async function agentsOf(c: Context<Env>): Promise<{ agents: Agents; user: string }> {
+    const { user, peer } = c.get('identity')
+    if (peer) throw new Forbidden('agents are added at their own site')
+    if (!(await who(user)).roles.has('config_edit')) throw new Forbidden('agents need the role config_edit')
+    const agents = deps.agents?.get(c.req.param('backend') ?? '')
+    if (!agents || !deps.agentBin) throw new Refused(`no agents for '${c.req.param('backend')}' here`)
+    return { agents, user }
+  }
+  /** Who fetched, for the audit log: behind a proxy, its last X-Forwarded-For. */
+  function address(c: Context<Env>): string {
+    if (deps.cookieSecure) {
+      const last = (c.req.header('X-Forwarded-For') ?? '').split(',').pop()?.trim() ?? ''
+      if (/^[0-9A-Fa-f:.]{2,45}$/.test(last)) return last
+    }
+    try {
+      return getConnInfo(c).remote.address ?? 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  }
+  function baseOf(c: Context<Env>): string {
+    if (deps.agentBase) return deps.agentBase
+    const url = new URL(c.req.url)
+    const host = c.req.header('host') ?? url.host
+    return `${deps.cookieSecure ? 'https:' : url.protocol}//${host}`
+  }
+
+  app.get('/api/v1/agents/:backend', async (c) => {
+    const { agents } = await agentsOf(c)
+    return c.json({ agents: await agents.list() })
+  })
+
+  app.post('/api/v1/agents/:backend', async (c) => {
+    const { agents, user } = await agentsOf(c)
+    const sent = await body(c)
+    const { host, os } = sent
+    if (!agentName(host)) throw new Refused('a host name of letters, digits, ., - and _')
+    if (os !== 'linux' && os !== 'windows') throw new Refused('os is linux or windows')
+    // The script carries a token and is run as root: never over plain
+    // HTTP, but to this machine itself.
+    const base = baseOf(c)
+    const secure = base.startsWith('https://')
+    if (!secure && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(base)) {
+      throw new Refused('install commands need nuthatch at an https address: set url under [agents]')
+    }
+    if (!/^https?:\/\/[A-Za-z0-9.:[\]-]+(\/[A-Za-z0-9._~/-]*)?$/.test(base)) throw new Refused('this address cannot go into a command; set url under [agents]')
+    const nrpe = os === 'linux' && sent.nrpe === true
+    const token = await agents.add(host)
+    const { code, until } = codes.make({ backend: agents.backend.name, host, token, os, nrpe, plugins: sent.plugins === true })
+    const url = `${base}/agent/install/${code}`
+    deps.store.audit(user, agents.backend.name, 'agent', `${host} (${os}${nrpe ? ', nrpe' : ''})`)
+    return c.json({ until, command: os === 'linux' ? `curl -fsSL${secure ? " --proto '=https'" : ''} '${url}' | sudo sh` : `irm '${url}' | iex` })
+  })
+
+  app.delete('/api/v1/agents/:backend/:host', async (c) => {
+    const { agents, user } = await agentsOf(c)
+    const host = c.req.param('host')
+    if (!(await agents.remove(host))) return c.json({ error: 'no such agent' }, 404)
+    deps.store.audit(user, agents.backend.name, 'agent removed', host)
+    return c.json({})
+  })
+
   app.all('/api/*', (c) => c.json({ error: 'no such thing' }, 404))
+
+  // What a monitored host fetches: its install script, once, by its code;
+  // and the agent binaries, which hold nothing secret.
+  app.get('/agent/install/:code', (c) => {
+    // A look ahead (HEAD, a link preview) does not use the code up.
+    if (c.req.method === 'HEAD') return c.body(null, 200)
+    const install = codes.take(c.req.param('code'))
+    const agents = install && deps.agents?.get(install.backend)
+    if (!install || !agents || !deps.agentBin) return c.text('This install code is used or has expired. Make a new one in nuthatch.\n', 404)
+    const facts = { install, settings: agents.settings, ca: agents.ca(), base: baseOf(c), sums: binaries(deps.agentBin) }
+    deps.store.audit('', install.backend, 'agent install fetched', `${install.host} from ${address(c)}`)
+    return c.text(install.os === 'linux' ? linuxScript(facts) : windowsScript(facts), 200, { 'Cache-Control': 'no-store' })
+  })
+
+  app.get('/agent/bin/:file', async (c) => {
+    const file = c.req.param('file')
+    if (!deps.agentBin || !binaries(deps.agentBin).has(file)) return c.text('not found\n', 404)
+    const data = await readFile(join(deps.agentBin, file))
+    return c.body(new Uint8Array(data), 200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-cache' })
+  })
 
   // The interface's files hold nothing secret and are served to anyone,
   // so that the login page can load. A path that is no file is the
