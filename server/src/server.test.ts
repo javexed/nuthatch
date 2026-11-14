@@ -1258,7 +1258,7 @@ describe('agents', () => {
   it('writes a PowerShell script for Windows', async () => {
     const { app, post } = site({ authorized_for_config_edit: ['ops'] })
     const { command } = (await (await post({ host: 'win1', os: 'windows', nrpe: true, plugins: false })).json()) as { command: string }
-    expect(command).toMatch(/^irm 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
+    expect(command).toMatch(/^\[Net\.ServicePointManager\]::SecurityProtocol='Tls12';irm 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
     const text = await (await app.request(new URL(urlOf(command)).pathname)).text()
     expect(text).toContain('Register-ScheduledTask')
     expect(text).toContain("-UserId 'NT AUTHORITY\\LOCALSERVICE'")

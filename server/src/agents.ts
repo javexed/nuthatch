@@ -73,9 +73,11 @@ export function installCommand(install: Pick<Install, 'os' | 'pin'>, url: string
     const tls = url.startsWith('https://') ? ` --proto '=https'${pin ? ` -k --pinnedpubkey 'sha256//${pin.key}'` : ''}` : ''
     return `curl -fsSL${tls} '${url}' | sudo sh`
   }
-  if (!pin) return `irm '${url}' | iex`
+  // Windows PowerShell 5.1 may offer only TLS 1.0 unless told.
+  const tls12 = "[Net.ServicePointManager]::SecurityProtocol='Tls12';"
+  if (!pin) return `${url.startsWith('https://') ? tls12 : ''}irm '${url}' | iex`
   return (
-    "[Net.ServicePointManager]::SecurityProtocol='Tls12';" +
+    tls12 +
     `[Net.ServicePointManager]::ServerCertificateValidationCallback={param($s,$c)-join([Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())|%{$_.ToString('X2')}) -eq '${pin.cert}'};` +
     `irm '${url}' | iex`
   )

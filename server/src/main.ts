@@ -172,7 +172,9 @@ function main(): void {
   // [agents]: where the agent binaries are, and this nuthatch's address as hosts reach it.
   let agentBin: string | undefined
   let agentBase: string | undefined
-  let agentListen: { hostname: string; port: number; addresses: string[]; pin: Pin; cert: string; key: string } | undefined
+  // Hosts-only listener: TLS with cert and key, or plain HTTP on loopback
+  // for a proxy or tunnel in front (then url is what hosts reach).
+  let agentListen: { hostname: string; port: number; addresses: string[]; pin?: Pin; cert?: string; key?: string } | undefined
   if (config.agents !== undefined) {
     const { bin, url, listen: hostsListen, cert, key, addresses, ...rest } = (typeof config.agents === 'object' && config.agents !== null ? config.agents : {}) as Record<string, unknown>
     if (Object.keys(rest).length > 0) fail(`${path}: [agents] has no setting ${Object.keys(rest).join(', ')}`)
@@ -183,24 +185,31 @@ function main(): void {
       if (typeof url !== 'string' || !/^https?:\/\/[^\s/]+(\/[^\s]*)?$/.test(url)) fail(`${path}: [agents] url is this nuthatch's address, as hosts reach it`)
       agentBase = url.replace(/\/+$/, '')
     }
-    // nuthatch's own TLS listener for hosts, its certificate checked by pins.
     if (hostsListen !== undefined) {
-      if (url !== undefined) fail(`${path}: [agents] takes url or listen, not both`)
       const at = typeof hostsListen === 'string' ? hostsListen.lastIndexOf(':') : -1
       const hostname = typeof hostsListen === 'string' ? hostsListen.slice(0, at).replace(/^\[|\]$/g, '') : ''
       const port = typeof hostsListen === 'string' ? Number(hostsListen.slice(at + 1)) : NaN
       if (at < 0 || isIP(hostname) === 0 || !Number.isInteger(port)) fail(`${path}: [agents] listen is address:port`)
-      if (typeof cert !== 'string' || typeof key !== 'string') fail(`${path}: [agents] listen needs cert and key`)
-      if (!Array.isArray(addresses) || addresses.length === 0 || !addresses.every((a) => typeof a === 'string' && (isIP(a) !== 0 || /^[A-Za-z0-9.-]+$/.test(a)))) {
-        fail(`${path}: [agents] listen needs addresses, this machine's addresses or names as hosts reach it`)
+      if ((cert === undefined) !== (key === undefined) || (cert !== undefined && (typeof cert !== 'string' || typeof key !== 'string'))) fail(`${path}: [agents] cert and key go together`)
+      if (cert === undefined) {
+        // Plain HTTP: only for a proxy or tunnel on this machine.
+        if (!['127.0.0.1', '::1'].includes(hostname) || url === undefined) fail(`${path}: [agents] listen without cert is for a proxy or tunnel: listen on 127.0.0.1, and url is the address it gives hosts`)
       }
-      let pin: Pin
-      try {
-        pin = pinOf(readFileSync(cert, 'utf8'))
-      } catch (err) {
-        fail(`${path}: [agents] cert: ${err instanceof Error ? err.message : String(err)}`)
+      if (url !== undefined) {
+        if (addresses !== undefined) fail(`${path}: [agents] takes url or addresses, not both`)
+      } else if (!Array.isArray(addresses) || addresses.length === 0 || !addresses.every((a) => typeof a === 'string' && (isIP(a) !== 0 || /^[A-Za-z0-9.-]+$/.test(a)))) {
+        fail(`${path}: [agents] listen needs url, or addresses: this machine's addresses or names as hosts reach it`)
       }
-      agentListen = { hostname, port, addresses: addresses as string[], pin, cert, key }
+      let pin: Pin | undefined
+      if (typeof cert === 'string' && url === undefined) {
+        // Hosts reach this listener straight: its certificate is checked by pin.
+        try {
+          pin = pinOf(readFileSync(cert, 'utf8'))
+        } catch (err) {
+          fail(`${path}: [agents] cert: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+      agentListen = { hostname, port, addresses: (addresses ?? []) as string[], pin, cert: cert as string | undefined, key: key as string | undefined }
     }
   }
 
@@ -285,7 +294,7 @@ function main(): void {
     agents,
     agentBin,
     agentBase,
-    agentListen: agentListen && { port: agentListen.port, addresses: agentListen.addresses, pin: agentListen.pin },
+    agentListen: agentListen?.pin && { port: agentListen.port, addresses: agentListen.addresses, pin: agentListen.pin },
     remotes,
     peers,
     appOrigins: appOrigins as string[],
@@ -312,15 +321,33 @@ function main(): void {
     })
   }
   server.on('error', (err) => fail(`cannot listen at ${listen}: ${err.message}`))
-  // For monitored hosts: the install script and the binaries only, over TLS.
+  // For monitored hosts: the install script and the binaries only.
   let hostsServer: ReturnType<typeof createAdaptorServer> | undefined
   if (agentListen) {
-    const { hostname: h, port: p, cert, key } = agentListen
-    hostsServer = serve(
-      { fetch: hostsOnly(app.fetch), hostname: h, port: p, createServer: createHttpsServer, serverOptions: { cert: readFileSync(cert), key: readFileSync(key) } },
-      () => console.error(`agents: listening at https://${h.includes(':') ? `[${h}]` : h}:${p}`),
-    )
-    hostsServer.on('error', (err) => fail(`cannot listen at ${h}:${p} for agents: ${err.message}`))
+    const { hostname: h, port: p, cert, key, pin } = agentListen
+    const where = `${cert ? 'https' : 'http'}://${h.includes(':') ? `[${h}]` : h}:${p}`
+    if (cert && key) {
+      const tls = () => ({ cert: readFileSync(cert), key: readFileSync(key) })
+      const server = serve({ fetch: hostsOnly(app.fetch), hostname: h, port: p, createServer: createHttpsServer, serverOptions: tls() }, () => console.error(`agents: listening at ${where}`))
+      hostsServer = server
+      // A renewed certificate (Let's Encrypt) is taken up within the hour.
+      let seen = readFileSync(cert, 'utf8')
+      setInterval(() => {
+        try {
+          const now = readFileSync(cert, 'utf8')
+          if (now === seen) return
+          ;(server as unknown as { setSecureContext(o: object): void }).setSecureContext(tls())
+          if (pin) Object.assign(pin, pinOf(now))
+          seen = now
+          console.error('agents: certificate renewed')
+        } catch (err) {
+          console.error(`agents: cannot read the renewed certificate: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }, 3600_000).unref()
+    } else {
+      hostsServer = serve({ fetch: hostsOnly(app.fetch), hostname: h, port: p }, () => console.error(`agents: listening at ${where}`))
+    }
+    hostsServer.on('error', (err) => fail(`cannot listen at ${where} for agents: ${err.message}`))
   }
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
