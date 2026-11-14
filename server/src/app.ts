@@ -958,6 +958,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     if (!agentName(host)) throw new Refused('a host name of letters, digits, ., - and _')
     if (os !== 'linux' && os !== 'windows') throw new Refused('os is linux or windows')
     const nrpe = os === 'linux' && sent.nrpe === true
+    if (nrpe && /^wss?:/.test(agents.settings.engine)) throw new Refused('NRPE needs the engine to reach the host, which it does not through a proxy or tunnel')
     let base: string
     let at: string
     const listen = deps.agentListen

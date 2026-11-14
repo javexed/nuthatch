@@ -150,8 +150,8 @@ function main(): void {
         const { dir, engine, ca, server_name, ...rest } = entry.agents as Record<string, unknown>
         if (Object.keys(rest).length > 0) fail(`${path}: backend ${name}: agents has no setting ${Object.keys(rest).join(', ')}`)
         if (typeof dir !== 'string' || typeof ca !== 'string') fail(`${path}: backend ${name}: agents needs dir (checkd's agents=) and ca (the workers' ca.crt)`)
-        if (typeof engine !== 'string' || !/^([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\])?:\d{1,5}$/.test(engine)) {
-          fail(`${path}: backend ${name}: agents.engine is host:port, the engine's worker listener as hosts reach it, or :port at the address hosts reach nuthatch at`)
+        if (typeof engine !== 'string' || !(/^([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\])?:\d{1,5}$/.test(engine) || /^wss?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?(\/[A-Za-z0-9._~/-]*)?$/.test(engine))) {
+          fail(`${path}: backend ${name}: agents.engine is host:port, the engine's worker listener as hosts reach it; :port at the address hosts reach nuthatch at; or wss://host/path through a proxy or tunnel`)
         }
         if (server_name !== undefined && (typeof server_name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(server_name))) fail(`${path}: backend ${name}: agents.server_name is a host name`)
         if (!existsSync(dir) || !existsSync(ca)) console.error(`warning: backend ${name}: agents.dir or agents.ca is not there yet`)

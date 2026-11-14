@@ -75,9 +75,9 @@ certificate. Pick one setup:
 |---|---|---|
 | VPN (Tailscale, WireGuard) | `url` = nuthatch's VPN address | the VPN address |
 | LAN, no certificate authority | own listener, certificate pinned | a LAN address |
-| Let's Encrypt, with a proxy | own listener on loopback, proxy in front | open or forwarded |
+| Let's Encrypt, with a proxy | own listener on loopback, proxy in front | open or forwarded, or `wss://` through the proxy |
 | Let's Encrypt, certificate files | own listener with the files | open or forwarded |
-| Cloudflare Tunnel | own listener on loopback, tunnel in front | see below |
+| Cloudflare Tunnel | own listener on loopback, tunnel in front | `wss://` through the tunnel |
 
 nuthatch's own listener (`[agents] listen`) answers `/agent/install/`
 and `/agent/bin/` only, never the interface.
@@ -125,18 +125,29 @@ hook).
     key = "/etc/nuthatch/privkey.pem"
     url = "https://nuthatch.example.com"
 
-**Cloudflare Tunnel.** As with a proxy, a plain listener on loopback, and
-the tunnel in front:
+**Cloudflare Tunnel.** As with a proxy, a plain listener on loopback,
+and for the engine its WebSocket listener (`websocket=127.0.0.1:4732` in
+checkd's workers file), both behind the tunnel:
+
+    [agents]
+    listen = "127.0.0.1:10445"
+    url = "https://nuthatch.example.com"
+
+    [backend.agents]
+    engine = "wss://checkd.example.com/workers"
+    server_name = "checkd"
 
     # cloudflared config.yml
     ingress:
       - hostname: nuthatch.example.com
         service: http://127.0.0.1:10445
+      - hostname: checkd.example.com
+        service: http://127.0.0.1:4732
       - service: http_status:404
 
-The engine's port is raw TLS, which a tunnel carries only with
-`cloudflared access tcp` running on each host. Otherwise the engine needs
-one of the other setups (VPN, LAN, forwarded port).
+The engine's TLS runs inside the WebSocket, so Cloudflare sees neither
+tokens nor checks. A `wss://` engine works behind any HTTPS proxy too.
+NRPE is not offered with it: NRPE needs the engine to reach the host.
 
 Without `listen`, install commands use `url`, or the address the page was
 opened at, and need `https`; plain `http` only on this machine

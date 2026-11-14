@@ -1341,4 +1341,14 @@ describe('agents', () => {
       server.close()
     }
   })
+
+  it('an engine through a proxy or tunnel: wss:// in the agent, and no NRPE', async () => {
+    const { app, post } = site({ authorized_for_config_edit: ['ops'] }, 'https://nuthatch.example.com', undefined, 'wss://checkd.example.com/workers')
+    expect((await post({ host: 'web1', os: 'linux', nrpe: true })).status).toBe(400)
+    const { command } = (await (await post({ host: 'web1', os: 'linux' })).json()) as { command: string }
+    const text = await (await app.request(new URL(urlOf(command)).pathname)).text()
+    expect(text).toContain('--engine wss://checkd.example.com/workers --name web1')
+    const win = (await (await post({ host: 'win1', os: 'windows' })).json()) as { command: string }
+    expect(await (await app.request(new URL(urlOf(win.command)).pathname)).text()).toContain('--engine wss://checkd.example.com/workers')
+  })
 })
