@@ -294,7 +294,8 @@ export interface Layout {
 }
 
 /** A panel on a dashboard. What it shows is asked as the one who looks. */
-export type Widget = (
+/** A panel's settings, without its place on the grid. */
+export type PanelSettings =
   | { type: 'totals'; title?: string; of: 'hosts' | 'services'; /** Of this host group only. */ hostgroup?: string }
   | { type: 'problems'; title?: string; of: 'hosts' | 'services'; unhandled?: boolean; hostgroup?: string; limit?: number }
   | { type: 'object'; title?: string; backend: string; host: string; service?: string }
@@ -303,7 +304,8 @@ export type Widget = (
   | { type: 'stat'; title?: string; backend: string; host: string; service?: string; label?: string; hours?: number }
   /** A number of a check's performance data over time. */
   | { type: 'graph'; title?: string; backend: string; host: string; service?: string; label?: string; hours?: number }
-) & { layout?: Layout }
+
+export type Widget = PanelSettings & { layout: Layout }
 
 export interface Dashboard {
   id: number

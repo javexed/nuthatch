@@ -1,13 +1,13 @@
 <script setup lang="ts">
 // A dashboard: panels on a grid. In edit mode a panel is moved by its
 // header, resized by its corner, and set up in the side panel.
-import type { Dashboard, Layout, Widget } from '@nuthatch/api'
+import type { Dashboard, Layout, PanelSettings, Widget } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import WidgetBox from '../components/WidgetBox.vue'
 import { hostGroups, hostsOf, metricsOf, servicesOf, useList } from '../lib/choices'
-import { type Box, COLUMNS, SIZES, clamp, move, place, placed } from '../lib/layout'
+import { type Box, COLUMNS, SIZES, clamp, move, place } from '../lib/layout'
 import { api, useSession } from '../stores/session'
 
 const props = defineProps<{ id: string }>()
@@ -24,7 +24,7 @@ const mine = computed(() => dashboard.value?.owner === session.session?.user)
 const mayEdit = computed(() => mine.value || dashboard.value?.shared === true)
 const backends = computed(() => session.session?.backends.map((b) => b.name) ?? [])
 
-const KINDS: { type: Widget['type']; label: string; make: () => Widget }[] = [
+const KINDS: { type: Widget['type']; label: string; make: () => PanelSettings }[] = [
   { type: 'stat', label: 'Number', make: () => ({ type: 'stat', backend: backends.value[0] ?? '', host: '' }) },
   { type: 'graph', label: 'Graph', make: () => ({ type: 'graph', backend: backends.value[0] ?? '', host: '', hours: 24 }) },
   { type: 'problems', label: 'Problems', make: () => ({ type: 'problems', of: 'services', unhandled: true, limit: 10 }) },
@@ -37,20 +37,20 @@ const KINDS: { type: Widget['type']; label: string; make: () => Widget }[] = [
 // others moved out of its way.
 const incoming = ref<{ type: Widget['type']; layout: Layout } | null>(null)
 const shown = computed(() => {
-  const widgets = placed(draft.value?.widgets ?? dashboard.value?.widgets ?? [])
+  const widgets = draft.value?.widgets ?? dashboard.value?.widgets ?? []
   const coming = incoming.value
   if (!coming) return widgets
-  const boxes = move([...widgets.map((w) => w.layout!), coming.layout], widgets.length, coming.layout)
+  const boxes = move([...widgets.map((w) => w.layout), coming.layout], widgets.length, coming.layout)
   return widgets.map((w, i) => ({ ...w, layout: boxes[i]! }))
 })
 const ghost = computed(() => {
   const coming = incoming.value
   if (!coming) return null
-  const widgets = placed(draft.value?.widgets ?? [])
-  return move([...widgets.map((w) => w.layout!), coming.layout], widgets.length, coming.layout)[widgets.length]!
+  const widgets = draft.value?.widgets ?? []
+  return move([...widgets.map((w) => w.layout), coming.layout], widgets.length, coming.layout)[widgets.length]!
 })
 /** On a narrow screen the panels are one column, top to bottom. */
-const order = computed(() => shown.value.map((w, n) => ({ w, n })).sort((a, b) => a.w.layout!.y - b.w.layout!.y || a.w.layout!.x - b.w.layout!.x))
+const order = computed(() => shown.value.map((w, n) => ({ w, n })).sort((a, b) => a.w.layout.y - b.w.layout.y || a.w.layout.x - b.w.layout.x))
 const cell = (l: Layout) => ({ gridColumn: `${l.x + 1} / span ${l.w}`, gridRow: `${l.y + 1} / span ${l.h}` })
 
 async function load() {
@@ -66,7 +66,7 @@ watch(() => props.id, () => void load(), { immediate: true })
 
 function edit() {
   if (!dashboard.value) return
-  draft.value = JSON.parse(JSON.stringify({ title: dashboard.value.title, shared: dashboard.value.shared, widgets: placed(dashboard.value.widgets) })) as typeof draft.value
+  draft.value = JSON.parse(JSON.stringify({ title: dashboard.value.title, shared: dashboard.value.shared, widgets: dashboard.value.widgets })) as typeof draft.value
   selected.value = null
 }
 
@@ -75,10 +75,10 @@ function add(type: Widget['type'], at?: Layout) {
   const kind = KINDS.find((k) => k.type === type)
   if (!kind || !draft.value) return
   const [w, h] = SIZES[kind.type]
-  const boxes = draft.value.widgets.map((x) => x.layout!)
+  const boxes = draft.value.widgets.map((x) => x.layout)
   const layout = at ?? place(boxes, w, h)
   const moved = move([...boxes, layout], boxes.length, layout)
-  draft.value.widgets.forEach((x, i) => (x.layout = moved[i]))
+  draft.value.widgets.forEach((x, i) => (x.layout = moved[i]!))
   draft.value.widgets.push({ ...kind.make(), layout: moved[boxes.length]! })
   selected.value = draft.value.widgets.length - 1
 }
@@ -134,7 +134,7 @@ function grab(event: PointerEvent, n: number, how: 'move' | 'size') {
   const rect = grid.value.getBoundingClientRect()
   const gap = 12
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  const base = draft.value.widgets.map((w) => ({ ...w.layout! }))
+  const base = draft.value.widgets.map((w) => ({ ...w.layout }))
   dragging = { n, how, x: event.clientX, y: event.clientY, start: { ...base[n]! }, base, col: (rect.width + gap) / COLUMNS, row: 70 + gap }
   event.preventDefault()
 }
@@ -145,7 +145,7 @@ function drag(event: PointerEvent) {
   const s = dragging.start
   const to = dragging.how === 'move' ? { ...s, x: s.x + dx, y: s.y + dy } : { ...s, w: s.w + dx, h: s.h + dy }
   const boxes = move(dragging.base, dragging.n, to)
-  draft.value.widgets.forEach((w, i) => (w.layout = boxes[i]))
+  draft.value.widgets.forEach((w, i) => (w.layout = boxes[i]!))
 }
 function drop() {
   dragging = null
@@ -279,7 +279,7 @@ const unknown = (list: string[] | null, value: string | undefined) => !!value &&
           v-for="{ w, n } in order"
           :key="`${n} ${draft ? '' : JSON.stringify(w)}`"
           :widget="w"
-          :style="cell(w.layout!)"
+          :style="cell(w.layout)"
           :class="['panel', { chosen: selected === n }]"
         >
           <template v-if="draft" #handle>

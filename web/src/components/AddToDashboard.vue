@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // A host or service, or one of its numbers, as a panel on a dashboard.
-import type { Dashboard, Widget } from '@nuthatch/api'
+import type { Dashboard, PanelSettings } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, ref } from 'vue'
 import { SIZES, withPanel } from '../lib/layout'
@@ -33,7 +33,7 @@ async function start() {
   }
 }
 
-const panel = computed<Widget>(() => {
+const panel = computed<PanelSettings>(() => {
   const at = { backend: props.backend, host: props.host, ...(props.service !== undefined ? { service: props.service } : {}) }
   if (kind.value === 'object') return { type: 'object', ...at }
   return { type: kind.value, ...at, ...(label.value ? { label: label.value } : {}), ...(kind.value === 'graph' ? { hours: 24 } : {}) }

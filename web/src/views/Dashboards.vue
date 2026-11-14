@@ -14,7 +14,7 @@ const problem = ref('')
 
 async function make() {
   try {
-    const made = await api.newDashboard({ title: title.value.trim(), shared: false, widgets: [{ type: 'totals', of: 'hosts' }, { type: 'totals', of: 'services' }] })
+    const made = await api.newDashboard({ title: title.value.trim(), shared: false, widgets: [{ type: 'totals', of: 'hosts', layout: { x: 0, y: 0, w: 12, h: 3 } }, { type: 'totals', of: 'services', layout: { x: 0, y: 3, w: 12, h: 3 } }] })
     await router.push({ name: 'dashboard', params: { id: made.id }, query: { edit: '1' } })
   } catch (err) {
     problem.value = err instanceof ApiError ? err.message : 'Server unreachable'
