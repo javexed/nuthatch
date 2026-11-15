@@ -1566,13 +1566,18 @@ describe('whether a host can reach this machine for its agent', () => {
     const etc = mkdtempSync(join(tmpdir(), 'ufw-'))
     mkdirSync(join(etc, 'ufw'))
     writeFileSync(join(etc, 'ufw', 'ufw.conf'), 'ENABLED=yes\n')
-    writeFileSync(join(etc, 'ufw', 'user.rules'), ['-A ufw-user-input -p tcp --dport 22 -s 198.51.100.0/24 -j ACCEPT', '-A ufw-user-input -p tcp --dport 10444 -s 198.51.100.0/24 -j ACCEPT', '-A ufw-user-input -p tcp -m multiport --dports 4000:4800 -j ACCEPT'].join('\n'))
-    expect(ufwGaps([10444, 4730], ['198.51.100.0/24', '203.0.113.0/24'], etc)).toEqual([
-      { port: 10444, from: '203.0.113.0/24', command: 'sudo ufw allow from 203.0.113.0/24 to any port 10444 proto tcp' },
+    writeFileSync(join(etc, 'ufw', 'user.rules'), ['-A ufw-user-input -p tcp --dport 22 -s 198.51.100.0/24 -j ACCEPT', '-A ufw-user-input -p tcp --dport 4731 -s 198.51.100.0/24 -j ACCEPT', '-A ufw-user-input -p tcp -m multiport --dports 5000:5800 -j ACCEPT'].join('\n'))
+    // One rule for ports next to each other.
+    expect(ufwGaps([4731, 4730], ['198.51.100.0/24', '203.0.113.0/24'], etc)).toEqual([
+      { port: 4730, from: '198.51.100.0/24', command: 'sudo ufw allow from 198.51.100.0/24 to any port 4730 proto tcp' },
+      { port: 4731, from: '203.0.113.0/24', command: 'sudo ufw allow from 203.0.113.0/24 to any port 4730:4731 proto tcp' },
+      { port: 4730, from: '203.0.113.0/24', command: 'sudo ufw allow from 203.0.113.0/24 to any port 4730:4731 proto tcp' },
+    ])
+    expect(ufwGaps([5100], ['203.0.113.0/24'], etc)).toEqual([
     ])
     // Turned off: nothing is kept out.
     writeFileSync(join(etc, 'ufw', 'ufw.conf'), 'ENABLED=no\n')
-    expect(ufwGaps([10444], ['203.0.113.0/24'], etc)).toEqual([])
+    expect(ufwGaps([4731], ['203.0.113.0/24'], etc)).toEqual([])
     rmSync(etc, { recursive: true })
   })
 

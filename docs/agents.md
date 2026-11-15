@@ -185,13 +185,23 @@ command by its pin: curl by `--pinnedpubkey`, Windows PowerShell 5.1 by
 the certificate's SHA-256 (PowerShell 7 refuses it).
 
     [agents]
-    listen = "0.0.0.0:10444"
+    listen = "0.0.0.0:4731"
     cert = "/etc/checkd/workers/engine.crt"
     key = "/etc/checkd/workers/engine.key"
     addresses = ["192.0.2.10", "198.51.100.10"]  # this machine, as hosts reach it
 
 The page asks which address when there is more than one. With
 `engine = ":4730"` the engine is at that same address.
+
+**The agent ports: 4730 and 4731.** 4730 is the engine's workers
+listener (the port Gearman has, as mod_gearman uses it); 4731 is
+nuthatch's, for the installer. Side by side, one firewall rule lets both
+in, from the network the hosts are on:
+
+    sudo ufw allow from 192.0.2.0/24 to any port 4730:4731 proto tcp
+
+Hosts connect out to them; nothing on a host needs to be opened, unlike
+NRPE (5666), which the engine connects in to.
 
 **Let's Encrypt, with a proxy.** A plain listener on loopback, and a
 proxy that gets the certificate, here Caddy:

@@ -62,7 +62,7 @@ checkd)
     # the agents directory nuthatch writes.
     mkdir -p "$run/workers/agents"
     [ -f "$run/workers/ca.crt" ] || "$checkd" make-certs "$run/workers" localhost 127.0.0.1 >/dev/null
-    printf 'listen=127.0.0.1:4731\ncert=engine.crt\nkey=engine.key\nagents=agents\n' > "$run/workers/workers.cfg"
+    printf 'listen=127.0.0.1:14731\ncert=engine.crt\nkey=engine.key\nagents=agents\n' > "$run/workers/workers.cfg"
     mkdir -p "$run/checkresults"
     main "$here" "$run" > "$run/naemon.cfg"
     echo "\$USER1\$=$here/plugins" > "$run/resource.cfg"

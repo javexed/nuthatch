@@ -103,10 +103,16 @@ export function ufwGaps(ports: number[], networks: string[], etc = '/etc'): Fire
   }
   const covers = (from: string, network: string) => from === '' || from === '0.0.0.0/0' || inside(network.split('/')[0] ?? '', from.includes('/') ? from : `${from}/32`) && Number(network.split('/')[1]) >= Number(from.split('/')[1] ?? 32)
   const gaps: FirewallGap[] = []
-  for (const port of ports) {
-    for (const network of networks.length ? networks : ['']) {
-      if (allowed.some((a) => a.ports(port) && (network === '' ? a.from === '' : covers(a.from, network)))) continue
-      gaps.push({ port, from: network, command: network ? `sudo ufw allow from ${network} to any port ${port} proto tcp` : `sudo ufw allow ${port}/tcp` })
+  for (const network of networks.length ? networks : ['']) {
+    const missing = ports.filter((port) => !allowed.some((a) => a.ports(port) && (network === '' ? a.from === '' : covers(a.from, network))))
+    if (missing.length === 0) continue
+    // Ports next to each other (4730 and 4731) are let in by one rule.
+    const sorted = [...missing].sort((a, b) => a - b)
+    const together = sorted.length > 1 && sorted.every((p, i) => i === 0 || p === (sorted[i - 1] ?? 0) + 1)
+    const ranges = together ? [`${sorted[0]}:${sorted[sorted.length - 1]}`] : sorted.map(String)
+    for (const port of missing) {
+      const range = together ? ranges[0]! : String(port)
+      gaps.push({ port, from: network, command: network ? `sudo ufw allow from ${network} to any port ${range} proto tcp` : `sudo ufw allow ${range}/tcp` })
     }
   }
   return gaps

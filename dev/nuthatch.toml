@@ -57,5 +57,5 @@ verify = ["../checkd/target/debug/checkd", "verify", "--quiet", "{main}"]
 # checkd's agents (dev/up starts its workers listener).
 [backend.agents]
 dir = "dev/run/checkd/workers/agents"
-engine = "127.0.0.1:4731"
+engine = "127.0.0.1:14731"
 ca = "dev/run/checkd/workers/ca.crt"

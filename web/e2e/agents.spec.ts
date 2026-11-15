@@ -41,7 +41,7 @@ test('a host added with an agent: base checks at once, the rest proposed', async
 
   const script = await (await request.get(command.split("'")[1] ?? '')).text()
   await expect(panel.getByText('Installer fetched; waiting for the agent')).toBeVisible({ timeout: 10_000 })
-  expect(script).toContain(`--engine 127.0.0.1:4731 --name ${name}`)
+  expect(script).toContain(`--engine 127.0.0.1:14731 --name ${name}`)
   expect(script).toContain('--restrict-path /usr/local/lib/checkd-agent')
   expect(script).not.toContain('monitoring-plugins')
   const token = /printf '%s\\n' '([A-Za-z0-9_-]+)'/.exec(script)?.[1] ?? ''
@@ -53,7 +53,7 @@ test('a host added with an agent: base checks at once, the rest proposed', async
   writeFileSync(join(dir, 'ca.crt'), `${ca}\n`)
   let agent: ChildProcess | undefined
   try {
-    agent = spawn(agentBinary, ['--engine', '127.0.0.1:4731', '--name', name, '--token-file', join(dir, 'token'), '--ca', join(dir, 'ca.crt'), '--restrict-path', join(dir, 'none')], { stdio: 'ignore' })
+    agent = spawn(agentBinary, ['--engine', '127.0.0.1:14731', '--name', name, '--token-file', join(dir, 'token'), '--ca', join(dir, 'ca.crt'), '--restrict-path', join(dir, 'none')], { stdio: 'ignore' })
     // It connects, its token becomes the host's, and its inventory adds the base checks.
     await expect(panel.getByText(/^Added: Disk \//)).toBeVisible({ timeout: 60_000 })
     await expect(panel.getByText(/Memory, Load$/)).toBeVisible()
