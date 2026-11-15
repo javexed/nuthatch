@@ -13,9 +13,10 @@ export function portsOf(host: ManagedHost): number[] {
   return [...new Set(host.services.flatMap((s) => portOf(s.check_command) ?? []))]
 }
 
-/** The port a check of nuthatch's own is of: `nuthatch_tcp!5432`. */
+/** The port a check of nuthatch's own is of: `nuthatch_tcp!5432`. Only
+ * those that look at a port: `nuthatch_memory!90!95` is a level, not one. */
 function portOf(command: string | undefined): number | undefined {
-  const found = /^nuthatch_[a-z]+!(\d{1,5})(!|$)/.exec(command ?? '')
+  const found = /^nuthatch_(?:tcp|http|https|cert|ssh|smtp|imap|imaps)!(\d{1,5})(!|$)/.exec(command ?? '')
   return found ? Number(found[1]) : undefined
 }
 

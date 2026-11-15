@@ -10,7 +10,7 @@ const host: ManagedHost = {
   hostgroups: [],
   contacts: [],
   contact_groups: [],
-  services: [service('SSH', 'nuthatch_ssh!22'), service('Web', 'nuthatch_http!80!/'), service('Load', 'check_load!1!2'), service('Postgres', 'nuthatch_tcp!5432')],
+  services: [service('SSH', 'nuthatch_ssh!22'), service('Web', 'nuthatch_http!80!/'), service('Load', 'check_load!1!2'), service('Postgres', 'nuthatch_tcp!5432'), service('Memory', 'nuthatch_memory!90!95')],
 }
 const seen = (ports: number[], suggestions: [string, string][]): Discovery => ({
   input: host.address,
@@ -26,10 +26,10 @@ describe('a host looked at again', () => {
   it('has gained what answers now and is not checked, and lost what is checked and does not answer', () => {
     const changes = compare(host, seen([22, 80, 443], [['SSH', 'nuthatch_ssh!22'], ['Web', 'nuthatch_http!80!/'], ['HTTPS', 'nuthatch_https!443!/']]))
     expect(changes.gained.map((s) => s.description)).toEqual(['HTTPS'])
-    // A check that is of no port (Load) is not said to be lost.
+    // A check that is of no port (Load, Memory's 90 a level) is not said to be lost.
     expect(changes.lost).toEqual([{ description: 'Postgres', port: 5432 }])
     const merged = withGained(host, changes.gained, 's')
-    expect(merged.services.map((s) => s.description)).toEqual(['SSH', 'Web', 'Load', 'Postgres', 'HTTPS'])
+    expect(merged.services.map((s) => s.description)).toEqual(['SSH', 'Web', 'Load', 'Postgres', 'Memory', 'HTTPS'])
     expect(merged.services.at(-1)?.check_command).toBe('nuthatch_https!443!/')
   })
 
