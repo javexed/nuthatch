@@ -29,6 +29,8 @@ onMounted(async () => {
   } catch {
     // The server's own address, then.
   }
+  // The host's key at once, for the address already known: one click less.
+  if (ssh.value.address) await lookUp(true)
 })
 
 // Over SSH. The login is sent once and kept nowhere; the fields are
@@ -42,15 +44,19 @@ watch(() => [ssh.value.address, ssh.value.port], () => (hostKey.value = null))
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const plan = () => ({ host: props.host, os: os.value, nrpe: nrpe.value, plugins: plugins.value, address: at.value || undefined })
 
-async function lookUp() {
+/** `quiet`: on opening, a host without SSH says nothing yet. */
+async function lookUp(quiet = false) {
   error.value = ''
   hostKey.value = null
+  const asked = `${ssh.value.address.trim()}:${ssh.value.port}`
   try {
     const { keys } = await api.sshKeys(props.backend, ssh.value.address.trim(), Number(ssh.value.port))
+    // Not if the address changed meanwhile: that one's key is asked again.
+    if (asked !== `${ssh.value.address.trim()}:${ssh.value.port}`) return
     // The key ssh will use: Ed25519 when there is one.
     hostKey.value = keys.find((k) => k.type === 'ssh-ed25519') ?? keys[0] ?? null
   } catch (err) {
-    error.value = message(err)
+    if (!quiet) error.value = message(err)
   }
 }
 
@@ -166,7 +172,7 @@ const until = () => (made.value ? new Date(made.value.until).toLocaleTimeString(
         <label class="field">Passphrase <input v-model="ssh.passphrase" name="ssh-passphrase" type="password" autocomplete="off" /></label>
       </template>
       <label v-if="os === 'linux' && ssh.user !== 'root' && ssh.login === 'key'" class="field">sudo password <input v-model="ssh.sudo" name="ssh-sudo" type="password" autocomplete="off" /></label>
-      <button v-if="!hostKey" type="button" :disabled="!ssh.address" @click="lookUp">Look up host key</button>
+      <button v-if="!hostKey" type="button" :disabled="!ssh.address" @click="lookUp()">Look up host key</button>
       <template v-else>
         <p class="by host-key">{{ hostKey.type }} {{ hostKey.fingerprint }}</p>
         <button type="submit" :disabled="busy">Install</button>

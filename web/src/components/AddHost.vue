@@ -104,7 +104,7 @@ function days(n: number): string {
           placeholder="nas.example.com, 192.0.2.20 or https://…"
         />
       </label>
-      <button type="submit" :disabled="looking || busy">{{ looking ? 'Looking…' : 'Look' }}</button>
+      <button type="submit" :disabled="looking || busy">{{ looking ? 'Scanning…' : 'Scan' }}</button>
     </form>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <div v-if="machines.length > 0 && !found && !looking" class="tailnet" role="group" aria-label="On your tailnet, not monitored yet">

@@ -94,7 +94,7 @@ for (const engine of ENGINES) {
     await page.getByRole('button', { name: 'Add a host', exact: true }).click()
     // The test's own nuthatch is a web server to find.
     await page.getByLabel('Name, address or URL').fill('http://127.0.0.1:8092/')
-    await page.getByRole('button', { name: 'Look' }).click()
+    await page.getByRole('button', { name: 'Scan', exact: true }).click()
     const http = page.locator('.suggestion').filter({ has: page.locator('.what', { hasText: /^HTTP$/ }) })
     await expect(http.first()).toBeVisible({ timeout: 30_000 })
     await expect(http.first().getByRole('checkbox')).toBeChecked()
@@ -115,7 +115,7 @@ for (const engine of ENGINES) {
 
     // Looked at again: what answers there beside what is checked, and never the check it has.
     const item = page.locator('.managed li', { hasText: name })
-    await item.getByRole('button', { name: 'Look again' }).click()
+    await item.getByRole('button', { name: 'Scan again' }).click()
     const again = item.locator('.again')
     await expect(again).toContainText(/No change|New/, { timeout: 30_000 })
     await expect(again.locator('li', { hasText: /^HTTP / })).toHaveCount(0)
@@ -133,7 +133,7 @@ test('looking at a name that is not there says so', async ({ page }) => {
   await goTo(page, 'Config')
   await page.getByRole('button', { name: 'Add a host', exact: true }).click()
   await page.getByLabel('Name, address or URL').fill('no-such-host.invalid')
-  await page.getByRole('button', { name: 'Look' }).click()
+  await page.getByRole('button', { name: 'Scan', exact: true }).click()
   await expect(page.locator('.add-host [role=alert]')).toContainText('cannot be found')
 })
 

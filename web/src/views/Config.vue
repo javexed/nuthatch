@@ -313,14 +313,14 @@ async function remove(host: ManagedHost) {
                   </template>
                 </template>
               </div>
-              <HostAgent v-if="agentOpen[host.name]" :backend="backend" :host="host.name" :address="host.address" @changed="load" />
+              <HostAgent v-if="agentOpen[host.name]" :backend="backend" :host="host.name" :address="host.address" :install="!agentOf.get(host.name)" @changed="load" />
             </div>
             <div class="actions">
               <button v-if="hasAgents" type="button" class="quiet" :aria-pressed="agentOpen[host.name] === true" @click="agentOpen[host.name] = !agentOpen[host.name]">
                 {{ agentOf.get(host.name) || agentOpen[host.name] ? 'Agent' : 'Install agent' }}
               </button>
               <button type="button" class="quiet" :disabled="busy || again[host.name]?.looking" @click="lookAgain(host)">
-                {{ again[host.name]?.looking ? 'Looking…' : 'Look again' }}
+                {{ again[host.name]?.looking ? 'Scanning…' : 'Scan again' }}
               </button>
               <button type="button" class="quiet" :disabled="busy" @click="editing = host">Change</button>
               <button type="button" class="plain" :disabled="busy" @click="remove(host)">Take out</button>

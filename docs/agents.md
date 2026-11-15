@@ -10,7 +10,7 @@ well, for `check_nrpe` from the engine.
 
 ## Adding a host with an agent
 
-**Config → Add a host**: type its name or address and **Look**. nuthatch
+**Config → Add a host**: type its name or address and **Scan**. nuthatch
 guesses its system from what answered (what its SSH server says of
 itself, Windows' own ports, a ping's TTL); change it if wrong. With
 **Install agent** ticked, adding the host goes on to installing its agent,
@@ -75,8 +75,9 @@ out. A command never run is taken back after an hour.
 **Over SSH** (the default) has nuthatch log in to the host and run the command itself.
 Give the SSH address (the host's address to start with), port and user,
 and a password or a private key (with its passphrase, if it has one);
-**Look up host key** shows the key the host's SSH server offers, and
-**Install** goes ahead only with that key. The output follows on the page.
+The key the host's SSH server offers is shown as the panel opens (or
+with **Look up host key** for another address), and **Install** goes
+ahead only with that key. The output follows on the page.
 
 - On Linux the user is root, or one sudo lets run commands; sudo is given
   the password (or, with a key, the sudo password). On Windows the user is

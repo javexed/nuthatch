@@ -22,7 +22,7 @@ test('a host added with an agent: base checks at once, the rest proposed', async
   await chooseBackend(page, 'checkd')
   await page.getByRole('button', { name: 'Add a host', exact: true }).click()
   await page.getByLabel('Name, address or URL').fill('127.0.0.1')
-  await page.getByRole('button', { name: 'Look' }).click()
+  await page.getByRole('button', { name: 'Scan', exact: true }).click()
   await page.locator('input[name=name]').fill(name, { timeout: 30_000 })
   await page.getByLabel('Linux').check()
   await expect(page.getByLabel('Install agent')).toBeChecked()

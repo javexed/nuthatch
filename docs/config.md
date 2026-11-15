@@ -131,7 +131,7 @@ typed, and written to `nuthatch-commands.cfg` in nuthatch's directory,
 with the rest of a change and checked by the engine like it, when a host
 first uses one. They can be chosen in the full form too.
 
-Looking is for the role `config_edit`, and written to the audit log.
+Scanning is for the role `config_edit`, and written to the audit log.
 
 ## Services that are not checked by a command (checkd)
 
@@ -183,9 +183,9 @@ checkd. A user whose rights are a contact's covers what that contact
 sees; at most 500 at a time; one line in the audit log. It is set at
 the site's own nuthatch, not through another.
 
-## Looking at a host again
+## Scanning a host again
 
-Each host nuthatch keeps has "Look again": the same look as before it
+Each host nuthatch keeps has "Scan again": the same scan as before it
 was added, at its address, now also at the ports its own checks are of.
 It says what answers there and is not checked, with a button that opens
 the form with those checks added, to look over and save; and which

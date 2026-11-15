@@ -1094,7 +1094,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     const key = text(login.key)
     if (!password === !key) throw new Refused('a password or a key')
     const seenKeys = (await hostKeys(login.address, port)).filter((k) => k.fingerprint === login.fingerprint)
-    if (seenKeys.length === 0) throw new Refused("the host's key is not the one shown: look again")
+    if (seenKeys.length === 0) throw new Refused("the host's key is not the one shown: fetch it again")
     const sudo = text(login.sudo_password) ?? password ?? ''
     const id = randomBytes(12).toString('base64url')
     const job: Job = { owner: user, output: '', done: false, ok: false, at: Date.now() }
