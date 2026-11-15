@@ -143,6 +143,7 @@ the host, or an address of this machine the host has no way to.
     name = "site"
     livestatus = "unix:/run/checkd/live"
     push_url = "http://127.0.0.1:6559"   # needed: /metrics tells when an agent connects
+    http_token_file = "/etc/checkd/http.env"  # when checkd has CHECKD_HTTP_TOKEN
 
     [backend.agents]
     dir = "/etc/checkd/workers/agents"   # checkd's agents= directory

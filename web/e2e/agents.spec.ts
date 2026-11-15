@@ -33,7 +33,15 @@ test('a host added with an agent: base checks at once, the rest proposed', async
   await expect(panel.getByRole('form', { name: 'Over SSH' })).toBeVisible({ timeout: 90_000 })
   await panel.getByRole('button', { name: 'Command instead' }).click()
   await panel.getByRole('button', { name: 'Make command' }).click()
-  const command = (await panel.locator('pre.call code').textContent()) ?? ''
+  // A choice changed after it is made makes a new command.
+  const code = panel.locator('pre.call code')
+  await expect(code).toContainText('/agent/install/')
+  const first = (await code.textContent()) ?? ''
+  await panel.getByRole('checkbox', { name: 'Plugins' }).check()
+  await expect(code).not.toHaveText(first)
+  await panel.getByRole('checkbox', { name: 'Plugins' }).uncheck()
+  await expect(code).not.toHaveText(first)
+  const command = (await code.textContent()) ?? ''
   expect(command).toMatch(/^curl -fsSL --connect-timeout 10 'http:\/\/127\.0\.0\.1:8092\/agent\/install\/[A-Za-z0-9_-]+' \| sudo sh$/)
   // Each step as it comes: fetched, then connected.
   await expect(panel.getByText(`Waiting for ${name} to fetch the installer`)).toBeVisible()

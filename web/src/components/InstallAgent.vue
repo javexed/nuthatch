@@ -121,6 +121,11 @@ async function make() {
     busy.value = false
   }
 }
+// A choice changed after the command was made: a new one, which also
+// takes the old one's token back.
+watch([os, nrpe, plugins, at], () => {
+  if (made.value && !busy.value) void make()
+})
 async function copy(text: string) {
   try {
     await navigator.clipboard.writeText(text)

@@ -26,6 +26,8 @@ export interface AgentSettings {
   serverName?: string
   /** checkd's HTTP API, for `/metrics`: which agents are connected. */
   metrics?: string
+  /** checkd's CHECKD_HTTP_TOKEN, when it has one. */
+  metricsToken?: string
 }
 
 export interface AgentRow {
@@ -115,6 +117,8 @@ export class Agents {
   /** Installs on their way, by host: where the host fetches from and finds
    * the engine, and when it fetched the installer. In memory. */
   private issued = new Map<string, { from: string; engine: string; fetched?: number }>()
+  /** checkd refused /metrics: said once, until it answers again. */
+  private refused = false
 
   /** An install command was made: where the host is to fetch and connect. */
   noteIssued(host: string, from: string, engine: string): void {
@@ -205,8 +209,17 @@ export class Agents {
   private async pools(): Promise<Map<string, number> | undefined> {
     if (!this.settings.metrics) return undefined
     try {
-      const answer = await fetch(`${this.settings.metrics.replace(/\/+$/, '')}/metrics`, { signal: AbortSignal.timeout(3000) })
-      if (!answer.ok) return undefined
+      const answer = await fetch(`${this.settings.metrics.replace(/\/+$/, '')}/metrics`, {
+        signal: AbortSignal.timeout(3000),
+        ...(this.settings.metricsToken ? { headers: { authorization: `Bearer ${this.settings.metricsToken}` } } : {}),
+      })
+      if (!answer.ok) {
+        // Said once: without /metrics no new agent is ever taken on.
+        if (!this.refused) console.error(`agents: ${this.backend.name}: checkd's /metrics answered ${answer.status}${answer.status === 401 ? '; give the backend http_token_file' : ''}`)
+        this.refused = true
+        return undefined
+      }
+      this.refused = false
       const found = new Map<string, number>()
       for (const m of (await answer.text()).matchAll(/^checkd_pool_workers\{pool="([^"]+)"\} (\d+)$/gm)) {
         if (m[1] !== undefined) found.set(m[1], Number(m[2]))

@@ -1370,11 +1370,15 @@ describe('agents', () => {
   it("a new agent's checks move to it only once it has connected; one never run is taken back", async () => {
     const dir = mkdtempSync(join(tmpdir(), 'nuthatch-settle-'))
     let pools = ''
-    const metrics = createServer((_, res) => res.end(pools))
+    // checkd with CHECKD_HTTP_TOKEN set answers /metrics only with it.
+    const metrics = createServer((req, res) => {
+      if (req.headers.authorization !== 'Bearer t0ken') res.statusCode = 401
+      res.end(res.statusCode === 401 ? '' : pools)
+    })
     await new Promise<void>((done) => metrics.listen(0, '127.0.0.1', done))
     const backend = fake('site', (request) => (request.startsWith('GET hosts\nColumns: name\nFilter: name = ') ? [[request.split('= ')[1]]] : []))
     let reloads = 0
-    const agents = new Agents(backend, { dir, engine: 'e:4730', ca: '', metrics: `http://127.0.0.1:${(metrics.address() as AddressInfo).port}` }, async () => {
+    const agents = new Agents(backend, { dir, engine: 'e:4730', ca: '', metrics: `http://127.0.0.1:${(metrics.address() as AddressInfo).port}`, metricsToken: 't0ken' }, async () => {
       reloads++
     })
     try {

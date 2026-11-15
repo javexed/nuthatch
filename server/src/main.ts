@@ -94,6 +94,7 @@ function main(): void {
   const backends: Backend[] = []
   const admins = new Map<string, ConfigAdmin>()
   const pushUrls = new Map<string, string>()
+  const httpTokens = new Map<string, string>()
   const agents = new Map<string, Agents>()
   const remotes: RemoteSite[] = []
   const keyOf = (file: unknown, what: string): string => {
@@ -134,6 +135,20 @@ function main(): void {
         if (typeof entry.push_url !== 'string' || !/^https?:\/\/[^\s]+$/.test(entry.push_url)) fail(`${path}: backend ${name}: push_url is a URL`)
         pushUrls.set(name, entry.push_url as string)
       }
+      // checkd's CHECKD_HTTP_TOKEN, when it has one: the file holds the token,
+      // or a line CHECKD_HTTP_TOKEN=... (checkd's own environment file).
+      if (entry.http_token_file !== undefined) {
+        if (typeof entry.http_token_file !== 'string') fail(`${path}: backend ${name}: http_token_file is a path`)
+        let text = ''
+        try {
+          text = readFileSync(entry.http_token_file, 'utf8')
+        } catch (err) {
+          fail(`${path}: backend ${name}: cannot read ${entry.http_token_file}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        const token = (/^\s*CHECKD_HTTP_TOKEN\s*=\s*"?([^"\s]+)"?\s*$/m.exec(text)?.[1] ?? text).trim()
+        if (!token || /\s/.test(token)) fail(`${path}: backend ${name}: ${entry.http_token_file} holds no token`)
+        httpTokens.set(name, token)
+      }
       // [backend.config]: where its config can be changed.
       if (entry.config !== undefined) {
         const c = entry.config as Record<string, unknown>
@@ -161,7 +176,7 @@ function main(): void {
         const admin = admins.get(name)
         agents.set(
           name,
-          new Agents(backend, { dir, engine, ca, serverName: server_name as string | undefined, metrics: pushUrls.get(name) }, () =>
+          new Agents(backend, { dir, engine, ca, serverName: server_name as string | undefined, metrics: pushUrls.get(name), metricsToken: httpTokens.get(name) }, () =>
             admin ? admin.reload() : backend.command(`[${Math.floor(Date.now() / 1000)}] RESTART_PROGRAM`),
           ),
         )
