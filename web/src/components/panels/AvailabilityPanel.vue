@@ -4,16 +4,17 @@
 import type { Scope } from '@nuthatch/api'
 import { computed } from 'vue'
 import { type Availability, availability, percent, showPercent } from '../../lib/availability'
+import { type When, spanNow } from '../../lib/range'
 import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
 
-const props = defineProps<{ scope: Scope; seconds: number; rows: number }>()
+const props = defineProps<{ scope: Scope; when: When; rows: number }>()
 const clean = (text: string) => text.replace(/[\r\n]/g, ' ')
 
 const { data } = useLoader(
   async (): Promise<Availability[]> => {
-    const to = Date.now() / 1000
-    const span = { from: to - props.seconds, to }
+    const { from, to } = spanNow(props.when)
+    const span = { from, to }
     const of = props.scope.of
     if (of?.service) {
       const answer = await availability(api, 'service', span, { host: of.host, backends: [of.backend] })
@@ -26,7 +27,7 @@ const { data } = useLoader(
     const wanted = new Set(members.rows.map((r) => `${r.backend}\n${String(r.name)}`))
     return all.filter((r) => wanted.has(`${r.backend}\n${r.host}`))
   },
-  [() => JSON.stringify(props.scope), () => props.seconds],
+  [() => JSON.stringify(props.scope), () => JSON.stringify(props.when)],
   { live: false },
 )
 

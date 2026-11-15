@@ -5,11 +5,12 @@
 import type { ProblemsShow } from '@nuthatch/api'
 import { computed, watch } from 'vue'
 import { EMPTY, type ListFilter, toHeaders } from '../../lib/filters'
+import { type When, spanNow } from '../../lib/range'
 import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
 import StatusList from '../StatusList.vue'
 
-const props = defineProps<{ of: 'hosts' | 'services'; show: ProblemsShow; hostgroup?: string; seconds: number; rows: number }>()
+const props = defineProps<{ of: 'hosts' | 'services'; show: ProblemsShow; hostgroup?: string; when: When; rows: number }>()
 const emit = defineEmits<{ worst: [state: number] }>()
 const kind = computed(() => (props.of === 'hosts' ? 'host' : 'service'))
 
@@ -22,7 +23,7 @@ const base = computed<Partial<ListFilter>>(() => {
     case 'downtimes':
       return { downtime: true, ...group }
     case 'recovered':
-      return { states: [0], since: Date.now() / 1000 - props.seconds, ...group }
+      return { states: [0], since: spanNow(props.when).from, ...group }
     default:
       return { states: bad, unhandled: true, ...group }
   }

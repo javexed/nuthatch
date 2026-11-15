@@ -6,6 +6,7 @@ import { ago, duration, fromInput, toInput } from './format.ts'
 import { pulled, sideways, swipeOf } from './gestures.ts'
 import { nearest, shape, short, withUnit } from './graph.ts'
 import { fraction, parsePerfdata } from './perfdata.ts'
+import { spanNow } from './range.ts'
 import { stateOf } from './states.ts'
 import { decide, latestBuild } from './update.ts'
 
@@ -176,5 +177,19 @@ describe('gestures', () => {
     expect(pulled(-30)).toBe(0)
     expect(pulled(60)).toBeLessThan(1)
     expect(pulled(140)).toBe(1)
+  })
+})
+
+describe('the time a dashboard looks at', () => {
+  // Wednesday 12 November 2026, 15:30, in the looker's time zone.
+  const now = new Date(2026, 10, 12, 15, 30).getTime() / 1000
+  const at = (...parts: [number, number, number, number?]) => new Date(parts[0], parts[1], parts[2], parts[3] ?? 0).getTime() / 1000
+  it('ends now, or follows the calendar', () => {
+    expect(spanNow({ range: '6h' }, now)).toEqual({ from: now - 6 * 3600, to: now, live: true })
+    expect(spanNow({ range: 'today' }, now)).toEqual({ from: at(2026, 10, 12), to: now, live: true })
+    expect(spanNow({ range: 'yesterday' }, now)).toEqual({ from: at(2026, 10, 11), to: at(2026, 10, 12), live: false })
+    expect(spanNow({ range: 'week' }, now)).toEqual({ from: at(2026, 10, 9), to: now, live: true })
+    expect(spanNow({ range: 'last-month' }, now)).toEqual({ from: at(2026, 9, 1), to: at(2026, 10, 1), live: false })
+    expect(spanNow({ from: 10, to: 20 }, now)).toEqual({ from: 10, to: 20, live: false })
   })
 })

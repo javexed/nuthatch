@@ -7,30 +7,31 @@ import type { GraphSeries, Perf, Series } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { perfOf } from '../../lib/choices'
 import { type Point, nearest, shape, withUnit } from '../../lib/graph'
+import { type When, spanNow } from '../../lib/range'
 import { level } from '../../lib/thresholds'
 import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
 
-const props = defineProps<{ series: Series[]; seconds: number; compact: boolean }>()
-const emit = defineEmits<{ worst: [state: number] }>()
+const props = defineProps<{ series: Series[]; when: When; compact: boolean }>()
+const emit = defineEmits<{ worst: [state: number]; zoom: [span: { from: number; to: number }] }>()
 
 const objects = computed(() => {
   const seen = new Map<string, { backend: string; host: string; service?: string }>()
   for (const s of props.series) seen.set(`${s.backend}\n${s.host}\n${s.service ?? ''}`, { backend: s.backend, host: s.host, service: s.service })
   return [...seen.entries()]
 })
-const hours = computed(() => Math.max(1, Math.ceil(props.seconds / 3600)))
 const { data } = useLoader(
   async () => {
     const found = await Promise.all(
       objects.value.map(async ([key, o]) => {
-        const [graph, perf] = await Promise.all([api.graph(o.backend, o.host, o.service, hours.value).catch(() => null), perfOf(o).catch(() => [] as Perf[])])
+        const { from, to } = spanNow(props.when)
+        const [graph, perf] = await Promise.all([api.graph(o.backend, o.host, o.service, { from, to }).catch(() => null), perfOf(o).catch(() => [] as Perf[])])
         return [key, { graph: graph?.series ?? [], perf }] as const
       }),
     )
     return new Map(found)
   },
-  [() => JSON.stringify(props.series), hours],
+  [() => JSON.stringify(props.series), () => JSON.stringify(props.when)],
 )
 
 const keyOf = (s: Series) => `${s.backend}\n${s.host}\n${s.service ?? ''}`
@@ -56,8 +57,7 @@ const TONES = ['ok', 'warning', 'critical'] as const
 
 const span = computed(() => {
   void data.value
-  const to = Date.now() / 1000
-  return { from: to - props.seconds, to }
+  return spanNow(props.when)
 })
 
 // Small: the first line.
@@ -96,6 +96,26 @@ function point(event: PointerEvent, unit: string) {
   const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
   hover.value = { unit, along: Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)) }
 }
+// Dragged across a graph (with a mouse or pen): the dashboard looks at that stretch.
+const picked = ref<{ start: number; end: number } | null>(null)
+function press(event: PointerEvent, unit: string) {
+  point(event, unit)
+  if (event.pointerType === 'touch' || event.button !== 0 || !hover.value) return
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  picked.value = { start: hover.value.along, end: hover.value.along }
+}
+function move(event: PointerEvent, unit: string) {
+  point(event, unit)
+  if (picked.value && hover.value) picked.value.end = hover.value.along
+}
+function release() {
+  const p = picked.value
+  picked.value = null
+  if (!p || Math.abs(p.end - p.start) < 0.02) return
+  const { from, to } = span.value
+  const [a, b] = [Math.min(p.start, p.end), Math.max(p.start, p.end)]
+  emit('zoom', { from: from + a * (to - from), to: from + b * (to - from) })
+}
 const at = (points: Point[]) => (hover.value ? nearest(points, span.value.from, span.value.to, hover.value.along)?.[1] : undefined)
 </script>
 
@@ -111,7 +131,8 @@ const at = (points: Point[]) => (hover.value ? nearest(points, span.value.from, 
   </div>
   <div v-else class="metric-graphs">
     <figure v-for="g in graphs" :key="g.unit" class="graph">
-      <div class="plot" role="img" :aria-label="g.lines.map((l) => `${nameOf(l.s)}: ${value(l.now, l.unit)}`).join(', ')" @pointermove="point($event, g.unit)" @pointerdown="point($event, g.unit)" @pointerleave="hover = null">
+      <div class="plot" role="img" :aria-label="g.lines.map((l) => `${nameOf(l.s)}: ${value(l.now, l.unit)}`).join(', ')" @pointermove="move($event, g.unit)" @pointerdown="press($event, g.unit)" @pointerup="release" @pointercancel="picked = null" @pointerleave="picked || (hover = null)">
+        <span v-if="picked && hover?.unit === g.unit" class="zoom-pick" :style="{ left: `${Math.min(picked.start, picked.end) * 100}%`, width: `${Math.abs(picked.end - picked.start) * 100}%` }"></span>
         <span class="edge top">{{ value(g.high, g.unit) }}</span>
         <span class="edge bottom">{{ value(g.low, g.unit) }}</span>
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">

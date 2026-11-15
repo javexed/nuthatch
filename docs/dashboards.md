@@ -56,6 +56,20 @@ kept at once; **Undo** (or Ctrl+Z) takes back one step. The ⋯ menu has
 sharing, **Export** and **Delete**, and the host chooser once a panel
 shows the chosen host.
 
+## Time
+
+One time for all the panels. At hand: 1h, 6h, 24h and 7d; **⋯** has
+15m to 90d, Today, Yesterday, This week, Last month (by the looker's
+calendar), and **From … To …**. A range chosen by whoever may change the
+dashboard is kept with it; anyone else's goes in the page's address.
+
+**‹** and **›** step back and forward by as long as is shown, and a
+graph dragged across with a mouse shows that stretch. These are in the
+address alone, so a link opens on the same stretch; **Zoom out** doubles
+it, **Now** returns to the range. Graphs reach back as far as nuthatch
+keeps numbers (`[graphs] days`); history and availability, as far as the
+engines' logs.
+
 **Wall** shows the panels alone, full screen. On the list of dashboards,
 ticking several and **Wall** shows them in turn, every so many seconds.
 

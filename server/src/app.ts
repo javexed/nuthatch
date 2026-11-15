@@ -815,12 +815,17 @@ export function buildApp(deps: Deps): Hono<Env> {
     const name = c.req.query('backend') ?? ''
     const host = c.req.query('host') ?? ''
     const service = c.req.query('service') ?? ''
-    const hours = Math.min(24 * 31, Math.max(1, Number(c.req.query('hours')) || 24))
+    const hours = Math.min(24 * 92, Math.max(1, Number(c.req.query('hours')) || 24))
+    // Or from one moment to another, at most 92 days apart.
+    const from = Number(c.req.query('from'))
+    const to = Number(c.req.query('to'))
+    const span = Number.isFinite(from) && Number.isFinite(to) && to > from && c.req.query('from') !== undefined ? { from: Math.max(from, to - 92 * 86400), to } : null
+    const over = span ?? hours
     if (/[\r\n]/.test(host + service) || host === '') throw new Refused('a graph is of a host, or of a host and a service')
     const site = remotes.find((r) => r.owns(name))
     if (site) {
       await site.session(user)
-      const query = new URLSearchParams({ backend: site.theirs(name) ?? name, host, service, hours: String(hours) })
+      const query = new URLSearchParams({ backend: site.theirs(name) ?? name, host, service, ...(span ? { from: String(span.from), to: String(span.to) } : { hours: String(hours) }) })
       return c.json(await site.call(user, 'GET', `/api/v1/graph?${query.toString()}`))
     }
     const backend = deps.backends.find((b) => b.name === name)
@@ -833,7 +838,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       const target: Target = service === '' ? { kind: 'host', host } : { kind: 'service', host, service }
       if (!limited || !(await sees(backend, user, target))) throw new Forbidden("not one of this user's hosts or services")
     }
-    return c.json({ enabled: true, series: deps.graphs.series(name, host, service, hours) })
+    return c.json({ enabled: true, series: deps.graphs.series(name, host, service, over) })
   })
 
   // Notifications pushed to this user's browsers.

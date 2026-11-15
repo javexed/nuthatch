@@ -425,6 +425,12 @@ a.button.quiet { background: none; color: var(--accent); }
 .panel-picker { position: absolute; z-index: 10; top: 2.6rem; left: 0; width: max(100%, 20rem); box-sizing: border-box; padding: 0.5rem; background: var(--card); border: 1px solid var(--line); border-radius: 0.6rem; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18); }
 .pick-left .panel-picker { left: auto; right: 0; }
 .dash-settings .settings-head { display: flex; gap: 0.5rem; align-items: end; }
+.when { position: relative; }
+.when .chip:disabled { opacity: 0.4; }
+.when-more { position: absolute; top: 2.4rem; left: 0; z-index: 6; display: grid; gap: 0.6rem; width: max-content; max-width: min(28rem, calc(100vw - 2rem)); margin: 0; }
+.when-typed { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
+.when-typed label { flex: 1; min-width: 12rem; }
+.graph .plot .zoom-pick { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); border-inline: 1px solid var(--accent); pointer-events: none; }
 .dash-settings .settings-head label { flex: 1; }
 .dash-settings p.row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; margin: 0; }
 .grip { cursor: grab; user-select: none; color: var(--muted); padding: 0 0.2rem; touch-action: none; }
@@ -435,7 +441,7 @@ a.button.quiet { background: none; color: var(--accent); }
 .dash-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
 .dash-edit .title { font-size: 1.2rem; font-weight: 600; min-width: 12rem; }
 .dash-edit .grow { flex: 1; }
-.dash-tray { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: -0.5rem 0 1rem; }
+.dash-tray { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 1rem; }
 .dash-tray .tray-item { touch-action: none; cursor: grab; user-select: none; }
 .drop-ghost { border: 2px dashed var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; }
 .dash-settings input[aria-invalid='true'] { border-color: var(--critical); }

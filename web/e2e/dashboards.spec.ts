@@ -135,6 +135,65 @@ test('changed in place and kept at once, with undo; panels from the tray, told w
   await deleteOpen(page)
 })
 
+test('the time: more ranges, earlier and later, a graph dragged across, a span typed, all in the link', async ({ page }) => {
+  test.skip(!desktop(), 'dragged with a mouse')
+  await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine|load=0.5;1;2')
+  await login(page, 'admin')
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto('/dashboards')
+  await page.getByRole('button', { name: 'Blank' }).click()
+  await page.getByLabel('Title').fill(`Times ${Date.now()}`)
+  const tray = page.getByRole('toolbar', { name: 'Add a panel' })
+  await tray.getByRole('button', { name: '+ Graph' }).click()
+  const picker = page.getByRole('group', { name: 'Choose' })
+  await picker.getByRole('button', { name: /^passive1\s*naemon$/ }).click()
+  await picker.getByRole('button', { name: /^a$/ }).click()
+  await picker.getByRole('button', { name: /^load\s*0\.5$/ }).click()
+  const times = page.getByRole('group', { name: 'Range' })
+
+  // A range beyond the four at hand, kept with the dashboard.
+  await times.getByRole('button', { name: 'Other times' }).click()
+  await page.locator('.when-more').getByRole('button', { name: '30d' }).click()
+  await expect(times.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true')
+
+  // Earlier: thirty days before, in the address; Now: back to the range.
+  await times.getByRole('button', { name: 'Earlier' }).click()
+  await expect(page).toHaveURL(/from=\d+&to=\d+/)
+  const span = (url: string) => {
+    const q = new URL(url).searchParams
+    return [Number(q.get('from')), Number(q.get('to'))] as const
+  }
+  const [from, to] = span(page.url())
+  expect(Math.round((to - from) / 86400)).toBe(30)
+  expect(Math.abs(Date.now() / 1000 - 30 * 86400 - to)).toBeLessThan(120)
+  await times.getByRole('button', { name: 'Now' }).click()
+  await expect(page).not.toHaveURL(/from=/)
+
+  // Dragged across the graph: the dashboard looks at that stretch.
+  const plot = await page.locator('.graph .plot').first().boundingBox()
+  if (!plot) throw new Error('no graph')
+  await page.mouse.move(plot.x + plot.width * 0.2, plot.y + plot.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(plot.x + plot.width * 0.6, plot.y + plot.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect(page).toHaveURL(/from=\d+&to=\d+/)
+  const [a, b] = span(page.url())
+  expect(Math.round((b - a) / 86400)).toBe(12)
+  // The link opens on the same stretch.
+  await page.reload()
+  await expect(times.getByRole('button', { name: 'Zoom out' })).toBeVisible()
+
+  // Or typed.
+  await times.getByRole('button', { name: 'Other times' }).click()
+  await page.getByLabel('From', { exact: true }).fill('2026-01-02T03:00')
+  await page.getByLabel('To', { exact: true }).fill('2026-01-02T05:00')
+  await page.getByRole('button', { name: 'Show' }).click()
+  const [c, d] = span(page.url())
+  expect(d - c).toBe(7200)
+  expect(c).toBe(new Date(2026, 0, 2, 3).getTime() / 1000)
+  await deleteOpen(page)
+})
+
 test('a shared dashboard shows each user their own, and its outline shows trouble', async ({ page }) => {
   test.skip(!desktop(), 'changed on a wide screen')
   await send('naemon', 'PROCESS_SERVICE_CHECK_RESULT;passive1;a;0;fine')

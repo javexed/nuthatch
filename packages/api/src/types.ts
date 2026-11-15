@@ -307,8 +307,23 @@ export interface Layout {
 
 /** A panel on a dashboard. What it shows is asked as the one who looks. */
 /** The time a dashboard's graphs, numbers and availability span. */
-export type Range = '1h' | '6h' | '24h' | '7d'
-export const RANGES: Record<Range, number> = { '1h': 3600, '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400 }
+export type Range = '15m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d' | '90d' | 'today' | 'yesterday' | 'week' | 'last-month'
+/** Each range: its name, and how long it is when it ends now (the
+ * others follow the calendar, in the looker's time zone). */
+export const RANGES: Record<Range, { label: string; seconds?: number }> = {
+  '15m': { label: '15m', seconds: 900 },
+  '1h': { label: '1h', seconds: 3600 },
+  '6h': { label: '6h', seconds: 6 * 3600 },
+  '12h': { label: '12h', seconds: 12 * 3600 },
+  '24h': { label: '24h', seconds: 86400 },
+  '7d': { label: '7d', seconds: 7 * 86400 },
+  '30d': { label: '30d', seconds: 30 * 86400 },
+  '90d': { label: '90d', seconds: 90 * 86400 },
+  today: { label: 'Today' },
+  yesterday: { label: 'Yesterday' },
+  week: { label: 'This week' },
+  'last-month': { label: 'Last month' },
+}
 
 /** A host or service a panel is about. The host `$host` is the one chosen
  * at the top of a dashboard that lets a host be chosen. */

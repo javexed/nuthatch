@@ -10,7 +10,9 @@ import { useRoute, useRouter } from 'vue-router'
 import FindTarget from '../components/FindTarget.vue'
 import WidgetBox from '../components/WidgetBox.vue'
 import { hostGroups, useList } from '../lib/choices'
+import { fromInput, toInput } from '../lib/format'
 import { type Box, COLUMNS, SIZES, clamp, move, place } from '../lib/layout'
+import { type When, spanNow, spanText } from '../lib/range'
 import { api, useSession } from '../stores/session'
 
 const props = defineProps<{ id: string }>()
@@ -135,10 +137,12 @@ function undo() {
 /** The ⋯ menu closes on a click elsewhere, or Escape. */
 function away(event: PointerEvent) {
   if (menu.value && !(event.target instanceof Element && event.target.closest('.more'))) menu.value = false
+  if (times.value && !(event.target instanceof Element && event.target.closest('.when'))) times.value = false
 }
 function keys(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     menu.value = false
+    times.value = false
     picking.value = null
   }
   const typing = event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
@@ -162,16 +166,77 @@ onUnmounted(() => {
   void keep()
 })
 
-// The range: everyone may look at another; whoever may change the
-// dashboard changes it for all.
-const lookRange = ref<Range | null>(null)
-const range = computed<Range>(() => lookRange.value ?? body.value?.range ?? '24h')
-function setRange(r: Range) {
-  mark()
-  if (mayEdit.value && body.value) body.value.range = r
-  else lookRange.value = r
+// The time: one of the ranges, which whoever may change the dashboard
+// changes for all (others look at another in the address); or, in the
+// address alone, from one moment to another: stepped back or forward,
+// dragged across a graph, or typed.
+const QUICK: Range[] = ['1h', '6h', '24h', '7d']
+const ROLLING: Range[] = ['15m', '1h', '6h', '12h', '24h', '7d', '30d', '90d']
+const CALENDAR: Range[] = ['today', 'yesterday', 'week', 'last-month']
+const asked = (key: string) => (typeof route.query[key] === 'string' ? route.query[key] : undefined)
+const range = computed<Range>(() => {
+  const r = asked('range')
+  return r !== undefined && r in RANGES ? (r as Range) : (body.value?.range ?? '24h')
+})
+const fixed = computed(() => {
+  const from = Number(asked('from'))
+  const to = Number(asked('to'))
+  return asked('from') !== undefined && Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : null
+})
+const when = computed<When>(() => fixed.value ?? { range: range.value })
+const times = ref(false)
+function address(changes: Record<string, string | undefined>) {
+  const query: Record<string, string> = {}
+  for (const [k, v] of Object.entries({ ...route.query, ...changes })) if (typeof v === 'string') query[k] = v
+  void router.replace({ query })
 }
-const seconds = computed(() => RANGES[range.value])
+function setRange(r: Range) {
+  times.value = false
+  if (mayEdit.value && body.value) {
+    mark()
+    body.value.range = r
+    address({ range: undefined, from: undefined, to: undefined })
+  } else address({ range: r === body.value?.range ? undefined : r, from: undefined, to: undefined })
+}
+function setSpan(span: { from: number; to: number }) {
+  times.value = false
+  address({ from: String(Math.floor(span.from)), to: String(Math.ceil(span.to)) })
+}
+const toNow = () => address({ from: undefined, to: undefined })
+/** Back or forward by as long as is shown; forward to now is the range again. */
+function step(by: -1 | 1) {
+  const s = spanNow(when.value)
+  const long = s.to - s.from
+  const now = Date.now() / 1000
+  const to = s.to + by * long
+  // Forward to now: the range again, when it is one that ends now.
+  if (by > 0 && to >= now - 1 && fixed.value && spanNow({ range: range.value }).live) return toNow()
+  setSpan({ from: Math.min(to, now) - long, to: Math.min(to, now) })
+}
+/** Twice as long, around the same middle; not past now. */
+function zoomOut() {
+  const s = spanNow(when.value)
+  const now = Date.now() / 1000
+  const long = (s.to - s.from) * 2
+  const to = Math.min(now, (s.from + s.to) / 2 + long / 2)
+  setSpan({ from: to - long, to })
+}
+const later = computed(() => !spanNow(when.value).live)
+const typedFrom = ref('')
+const typedTo = ref('')
+const typedWrong = ref(false)
+watch(times, (open) => {
+  if (!open) return
+  const s = spanNow(when.value)
+  typedFrom.value = toInput(s.from)
+  typedTo.value = toInput(s.to)
+  typedWrong.value = false
+})
+function typed() {
+  const span = { from: fromInput(typedFrom.value), to: fromInput(typedTo.value) }
+  typedWrong.value = !(Number.isFinite(span.from) && Number.isFinite(span.to) && span.to > span.from)
+  if (!typedWrong.value) setSpan(span)
+}
 
 // The host chosen at the top, in the page's address.
 const hostList = useList(
@@ -419,7 +484,6 @@ function toChosen() {
 }
 const scopeText = (w: Scope) => (w.of ? (w.of.host === '$host' ? 'The chosen host' : [w.of.host, w.of.service].filter(Boolean).join(' · ')) : (w.hostgroup ?? 'All hosts'))
 const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, s.service, s.label].filter(Boolean).join(' · ')
-const rangeNames = Object.keys(RANGES) as Range[]
 </script>
 
 <template>
@@ -433,8 +497,30 @@ const rangeNames = Object.keys(RANGES) as Range[]
         {{ body.title }}
         <span v-if="!mine && !wall" class="backend">{{ dashboard.owner }}</span>
       </h1>
-      <div class="chips" role="group" aria-label="Range">
-        <button v-for="r in rangeNames" :key="r" type="button" :class="['chip', { on: range === r }]" :aria-pressed="range === r" @click="setRange(r)">{{ r }}</button>
+      <div class="chips when" role="group" aria-label="Range">
+        <button type="button" class="chip" aria-label="Earlier" title="Earlier" @click="step(-1)">‹</button>
+        <template v-if="!fixed">
+          <button v-for="r in QUICK" :key="r" type="button" :class="['chip', { on: range === r }]" :aria-pressed="range === r" @click="setRange(r)">{{ RANGES[r].label }}</button>
+          <button v-if="!QUICK.includes(range)" type="button" class="chip on" aria-pressed="true" @click="times = !times">{{ RANGES[range].label }}</button>
+        </template>
+        <span v-else class="chip on">{{ spanText(fixed) }}</span>
+        <button type="button" class="chip" aria-label="Other times" title="Other times" :aria-expanded="times" @click="times = !times">⋯</button>
+        <button type="button" class="chip" aria-label="Later" title="Later" :disabled="!later" @click="step(1)">›</button>
+        <button v-if="fixed" type="button" class="chip" @click="zoomOut">Zoom out</button>
+        <button v-if="fixed" type="button" class="chip" @click="toNow">Now</button>
+        <div v-if="times" class="card when-more">
+          <div class="chips">
+            <button v-for="r in ROLLING" :key="r" type="button" :class="['chip', { on: !fixed && range === r }]" @click="setRange(r)">{{ RANGES[r].label }}</button>
+          </div>
+          <div class="chips">
+            <button v-for="r in CALENDAR" :key="r" type="button" :class="['chip', { on: !fixed && range === r }]" @click="setRange(r)">{{ RANGES[r].label }}</button>
+          </div>
+          <form class="when-typed" @submit.prevent="typed">
+            <label>From <input v-model="typedFrom" name="from" type="datetime-local" required /></label>
+            <label>To <input v-model="typedTo" name="to" type="datetime-local" required :aria-invalid="typedWrong" /></label>
+            <button type="submit" class="quiet">Show</button>
+          </form>
+        </div>
       </div>
       <label v-if="body.choose_host && hostList" class="field chooser">
         Host
@@ -489,10 +575,11 @@ const rangeNames = Object.keys(RANGES) as Range[]
           v-for="{ w, n } in order"
           :key="n"
           :widget="w"
-          :seconds="seconds"
+          :when="when"
           :chosen-host="chosen"
           :style="cell(w.layout)"
           :class="['panel', { chosen: selected === n, picking: picking === n, 'pick-left': w.layout.x + w.layout.w > 8 }]"
+          @zoom="setSpan"
         >
           <template v-if="arranging" #handle>
             <span class="grip" title="Move" @pointerdown="grab($event, n, 'move')">⠿</span>

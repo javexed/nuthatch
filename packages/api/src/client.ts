@@ -223,9 +223,10 @@ export class Client {
     return this.call('DELETE', `/api/v1/dashboards/${id}`)
   }
 
-  /** The performance data of a host (no service) or a service over the last hours. */
-  graph(backend: string, host: string, service: string | undefined, hours: number): Promise<GraphAnswer> {
-    const query = new URLSearchParams({ backend, host, service: service ?? '', hours: String(hours) })
+  /** The performance data of a host (no service) or a service over the last
+   * hours, or from one moment to another (seconds). */
+  graph(backend: string, host: string, service: string | undefined, over: number | { from: number; to: number }): Promise<GraphAnswer> {
+    const query = new URLSearchParams({ backend, host, service: service ?? '', ...(typeof over === 'number' ? { hours: String(over) } : { from: String(Math.floor(over.from)), to: String(Math.ceil(over.to)) }) })
     return this.call('GET', `/api/v1/graph?${query.toString()}`)
   }
 

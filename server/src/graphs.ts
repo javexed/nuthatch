@@ -99,9 +99,11 @@ export class Graphs {
     this.ids.clear()
   }
 
-  /** The graphs of a host (`service` empty) or a service, over the last `hours`. */
-  series(backend: string, host: string, service: string, hours: number, now = Date.now() / 1000): Series[] {
-    const from = Math.floor(now - hours * 3600)
+  /** The graphs of a host (`service` empty) or a service, over the last
+   * `hours`, or from one moment to another. */
+  series(backend: string, host: string, service: string, over: number | { from: number; to: number }, now = Date.now() / 1000): Series[] {
+    const from = Math.floor(typeof over === 'number' ? now - over * 3600 : over.from)
+    const to = Math.ceil(typeof over === 'number' ? now + 60 : over.to)
     const found = this.db.prepare('SELECT id, label, unit FROM series WHERE backend = ? AND host = ? AND service = ? ORDER BY id').all(backend, host, service) as {
       id: number
       label: string
@@ -109,7 +111,7 @@ export class Graphs {
     }[]
     const out: Series[] = []
     for (const s of found) {
-      const rows = this.db.prepare('SELECT time, value FROM points WHERE series = ? AND time >= ? ORDER BY time').all(s.id, from) as { time: number; value: number }[]
+      const rows = this.db.prepare('SELECT time, value FROM points WHERE series = ? AND time >= ? AND time <= ? ORDER BY time').all(s.id, from, to) as { time: number; value: number }[]
       if (rows.length === 0) continue
       out.push({ label: s.label, unit: s.unit, points: thin(rows.map((r) => [r.time, r.value])) })
     }

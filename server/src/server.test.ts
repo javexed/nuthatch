@@ -1019,6 +1019,8 @@ describe('a short history for graphs', () => {
     expect(graphs.series('other', 'web1', 'http', 24, 1100)).toEqual([])
     // Only the hours asked for; and what is older than the days kept goes.
     expect(graphs.series('site', 'web1', 'http', 1, 1000 + 3600 + 30)[0]?.points).toEqual([[1060, 0.75]])
+    // Or from one moment to another.
+    expect(graphs.series('site', 'web1', 'http', { from: 990, to: 1010 })[0]?.points.map((p) => p[0])).toEqual([1000])
     graphs.prune(1030 + 7 * 86400)
     expect(graphs.series('site', 'web1', 'http', 24 * 31, 1100 + 7 * 86400)[0]?.points).toEqual([[1060, 0.75]])
     expect(graphs.series('site', 'web1', 'disk', 24 * 31, 1100 + 7 * 86400)).toEqual([])
