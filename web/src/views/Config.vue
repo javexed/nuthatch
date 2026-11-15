@@ -3,12 +3,13 @@ import { type Changes, compare, portsOf, withGained } from '../lib/rediscover'
 // The hosts and services nuthatch keeps the config of: adding, changing
 // and taking away. Every change is checked by the engine itself before it
 // is written, and the engine then reads its config again.
-import type { AgentRow, ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGroup, ManagedHost } from '@nuthatch/api'
+import type { AgentRow, ConfigChange, ConfigResult, ConfigState, DeliverySettings, ManagedContact, ManagedGroup, ManagedHost } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AddHost from '../components/AddHost.vue'
 import ContactForm from '../components/ContactForm.vue'
+import DeliveryForm from '../components/DeliveryForm.vue'
 import GroupForm from '../components/GroupForm.vue'
 import HostAgent from '../components/HostAgent.vue'
 import HostForm from '../components/HostForm.vue'
@@ -59,8 +60,25 @@ async function loadAgents() {
   }
 }
 
+/** How nuthatch sends mail, chat and ntfy; null where notifications are not set up. */
+const delivery = ref<(DeliverySettings & { topic: string }) | null>(null)
+const sending = ref(false)
+async function loadDelivery() {
+  try {
+    delivery.value = await api.delivery()
+  } catch {
+    delivery.value = null
+  }
+}
+function savedDelivery(saved: DeliverySettings) {
+  delivery.value = { ...saved, topic: delivery.value?.topic ?? '' }
+}
+const ways = (k: ManagedContact) =>
+  [k.reach?.email ? 'e-mail' : '', k.reach?.chat ? `chat ${k.reach.chat}` : '', k.reach?.ntfy ? 'ntfy' : ''].filter(Boolean)
+
 async function load() {
   if (backend.value === '') return
+  if (delivery.value === null) void loadDelivery()
   try {
     state.value = await api.config(backend.value)
     error.value = ''
@@ -249,16 +267,20 @@ async function remove(host: ManagedHost) {
         @save="saveGroup"
         @cancel="group = null"
       />
+      <template v-else-if="contact !== null">
       <ContactForm
-        v-else-if="contact !== null"
         :key="contact === 'new' ? ' new' : contact.name"
         :state="state"
         :contact="contact === 'new' ? undefined : contact"
         :busy="busy"
+        :delivery="delivery"
         @check="checkContactOnly"
         @save="saveContact"
         @cancel="contact = null"
+        @sending="sending = true"
       />
+      <DeliveryForm v-if="sending && delivery" :settings="delivery" @saved="savedDelivery" @close="sending = false" />
+      </template>
       <section v-else-if="choosingHost" class="card choose-host" aria-label="Which host">
         <h2>New service on</h2>
         <p v-if="state.hosts.length === 0" class="none">No hosts yet</p>
@@ -357,11 +379,15 @@ async function remove(host: ManagedHost) {
           </li>
         </ul>
         <h2 class="groups-head">Contacts</h2>
-        <p><button type="button" class="quiet" :disabled="busy" @click="contact = 'new'">Add a contact</button></p>
+        <p>
+          <button type="button" class="quiet" :disabled="busy" @click="contact = 'new'">Add a contact</button>
+          <button v-if="delivery" type="button" class="quiet" :aria-pressed="sending" @click="sending = !sending">Sending</button>
+        </p>
+        <DeliveryForm v-if="sending && delivery && contact === null" :settings="delivery" @saved="savedDelivery" @close="sending = false" />
         <ul v-if="(state.contacts ?? []).length > 0" class="managed">
           <li v-for="k in state.contacts" :key="k.name" class="card">
             <div>
-              <strong>{{ k.name }}</strong> <span class="by">{{ k.email ?? '' }}{{ k.digest ? ' · digest' : '' }}</span>
+              <strong>{{ k.name }}</strong> <span class="by">{{ [k.email ?? '', ...ways(k), k.digest ? 'digest' : ''].filter(Boolean).join(' · ') }}</span>
             </div>
             <div class="actions">
               <button type="button" class="quiet" :disabled="busy" @click="contact = k">Change</button>

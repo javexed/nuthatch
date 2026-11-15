@@ -1,4 +1,5 @@
-// Notifications pushed to browsers where nuthatch is installed.
+// Notifications pushed to browsers where nuthatch is installed, and sent
+// the other ways a contact is reached (delivery.ts).
 //
 // The engine decides who is notified of what and when: its contacts,
 // their notification periods and options, acknowledgements and downtimes.
@@ -10,7 +11,9 @@
 // Only this nuthatch's own backends are watched: a site's notifications
 // are pushed by that site's nuthatch, to those subscribed there.
 
+import type { Reach } from '@nuthatch/api'
 import type { Backend } from './backend.ts'
+import { type KeptDelivery, NO_DELIVERY, anyWay, deliver } from './delivery.ts'
 import type { Store } from './store.ts'
 import { type Sent, type ServerKeys, type Subscription, newServerKeys, send } from './webpush.ts'
 
@@ -88,17 +91,44 @@ export class Pusher {
   private readonly subject: string
   private readonly fetcher: typeof fetch
   readonly keys: ServerKeys
+  /** nuthatch's own address, for links in mail, chat and ntfy: the subject, when it is one. */
+  readonly base: string | undefined
 
   /** `subject`: who runs this server, as push services ask: mailto: or https:. */
   constructor(store: Store, subject: string, backends: Backend[], every = 5000, fetcher: typeof fetch = fetch) {
     this.store = store
     this.subject = subject
     this.fetcher = fetcher
+    this.base = subject.startsWith('https://') ? subject : undefined
     // The server's keys are made once and kept: browsers subscribe to them.
     const kept = store.pref('', 'push.keys')
     this.keys = kept ? (JSON.parse(kept) as ServerKeys) : newServerKeys()
     if (!kept) store.setPref('', 'push.keys', JSON.stringify(this.keys))
     if (every > 0) for (const backend of backends) void this.watch(backend, every)
+  }
+
+  /** How mail, chat and ntfy are sent, as kept. */
+  delivery(): KeptDelivery {
+    const kept = this.store.pref('', 'delivery')
+    return kept ? { ...NO_DELIVERY, ...(JSON.parse(kept) as KeptDelivery) } : NO_DELIVERY
+  }
+
+  setDelivery(kept: KeptDelivery): void {
+    this.store.setPref('', 'delivery', JSON.stringify(kept))
+  }
+
+  /** A contact's other ways, and their address when mail is one. */
+  async toContact(backend: Backend, contact: string, message: Message, urgent: boolean): Promise<string[]> {
+    const body = this.store.reachOf(backend.name, contact)
+    const reach = body ? (JSON.parse(body) as Reach) : undefined
+    if (!anyWay(reach)) return []
+    let email: string | undefined
+    if (reach?.email) {
+      const rows = await backend.query(`GET contacts\nColumns: email\nFilter: name = ${contact}`)
+      email = String(rows[0]?.[0] ?? '') || undefined
+      if (!email) return ['e-mail: the contact has no e-mail address']
+    }
+    return deliver(this.delivery(), reach as Reach, email, message, urgent, this.base, this.fetcher)
   }
 
   /** Sends a message to all of a user's browsers; forgets those that are gone. */
@@ -134,7 +164,11 @@ export class Pusher {
     }
     for (const [contact, notices] of found) {
       const message = notices.length === 1 ? messageOf(backend.name, notices[0] as Notice) : digestOf(backend.name, notices)
-      void this.toUser(contact, message, notices.some((n) => bad(n.state)))
+      const urgent = notices.some((n) => bad(n.state))
+      void this.toUser(contact, message, urgent)
+      void this.toContact(backend, contact, message, urgent)
+        .then((failed) => failed.forEach((f) => console.error(`notify ${backend.name}/${contact}: ${f}`)))
+        .catch((err: unknown) => console.error(`notify ${backend.name}/${contact}: ${err instanceof Error ? err.message : String(err)}`))
     }
     // What is older than the newest second cannot come again.
     for (const key of seen) if (Number(key.split('|')[0]) < latest) seen.delete(key)
@@ -147,7 +181,7 @@ export class Pusher {
     const seen = new Set<string>()
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, every).unref())
-      if (!this.store.anyPush()) {
+      if (!this.store.anyPush() && !this.store.anyReach()) {
         since = Math.floor(Date.now() / 1000)
         continue
       }

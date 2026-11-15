@@ -23,6 +23,7 @@ import { type TailnetMachine, askTailscale, discover } from './discover.ts'
 import type { Events } from './events.ts'
 import type { Graphs } from './graphs.ts'
 import type { Pusher } from './push.ts'
+import { anyWay, checkDelivery, checkReach, newTopic, sendChat, sendMail, sendNtfy, shown } from './delivery.ts'
 import { ROLES, Refused, type Roles, type RolesConfig, TABLES, access, checkHeaders } from './policy.ts'
 import { checkSubscription } from './webpush.ts'
 import { Forbidden, combine, combineStats, limits, rows, stats } from './query.ts'
@@ -778,7 +779,10 @@ export function buildApp(deps: Deps): Hono<Env> {
   app.get('/api/v1/config/:backend', async (c) => {
     const far = await configSite(c)
     if (far) return c.json({ ...(await far.site.call<Record<string, unknown>>(c.get('identity').user, 'GET', far.path)), backend: c.req.param('backend') })
-    return c.json(await (await configOf(c)).admin.state())
+    const state = await (await configOf(c)).admin.state()
+    // How each contact is reached, from nuthatch's store.
+    const reach = deps.store.reachAll(c.req.param('backend'))
+    return c.json({ ...state, contacts: state.contacts?.map((k) => (reach.has(k.name) ? { ...k, reach: JSON.parse(reach.get(k.name) as string) } : k)) })
   })
 
   app.post('/api/v1/config/:backend', async (c) => {
@@ -799,14 +803,70 @@ export function buildApp(deps: Deps): Hono<Env> {
     }
     const dryRun = sent.dry_run === true
     const what = `${change.kind} ${String(change.kind === 'put' ? change.host?.name : change.kind === 'put-group' ? change.group?.name : change.kind === 'put-contact' ? change.contact?.name : change.name)}`
+    // How a contact is reached: checked before, kept after the engine has it.
+    let reach: string | null | undefined
+    if (change.kind === 'put-contact') {
+      const given = (change.contact as Record<string, unknown> | undefined)?.reach
+      const way = deps.pusher ? checkReach(given, deps.pusher.delivery()) : {}
+      if (!deps.pusher && anyWay(given as never)) throw new Refused('notifications are not set up on this server ([notifications] in its config)')
+      reach = anyWay(way) ? JSON.stringify(way) : null
+    }
     try {
       const result = await admin.change(sent.revision, change as never, dryRun)
+      if (!dryRun && change.kind === 'put-contact' && typeof change.contact?.name === 'string') {
+        const previous = (change as { previous?: unknown }).previous
+        if (typeof previous === 'string' && previous !== change.contact.name) deps.store.setReach(backend, previous, null)
+        deps.store.setReach(backend, change.contact.name, reach ?? null)
+      }
+      if (!dryRun && change.kind === 'delete-contact' && typeof change.name === 'string') deps.store.setReach(backend, change.name, null)
       if (!dryRun) deps.store.audit(user, backend, 'config', what)
       return c.json(result)
     } catch (err) {
       if (!dryRun) deps.store.audit(user, backend, 'config refused', `${what}: ${err instanceof Error ? err.message : String(err)}`)
       throw err
     }
+  })
+
+  // How mail, chat and ntfy are sent: for config_edit, on this nuthatch.
+  const delivering = async (c: Context<Env>) => {
+    const { user } = c.get('identity')
+    if (!(await who(user)).roles.has('config_edit')) throw new Forbidden('how notifications are sent is for the role config_edit')
+    if (!deps.pusher) throw new Refused('notifications are not set up on this server ([notifications] in its config)')
+    return { user, pusher: deps.pusher }
+  }
+  app.get('/api/v1/delivery', async (c) => {
+    const { pusher } = await delivering(c)
+    return c.json({ ...shown(pusher.delivery()), topic: newTopic(), ...(pusher.base ? { base: pusher.base } : {}) })
+  })
+  app.put('/api/v1/delivery', async (c) => {
+    const { user, pusher } = await delivering(c)
+    const kept = checkDelivery(await body(c), pusher.delivery())
+    pusher.setDelivery(kept)
+    deps.store.audit(user, '', 'delivery', [kept.email ? `mail ${kept.email.host}:${kept.email.port}` : 'no mail', `${kept.chats.length} chat`, `ntfy ${kept.ntfy.server}`].join(', '))
+    return c.json(shown(kept))
+  })
+  // A test message, one way: by what is kept, so save first.
+  app.post('/api/v1/delivery/test', async (c) => {
+    const { pusher } = await delivering(c)
+    const sent = await body(c)
+    const kept = pusher.delivery()
+    const title = 'nuthatch'
+    const text = 'Notifications reach you this way.'
+    if (sent.kind === 'email') {
+      if (!kept.email) throw new Refused('save the mail settings first')
+      await sendMail(kept.email, String(sent.to ?? ''), title, text)
+    } else if (sent.kind === 'chat') {
+      const chat = kept.chats.find((k) => k.name === sent.name)
+      if (!chat) throw new Refused('save the chat link first')
+      await sendChat(chat.url, chat.kind, title, text, pusher.base)
+    } else if (sent.kind === 'ntfy') {
+      const topic = checkReach({ ntfy: sent.topic }, kept).ntfy
+      if (!topic) throw new Refused('an ntfy topic is needed')
+      await sendNtfy(kept.ntfy.server, topic, title, text, false, pusher.base)
+    } else {
+      throw new Refused('a test is of email, chat or ntfy')
+    }
+    return c.json({ ok: true })
   })
 
   // The graphs of a host or a service: its performance data over the last

@@ -430,6 +430,15 @@ describe('a host to write', () => {
       expect(() => checkContact({ ...given, ...bad }, timed, true), JSON.stringify(bad)).toThrow()
     }
     expect(() => checkContact(given, timed, false)).toThrow(/only checkd/)
+    // Reached by nuthatch: its no-op command, which makes the engine log notifications.
+    const withNotify = { ...timed, commands: [...timed.commands, 'nuthatch_notify'] }
+    const reached = checkContact({ ...given, digest: undefined, host_notification_commands: [], service_notification_commands: ['notify'], reach: { ntfy: 'nuthatch-abcdefghijklmnopqrst' } }, withNotify, true)
+    expect(reached.host_notification_commands).toEqual(['nuthatch_notify'])
+    expect(reached.service_notification_commands).toEqual(['notify', 'nuthatch_notify'])
+    // Not reached any more: the no-op goes, and a way or a command is needed.
+    expect(() => checkContact({ ...given, digest: undefined, host_notification_commands: ['nuthatch_notify'] }, withNotify, true)).toThrow(/a way to reach them/)
+    expect(catalogueFile('$USER1$', true)).toMatch(/nuthatch_notify\s+command_line\s+checkd:dummy 0/)
+    expect(catalogueFile('$USER1$', false)).toMatch(/nuthatch_notify\s+command_line\s+\/bin\/true/)
   })
 
   it('keeps groups, in files no host can have', () => {

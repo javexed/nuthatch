@@ -20,7 +20,7 @@ import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGr
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
 import { randomBytes } from 'node:crypto'
-import { AGGREGATE_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, FROM_OUTSIDE, ON_AGENT, PUSHED_COMMAND, catalogueFile, catalogueFor } from './catalogue.ts'
+import { AGGREGATE_COMMAND, NOTIFY_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, FROM_OUTSIDE, ON_AGENT, PUSHED_COMMAND, catalogueFile, catalogueFor } from './catalogue.ts'
 import { Refused } from './policy.ts'
 import { now } from './store.ts'
 
@@ -223,9 +223,14 @@ export function checkContact(given: unknown, choices: Choices, extras: boolean):
     if (text === '' || [...text].some((l) => !allowed.includes(l))) throw new Refused(`${what}: letters of ${allowed}`)
     return [...new Set(text)].join(',')
   }
+  // Reached by nuthatch: no command of their own is needed, but the engine
+  // notifies only a contact that has one.
+  const r = (typeof c.reach === 'object' && c.reach !== null ? c.reach : {}) as Record<string, unknown>
+  const reached = r.email === true || (typeof r.chat === 'string' && r.chat !== '') || (typeof r.ntfy === 'string' && r.ntfy !== '')
   const commands = (value: unknown, what: string) => {
-    const list = Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '') : []
-    if (list.length === 0) throw new Refused(`${what}: choose at least one command`)
+    let list = Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '' && v !== NOTIFY_COMMAND) : []
+    if (reached) list = [...list, NOTIFY_COMMAND]
+    if (list.length === 0) throw new Refused(`${what}: choose a way to reach them, or a command`)
     for (const line of list) command(line, what, choices.commands)
     return list
   }
@@ -619,6 +624,8 @@ export class ConfigAdmin {
       }
       file = CONTACT_FILE(contact.name)
       writes.set(file, contactText(contact))
+      const catalogue = catalogueFile(this.settings.plugins ?? '$USER1$', state.extras === true)
+      if (contact.host_notification_commands.includes(NOTIFY_COMMAND) && this.files().get(CATALOGUE_FILE) !== catalogue) writes.set(CATALOGUE_FILE, catalogue)
     } else if (change.kind === 'delete-contact' && (state.contacts ?? []).some((k) => k.name === change.name)) {
       kept = { table: 'contacts', name: change.name }
       name = change.name

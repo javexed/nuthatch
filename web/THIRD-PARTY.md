@@ -6,3 +6,6 @@ with its licence, and must be permissively licensed.
 
 The phone app (`mobile/`) adds Capacitor (MIT); `mobile/android` is the
 project its `cap add android` made.
+
+The ntfy QR code is drawn with `qrcode-generator` (Kazuhiko Arase, MIT),
+an npm package with no dependencies of its own.

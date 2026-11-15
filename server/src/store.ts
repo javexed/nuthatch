@@ -105,7 +105,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS inventories (
         backend TEXT NOT NULL, host TEXT NOT NULL, body TEXT NOT NULL,
         received INTEGER NOT NULL, base TEXT NOT NULL, dismissed TEXT NOT NULL,
-        PRIMARY KEY (backend, host));`)
+        PRIMARY KEY (backend, host));
+      CREATE TABLE IF NOT EXISTS reach (
+        backend TEXT NOT NULL, contact TEXT NOT NULL, body TEXT NOT NULL,
+        PRIMARY KEY (backend, contact));`)
   }
 
   /** Starts a session. The answer is the cookie's secret and the session. */
@@ -193,6 +196,27 @@ export class Store {
   /** Whether anyone is to be pushed to at all. */
   anyPush(): boolean {
     return this.db.prepare('SELECT 1 FROM push LIMIT 1').get() !== undefined
+  }
+
+  /** How a contact is reached besides the browsers (delivery.ts): JSON. */
+  reachOf(backend: string, contact: string): string | null {
+    const row = this.db.prepare('SELECT body FROM reach WHERE backend = ? AND contact = ?').get(backend, contact) as { body: string } | undefined
+    return row?.body ?? null
+  }
+
+  reachAll(backend: string): Map<string, string> {
+    const rows = this.db.prepare('SELECT contact, body FROM reach WHERE backend = ?').all(backend) as { contact: string; body: string }[]
+    return new Map(rows.map((r) => [r.contact, r.body]))
+  }
+
+  /** `body` null: the contact is reached no other way. */
+  setReach(backend: string, contact: string, body: string | null): void {
+    if (body === null) this.db.prepare('DELETE FROM reach WHERE backend = ? AND contact = ?').run(backend, contact)
+    else this.db.prepare('INSERT INTO reach (backend, contact, body) VALUES (?, ?, ?) ON CONFLICT (backend, contact) DO UPDATE SET body = excluded.body').run(backend, contact, body)
+  }
+
+  anyReach(): boolean {
+    return this.db.prepare('SELECT 1 FROM reach LIMIT 1').get() !== undefined
   }
 
   /** A user's own dashboards and the shared ones, by title. */

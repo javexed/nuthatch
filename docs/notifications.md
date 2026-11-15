@@ -58,3 +58,42 @@ service says is gone is forgotten.
 
 No dependency was added for this: `server/src/webpush.ts` does the
 encryption and the signature with Node's own `crypto`.
+
+## E-mail, chat and ntfy
+
+A contact can also be reached by e-mail, in a chat channel, or with the
+ntfy app, whether or not they log in to nuthatch. The same notifications
+go these ways, from the same log, one message per contact per pass.
+
+**How nuthatch sends** is set once, by the role `config_edit`: Config,
+Contacts, **Sending**.
+
+- **E-mail** through a mail server that takes a password login (AUTH
+  PLAIN) over TLS: port 465, or 587 with STARTTLS. The server's
+  certificate is checked. For Gmail: server `smtp.gmail.com`, port 465,
+  the Google account as login, and an *app password* (Google Account,
+  Security, 2-Step Verification, App passwords), not the account's own.
+  The password is kept in nuthatch's store and never shown again; leave
+  the field empty to keep it.
+- **Chat**: links by name, each a channel's incoming webhook: Slack,
+  Discord, Microsoft Teams (a Workflows webhook), Google Chat or
+  Mattermost.
+- **ntfy**: the server, `https://ntfy.sh` unless you run your own.
+
+Each has a test, which saves first and sends by what is saved.
+
+**How each contact is reached** is in their form, **Reach by**: e-mail
+(to their address), a chat link, or ntfy. ntfy gives the contact a topic
+of its own, a random name, and a QR code: scanned with the phone, or the
+link opened, it subscribes the ntfy app. On a public ntfy server anyone
+who knows the topic can read it, so it is long and random; keep it to
+the contact. A contact reached these ways needs no notification command
+of their own: nuthatch gives them `nuthatch_notify`, which does nothing
+(`checkd:dummy 0` on checkd, `/bin/true` on Naemon) but makes the engine
+notify them, and log it.
+
+What leaves the machine: the host, service, state and output go to the
+mail server, the chat's service, or the ntfy server, in the clear to
+them. Links in the messages lead to nuthatch when `subject` is its
+`https://` address. A message that cannot be sent is logged by nuthatch
+(`notify <backend>/<contact>: ...`) and not tried again.

@@ -208,6 +208,24 @@ export interface ManagedContact {
   service_notification_commands: string[]
   /** checkd: several notifications close together as one run of this command. */
   digest?: { command: string; wait?: number }
+  /** How nuthatch reaches them besides the browsers they installed it in. */
+  reach?: Reach
+}
+
+/** A contact's ways: e-mail to their address, a chat link by its name, an ntfy topic. */
+export interface Reach {
+  email?: boolean
+  chat?: string
+  ntfy?: string
+}
+
+export type ChatKind = 'slack' | 'discord' | 'teams' | 'google-chat' | 'mattermost'
+
+/** How nuthatch sends, for config_edit; the mail password is never shown. */
+export interface DeliverySettings {
+  email?: { host: string; port: number; user: string; from: string; has_password: boolean; password?: string }
+  chats: { name: string; kind: ChatKind; url: string }[]
+  ntfy: { server: string }
 }
 
 export interface ConfigState {

@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory } from './types.ts'
+import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -243,6 +243,20 @@ export class Client {
 
   removeNotifications(endpoint: string): Promise<void> {
     return this.call('POST', '/api/v1/notifications/remove', { endpoint })
+  }
+
+  /** How mail, chat and ntfy are sent (config_edit); `topic` is a fresh ntfy topic to offer. */
+  delivery(): Promise<DeliverySettings & { topic: string; base?: string }> {
+    return this.call('GET', '/api/v1/delivery')
+  }
+
+  /** The mail password is kept when none is given. */
+  saveDelivery(settings: DeliverySettings): Promise<DeliverySettings> {
+    return this.call('PUT', '/api/v1/delivery', settings)
+  }
+
+  testDelivery(test: { kind: 'email'; to: string } | { kind: 'chat'; name: string } | { kind: 'ntfy'; topic: string }): Promise<{ ok: true }> {
+    return this.call('POST', '/api/v1/delivery/test', test)
   }
 
   /** Sends a test notification to all of this user's browsers. */

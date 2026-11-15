@@ -12,6 +12,9 @@ export const CATALOGUE_HOST = 'nuthatch-commands'
 
 export const AGGREGATE_COMMAND = 'nuthatch_aggregate'
 export const PUSHED_COMMAND = 'nuthatch_pushed'
+/** A contact's notification command when nuthatch reaches them (delivery.ts):
+ * it does nothing, but the engine logs each notification, which nuthatch reads. */
+export const NOTIFY_COMMAND = 'nuthatch_notify'
 
 /** Name, then the plugin and its arguments; `{plugins}` is the plugins' directory. */
 const COMMANDS: [string, string][] = [
@@ -33,6 +36,7 @@ const COMMANDS: [string, string][] = [
   ['nuthatch_load', 'checkd:load -w $ARG1$ -c $ARG2$'],
   ['nuthatch_cpu', 'checkd:cpu -w $ARG1$ -c $ARG2$'],
   ['nuthatch_service', 'checkd:service -s $ARG1$'],
+  [NOTIFY_COMMAND, '{nothing}'],
 ]
 
 /** nuthatch's commands that only checkd can run. */
@@ -67,7 +71,7 @@ export function catalogueFile(plugins: string, checkd = true): string {
     type: 'command',
     attrs: [
       ['command_name', name],
-      ['command_line', line.replace('{plugins}', plugins)],
+      ['command_line', line.replace('{plugins}', plugins).replace('{nothing}', checkd ? 'checkd:dummy 0' : '/bin/true')],
     ],
   }))
   return writeObjects(definitions, 'Written by nuthatch: the check commands its suggested checks use.\nRewritten by nuthatch; changes made here are lost.')
