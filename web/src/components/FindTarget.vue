@@ -5,15 +5,17 @@
 // host, service or number whose names have them all.
 //
 // `scope`: all hosts, a group, a host or a service. `series`: a number of
-// a host or service. `host`: a host. `group`: a host group.
+// a host or service. `place`: a host group or a host.
 import type { Scope, Series } from '@nuthatch/api'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { literal } from '../lib/filters'
 import { parsePerfdata } from '../lib/perfdata'
 import { api, useSession } from '../stores/session'
 
-const props = defineProps<{ mode: 'scope' | 'series' | 'host' | 'group'; chooser?: boolean; label?: string }>()
-const emit = defineEmits<{ scope: [scope: Scope]; series: [series: Series]; group: [name: string] }>()
+const props = defineProps<{ mode: 'scope' | 'series' | 'place'; chooser?: boolean; label?: string; focus?: boolean }>()
+const emit = defineEmits<{ scope: [scope: Scope]; series: [series: Series] }>()
+const box = ref<HTMLInputElement>()
+onMounted(() => props.focus && box.value?.focus())
 
 interface Found {
   key: string
@@ -46,7 +48,7 @@ const groupRow = (g: string, detail?: string): Found => ({
   key: `g\n${g}`,
   text: g,
   detail: detail ?? 'host group',
-  pick: props.mode === 'group' ? () => emit('group', g) : scope({ hostgroup: g }),
+  pick: scope({ hostgroup: g }),
 })
 
 /** The numbers of one host or service, to pick from. */
@@ -96,13 +98,12 @@ async function browse(): Promise<Found[]> {
   const out: Found[] = []
   if (props.mode === 'scope' && props.chooser) out.push({ key: '$host', text: 'The chosen host', pick: scope({ of: { backend: '$host', host: '$host' } }) })
   if (props.mode === 'scope') out.push({ key: 'all', text: 'All hosts', pick: scope({}) })
-  if (props.mode === 'scope' || props.mode === 'group') {
+  if (props.mode !== 'series') {
     const groups = await api.query({ table: 'hostgroups', columns: ['name', 'num_hosts'], sort: [{ column: 'name' }], limit: 200 })
     const seen = new Set<string>()
     const rows = groups.rows.filter((r) => !seen.has(String(r.name)) && seen.add(String(r.name)))
-    if (rows.length > 0 && props.mode === 'scope') out.push({ key: 'head-g', text: 'Host groups', head: true })
-    for (const r of rows) out.push(groupRow(String(r.name), `${Number(r.num_hosts)} host${Number(r.num_hosts) === 1 ? "" : "s"}`))
-    if (props.mode === 'group') return out
+    if (rows.length > 0) out.push({ key: 'head-g', text: 'Host groups', head: true })
+    for (const r of rows) out.push(groupRow(String(r.name), `${Number(r.num_hosts)} host${Number(r.num_hosts) === 1 ? '' : 's'}`))
   }
   const series = props.mode === 'series'
   const hosts = series
@@ -114,13 +115,13 @@ async function browse(): Promise<Found[]> {
     .map((r) => ({ backend: r.backend, host: String((r as Record<string, unknown>)[series ? 'host_name' : 'name']) }))
     .filter((h) => !seen.has(`${h.backend}\n${h.host}`) && seen.add(`${h.backend}\n${h.host}`))
     .slice(0, 100)
-  if (list.length > 0 && props.mode === 'scope') out.push({ key: 'head-h', text: 'Hosts', head: true })
+  if (list.length > 0 && !series) out.push({ key: 'head-h', text: 'Hosts', head: true })
   for (const h of list) {
     out.push({
       key: `h\n${h.backend}\n${h.host}`,
       text: h.host,
       detail: whose(h.backend),
-      ...(props.mode === 'host' ? { pick: () => emit('scope', { of: { backend: h.backend, host: h.host } }) } : props.mode === 'scope' ? { pick: scope({ of: { backend: h.backend, host: h.host } }), open: h } : { open: h }),
+      ...(props.mode === 'place' ? { pick: scope({ of: { backend: h.backend, host: h.host } }) } : props.mode === 'scope' ? { pick: scope({ of: { backend: h.backend, host: h.host } }), open: h } : { open: h }),
     })
   }
   return out
@@ -132,12 +133,9 @@ async function search(list: string[]): Promise<Found[]> {
     if (props.chooser && has('chosen host', list)) out.push({ key: '$host', text: 'The chosen host', pick: scope({ of: { backend: '$host', host: '$host' } }) })
     if (has('all hosts', list)) out.push({ key: 'all', text: 'All hosts', pick: scope({}) })
   }
-  if (props.mode === 'scope' || props.mode === 'group') {
+  if (props.mode !== 'series') {
     const groups = await api.query({ table: 'hostgroups', columns: ['name'], headers: each(list, ['name', 'alias']), sort: [{ column: 'name' }], limit: 20 })
     for (const g of new Set(groups.rows.map((r) => String(r.name)))) out.push(groupRow(g))
-    if (props.mode === 'group') return out
-  }
-  if (props.mode === 'scope' || props.mode === 'host') {
     const [hosts, services] = await Promise.all([
       api.query({ table: 'hosts', columns: ['name'], headers: each(list, ['name', 'alias', 'address']), sort: [{ column: 'name' }], limit: 20 }),
       props.mode === 'scope' ? api.query({ table: 'services', columns: ['host_name', 'description'], headers: each(list, ['host_name', 'description']), sort: [{ column: 'host_name' }, { column: 'description' }], limit: 30 }) : null,
@@ -218,10 +216,11 @@ function back() {
 <template>
   <div class="find">
     <input
+      ref="box"
       v-model="words"
       type="search"
       :aria-label="label ?? 'Find'"
-      :placeholder="mode === 'series' ? 'Search numbers' : mode === 'group' ? 'Search groups' : mode === 'host' ? 'Search hosts' : 'Search'"
+      :placeholder="mode === 'series' ? 'Search numbers' : 'Search'"
       autocomplete="off"
       autocapitalize="none"
       @keydown.enter.prevent="first && choose(first)"

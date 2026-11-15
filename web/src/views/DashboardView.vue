@@ -22,6 +22,8 @@ const dashboard = ref<Dashboard | null>(null)
 const body = ref<DashboardBody | null>(null)
 const error = ref('')
 const selected = ref<number | null>(null)
+/** The panel whose picker is open, inside it: what it shows, or another number. */
+const picking = ref<number | null>(null)
 const mine = computed(() => dashboard.value?.owner === session.session?.user)
 const mayEdit = computed(() => mine.value || dashboard.value?.shared === true)
 const narrow = ref(false)
@@ -64,6 +66,7 @@ async function load() {
     history.length = 0
     canUndo.value = false
     selected.value = null
+    picking.value = null
     // An empty dashboard begins with what can go on it.
     tray.value = d.widgets.length === 0
     error.value = ''
@@ -126,6 +129,7 @@ function undo() {
   undoing = true
   canUndo.value = history.length > 0
   selected.value = null
+  picking.value = null
   body.value = JSON.parse(before) as DashboardBody
 }
 /** The ⋯ menu closes on a click elsewhere, or Escape. */
@@ -133,7 +137,10 @@ function away(event: PointerEvent) {
   if (menu.value && !(event.target instanceof Element && event.target.closest('.more'))) menu.value = false
 }
 function keys(event: KeyboardEvent) {
-  if (event.key === 'Escape') menu.value = false
+  if (event.key === 'Escape') {
+    menu.value = false
+    picking.value = null
+  }
   const typing = event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
   if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey && !typing && arranging.value) {
     event.preventDefault()
@@ -216,8 +223,8 @@ const ghost = computed(() => {
 const order = computed(() => shown.value.map((w, n) => ({ w, n })).sort((a, b) => a.w.layout.y - b.w.layout.y || a.w.layout.x - b.w.layout.x))
 const cell = (l: Layout) => ({ gridColumn: `${l.x + 1} / span ${l.w}`, gridRow: `${l.y + 1} / span ${l.h}` })
 
-/** A new panel: where it was dropped, or the first free place. Its settings
- * open when it needs to be told what to show. */
+/** A new panel: where it was dropped, or the first free place. One that
+ * needs to be told what to show opens its picker; a note, its text. */
 function add(settings: PanelSettings, at?: Layout, size?: [number, number]) {
   if (!body.value) return
   mark()
@@ -227,9 +234,10 @@ function add(settings: PanelSettings, at?: Layout, size?: [number, number]) {
   const moved = move([...boxes, layout], boxes.length, layout)
   body.value.widgets.forEach((x, i) => (x.layout = moved[i]!))
   body.value.widgets.push({ ...settings, layout: moved[boxes.length]! } as Widget)
-  const needs = settings.type === 'metric' || settings.type === 'note' || settings.type === 'status' || settings.type === 'availability'
   const n = body.value.widgets.length - 1
-  selected.value = needs ? n : null
+  const fresh = !('of' in settings) && !('hostgroup' in settings)
+  picking.value = (settings.type === 'metric' && settings.series.length === 0) || ((settings.type === 'status' || settings.type === 'availability') && fresh) ? n : null
+  selected.value = settings.type === 'note' && !settings.text ? n : null
   // Where it went, when that is below what shows.
   void nextTick(() => grid.value?.querySelectorAll('.panel')[order.value.findIndex((o) => o.n === n)]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
 }
@@ -242,12 +250,22 @@ function duplicate(n: number) {
   if (!w) return
   const { layout, ...settings } = JSON.parse(JSON.stringify(w)) as Widget
   add(settings as PanelSettings, undefined, [layout.w, layout.h])
-  selected.value = null
+  selected.value = picking.value = null
 }
 function removePanel(n: number) {
   mark()
   body.value?.widgets.splice(n, 1)
   selected.value = null
+  if (picking.value === n) picking.value = null
+  else if (picking.value !== null && picking.value > n) picking.value--
+}
+function settingsOf(n: number) {
+  picking.value = null
+  selected.value = selected.value === n ? null : n
+}
+function pickFor(n: number) {
+  selected.value = null
+  picking.value = n
 }
 
 // Dragging in from the tray. A press that does not move is a click.
@@ -372,22 +390,27 @@ watch(
 )
 
 const panel = computed(() => (selected.value === null ? null : (body.value?.widgets[selected.value] ?? null)))
+/** Panels say "the chosen host" only when there is one to choose. */
+const usesChosen = computed(() => (body.value?.widgets ?? []).some((w) => ((w.type === 'status' || w.type === 'availability') && w.of?.host === '$host') || (w.type === 'metric' && w.series.some((s) => s.host === '$host'))))
 const groupList = useList(
   () => [panel.value?.type, !!body.value?.choose_host],
   () => (panel.value?.type === 'problems' || body.value?.choose_host ? hostGroups() : null),
 )
-function setScope(scope: Scope) {
-  const w = panel.value
+function setScope(n: number, scope: Scope) {
+  const w = body.value?.widgets[n]
+  picking.value = null
   if (!w || (w.type !== 'status' && w.type !== 'availability')) return
   mark()
   delete w.of
   delete w.hostgroup
   Object.assign(w, scope)
 }
-function addSeries(s: Series) {
+function addSeries(n: number, s: Series) {
+  const w = body.value?.widgets[n]
+  picking.value = null
+  if (w?.type !== 'metric' || w.series.length >= 8) return
   mark()
-  const w = panel.value
-  if (w?.type === 'metric' && w.series.length < 8) w.series.push(s)
+  w.series.push(s)
 }
 function toChosen() {
   mark()
@@ -427,7 +450,7 @@ const rangeNames = Object.keys(RANGES) as Range[]
           <button type="button" class="quiet" aria-label="More" :aria-expanded="menu" @click="menu = !menu">⋯</button>
           <div v-if="menu" class="card more-menu">
             <label v-if="mine" class="check"><input v-model="body.shared" type="checkbox" name="shared" /> Shared</label>
-            <label class="check"><input :checked="!!body.choose_host" type="checkbox" name="choose-host" @change="toggleChooser(($event.target as HTMLInputElement).checked)" /> Choose a host</label>
+            <label v-if="body.choose_host || usesChosen" class="check"><input :checked="!!body.choose_host" type="checkbox" name="choose-host" @change="toggleChooser(($event.target as HTMLInputElement).checked)" /> Choose a host</label>
             <label v-if="body.choose_host" class="field">
               Of host group
               <select v-model="body.choose_host.hostgroup" name="choose-hostgroup">
@@ -469,28 +492,40 @@ const rangeNames = Object.keys(RANGES) as Range[]
           :seconds="seconds"
           :chosen-host="chosen"
           :style="cell(w.layout)"
-          :class="['panel', { chosen: selected === n }]"
+          :class="['panel', { chosen: selected === n, picking: picking === n, 'pick-left': w.layout.x + w.layout.w > 8 }]"
         >
           <template v-if="arranging" #handle>
             <span class="grip" title="Move" @pointerdown="grab($event, n, 'move')">⠿</span>
           </template>
           <template v-if="arranging" #tools>
             <span class="tools">
-              <button type="button" class="plain" aria-label="Settings" @click="selected = selected === n ? null : n">⚙</button>
+              <button type="button" class="plain" aria-label="Settings" @click="settingsOf(n)">⚙</button>
               <button type="button" class="plain" aria-label="Duplicate" @click="duplicate(n)">⧉</button>
               <button type="button" class="plain" aria-label="Remove" @click="removePanel(n)">✕</button>
             </span>
             <span class="corner" title="Resize" @pointerdown="grab($event, n, 'size')"></span>
           </template>
+          <template v-if="arranging && picking === n" #picker>
+            <div class="panel-picker" role="group" aria-label="Choose">
+              <FindTarget v-if="w.type === 'metric'" mode="series" label="Search" focus @series="addSeries(n, $event)" />
+              <FindTarget v-else mode="scope" label="Search" focus :chooser="!!body.choose_host" @scope="setScope(n, $event)" />
+            </div>
+          </template>
+          <template v-else-if="arranging && w.type === 'metric' && w.series.length === 0" #picker>
+            <button type="button" class="quiet" @click="pickFor(n)">Choose a number</button>
+          </template>
         </WidgetBox>
         <div v-if="ghost" class="drop-ghost" :style="cell(ghost)" aria-hidden="true"></div>
       </div>
-      <aside v-if="arranging && panel" class="card dash-settings" aria-label="Panel settings">
-        <label>Title <input v-model="panel.title" name="panel-title" maxlength="200" /></label>
-        <template v-if="panel.type === 'status' || panel.type === 'availability'">
-          <p class="by">{{ scopeText(panel) }}</p>
-          <FindTarget mode="scope" label="What" :chooser="!!body.choose_host" @scope="setScope" />
-        </template>
+      <aside v-if="arranging && panel && selected !== null" class="card dash-settings" aria-label="Panel settings">
+        <div class="settings-head">
+          <label>Title <input v-model="panel.title" name="panel-title" maxlength="200" /></label>
+          <button type="button" class="plain" aria-label="Close" @click="selected = null">✕</button>
+        </div>
+        <p v-if="panel.type === 'status' || panel.type === 'availability'" class="row">
+          <span>{{ scopeText(panel) }}</span>
+          <button type="button" class="quiet" @click="pickFor(selected)">Change</button>
+        </p>
         <template v-else-if="panel.type === 'metric'">
           <ul class="series-list">
             <li v-for="(s, i) in panel.series" :key="i">
@@ -498,7 +533,7 @@ const rangeNames = Object.keys(RANGES) as Range[]
               <button type="button" class="plain" :aria-label="`Remove ${seriesText(s)}`" @click="mark(); panel.series.splice(i, 1)">✕</button>
             </li>
           </ul>
-          <FindTarget v-if="panel.series.length < 8" mode="series" label="Add" @series="addSeries" />
+          <button v-if="panel.series.length < 8" type="button" class="quiet" @click="pickFor(selected)">+ Number</button>
           <label v-if="body.choose_host && panel.series.some((s) => s.host !== '$host')" class="check">
             <input type="checkbox" @change="toChosen" /> For the chosen host
           </label>
@@ -532,7 +567,6 @@ const rangeNames = Object.keys(RANGES) as Range[]
           <label><input v-model="panel.lines" type="radio" value="notifications" /> notifications</label>
         </fieldset>
         <label v-else-if="panel.type === 'note'">Text <textarea v-model="panel.text" name="panel-text" rows="6" maxlength="4000"></textarea></label>
-        <button type="button" class="quiet" @click="selected = null">Done</button>
       </aside>
     </div>
     <p v-if="body.widgets.length === 0 && !arranging" class="none">Empty</p>

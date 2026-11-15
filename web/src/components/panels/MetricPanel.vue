@@ -6,7 +6,7 @@
 import type { GraphSeries, Perf, Series } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { perfOf } from '../../lib/choices'
-import { type Point, nearest, shape, short } from '../../lib/graph'
+import { type Point, nearest, shape, withUnit } from '../../lib/graph'
 import { level } from '../../lib/thresholds'
 import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
@@ -51,7 +51,7 @@ const sameBackend = computed(() => new Set(props.series.map((s) => s.backend)).s
 const sameHost = computed(() => new Set(props.series.map((s) => s.host)).size === 1)
 const sameService = computed(() => new Set(props.series.map((s) => s.service ?? '')).size === 1)
 const nameOf = (s: Series) => [sameHost.value ? '' : s.host, sameService.value ? '' : (s.service ?? ''), s.label, sameBackend.value ? '' : `(${s.backend})`].filter(Boolean).join(' · ')
-const value = (v: number | undefined, unit: string) => (v === undefined ? '–' : `${short(v)}${unit === '' ? '' : unit.length > 1 ? ` ${unit}` : unit}`)
+const value = (v: number | undefined, unit: string) => (v === undefined ? '–' : withUnit(v, unit))
 const TONES = ['ok', 'warning', 'critical'] as const
 
 const span = computed(() => {

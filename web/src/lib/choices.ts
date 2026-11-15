@@ -1,14 +1,7 @@
-// What a panel's settings can be chosen from, asked of the engines: hosts,
-// a host's services, host groups, and the numbers a check reports.
+// What a panel's settings can be chosen from, asked of the engines.
 import { type Ref, ref, watch } from 'vue'
 import { api } from '../stores/session'
 import { parsePerfdata } from './perfdata'
-
-export interface Metric {
-  label: string
-  /** The number now, with its unit, to choose by. */
-  now: string
-}
 
 const oneLine = (text: string) => !/[\r\n]/.test(text)
 
@@ -17,28 +10,8 @@ async function names(table: string, column: string, backend?: string, headers: s
   return [...new Set(answer.rows.map((r) => String(r[column])))]
 }
 
-export function hostsOf(backend: string): Promise<string[]> {
-  return names('hosts', 'name', backend)
-}
-
-export function servicesOf(backend: string, host: string): Promise<string[]> {
-  return oneLine(host) ? names('services', 'description', backend, [`Filter: host_name = ${host}`]) : Promise.resolve([])
-}
-
 export function hostGroups(): Promise<string[]> {
   return names('hostgroups', 'name')
-}
-
-/** The numbers in a host's or service's performance data now. */
-export async function metricsOf(backend: string, host: string, service?: string): Promise<Metric[]> {
-  if (!oneLine(host) || (service !== undefined && !oneLine(service))) return []
-  const answer = await api.query({
-    table: service ? 'services' : 'hosts',
-    columns: ['perf_data'],
-    headers: service ? [`Filter: host_name = ${host}`, `Filter: description = ${service}`] : [`Filter: name = ${host}`],
-    backends: [backend],
-  })
-  return parsePerfdata(String(answer.rows[0]?.perf_data ?? '')).map((p) => ({ label: p.label, now: `${p.value}${p.unit}` }))
 }
 
 /** A list that follows its inputs; empty while they are not set. */

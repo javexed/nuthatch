@@ -68,6 +68,7 @@ const now = () => Date.now() / 1000
 <template>
   <section :class="['card', 'widget', outline]" :aria-label="title || 'Note'">
     <h2><slot name="handle" />{{ title }}<slot name="tools" /></h2>
+    <slot name="picker" />
     <p v-if="waiting" class="none">Choose a host</p>
     <StatusPanel v-else-if="widget.type === 'status' && scope" :scope="scope" @worst="worst = $event" />
     <ProblemsPanel v-else-if="widget.type === 'problems'" :of="widget.of" :show="widget.show" :hostgroup="widget.hostgroup" :seconds="seconds" :rows="problemRows" @worst="worst = $event" />

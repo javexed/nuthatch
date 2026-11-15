@@ -221,7 +221,7 @@ for (const engine of ENGINES) {
     expect(await plot.locator('path.line').getAttribute('d')).toMatch(/^M[\d.]+ [\d.]+/)
     // The value under the pointer.
     await plot.hover({ position: { x: 40, y: 20 } })
-    await expect(graphs.locator('.graph .now.at').first()).toContainText(/[\d.]+s\s+\d\d:\d\d/)
+    await expect(graphs.locator('.graph .now.at').first()).toContainText(/[\d.]+ ?(s|ms|µs)\s+\d\d:\d\d/)
     await graphs.getByRole('button', { name: '6 hours' }).click()
     await expect(graphs.getByRole('button', { name: '6 hours' })).toHaveAttribute('aria-pressed', 'true')
     await fits(page)

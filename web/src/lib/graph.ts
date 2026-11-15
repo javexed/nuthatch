@@ -23,6 +23,30 @@ export function short(value: number): string {
   return String(Number(value.toPrecision(3)))
 }
 
+const SECONDS: [number, string][] = [[1, 's'], [1e-3, 'ms'], [1e-6, 'µs']]
+const BYTES = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+
+/** A number with its unit, as people write it: 0.00027 s is 270 µs,
+ * 0.27 s is 270 ms, 5368709120 B is 5 GB (of 1024). */
+export function withUnit(value: number, unit: string): string {
+  let v = value
+  let u = unit
+  const abs = Math.abs(value)
+  if (unit === 's' && abs > 0 && abs < 1) {
+    const [by, name] = SECONDS.find(([by]) => abs >= by) ?? SECONDS[SECONDS.length - 1]!
+    v = value / by
+    u = name
+  } else if (BYTES.includes(unit)) {
+    let i = BYTES.indexOf(unit)
+    while (Math.abs(v) >= 1024 && i < BYTES.length - 1) {
+      v /= 1024
+      i++
+    }
+    u = BYTES[i]!
+  }
+  return u === '' ? short(v) : u.length > 1 ? `${short(v)} ${u}` : `${short(v)}${u}`
+}
+
 /** The usual time between two points; a gap of over three of them breaks the line. */
 function usualStep(points: Point[]): number {
   const steps = points.slice(1).map((p, n) => p[0] - (points[n]?.[0] ?? 0)).sort((a, b) => a - b)

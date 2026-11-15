@@ -11,10 +11,10 @@ problems, the alerts, and each host group. **New** makes a whole
 dashboard in one click:
 
 - **Overview**, again.
-- **For a host group**: its hosts, problems, availability, what recovered,
-  and a number of each host's own check.
-- **For a host**: one host, chosen at the top, so that one dashboard
-  serves every host; a graph of each of its services' first number.
+- **For a host or group**: for a host group, its hosts, problems,
+  availability, what recovered, and a number of each host's own check;
+  for a host, one host chosen at the top, so that one dashboard serves
+  every host, with a graph of each of its services' first number.
 - **Blank**.
 - **Import**: a file another dashboard was exported to.
 
@@ -40,18 +40,21 @@ graph, and smaller, a graph a number.
 What can be worked out is not asked: a panel's title comes from what it
 shows, lists show as many rows as fit, and a metric is a number or a
 graph by its size. A panel's outline takes the colour of the worst it
-shows. What a panel shows is chosen from a list (everything, the host
-groups, the hosts; › opens a host's services or numbers), or by a few
-words: every host group, host, service or number with them all.
+shows. What a panel shows is chosen in the panel, from a list
+(everything, the host groups, the hosts; › opens a host's services or
+numbers), or by a few words: every host group, host, service or number
+with them all.
 
 ## Changing
 
 Whoever may change a dashboard changes it in place, on a wide screen:
 **+ Panel** opens the tray (open already on an empty dashboard), whose panels are dragged onto the grid (a
 dashed box shows where they land) or clicked; a panel moves by its grip
-and resizes by its corner; the gear opens its settings; ⧉ duplicates it.
-Every change is kept at once; **Undo** (or Ctrl+Z) takes back one step.
-The ⋯ menu has sharing, the host chooser, **Export** and **Delete**.
+and resizes by its corner; the gear opens its settings (title, what it
+shows, and what else its kind has); ⧉ duplicates it. Every change is
+kept at once; **Undo** (or Ctrl+Z) takes back one step. The ⋯ menu has
+sharing, **Export** and **Delete**, and the host chooser once a panel
+shows the chosen host.
 
 **Wall** shows the panels alone, full screen. On the list of dashboards,
 ticking several and **Wall** shows them in turn, every so many seconds.

@@ -4,7 +4,7 @@ import { acknowledge, downtime, recheck } from './commands.ts'
 import { EMPTY, fromQuery, literal, toHeaders, toQuery } from './filters.ts'
 import { ago, duration, fromInput, toInput } from './format.ts'
 import { pulled, sideways, swipeOf } from './gestures.ts'
-import { nearest, shape, short } from './graph.ts'
+import { nearest, shape, short, withUnit } from './graph.ts'
 import { fraction, parsePerfdata } from './perfdata.ts'
 import { stateOf } from './states.ts'
 import { decide, latestBuild } from './update.ts'
@@ -158,6 +158,7 @@ describe('graphs', () => {
     expect(nearest([[0, 1], [60, 3], [120, 2]], 0, 120, 0.45)).toEqual([60, 3])
     expect(nearest([], 0, 120, 0.5)).toBeUndefined()
     expect([0, 0.25, 1234.5, 0.000123, 41, 2500000].map(short)).toEqual(['0', '0.25', '1230', '1.2e-4', '41', '2.5e+6'])
+    expect([[0.00027, 's'], [0.27, 's'], [4.5, 's'], [0, 's'], [5368709120, 'B'], [2048, 'KB'], [87, '%'], [3, '']].map(([v, u]) => withUnit(v as number, u as string))).toEqual(['270 µs', '270 ms', '4.5s', '0s', '5 GB', '2 MB', '87%', '3'])
   })
 })
 

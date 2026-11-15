@@ -33,9 +33,11 @@ test('everyone starts with an Overview, and a template makes a whole dashboard',
   await fits(page)
 
   await page.goto('/dashboards')
-  await page.getByRole('button', { name: 'For a host group' }).click()
-  const group = page.locator('.card button.quiet').first()
-  const name = (await group.textContent())?.trim() ?? ''
+  await page.getByRole('button', { name: 'For a host or group' }).click()
+  // The groups come first, each with its number of hosts.
+  const group = page.locator('.find .found li:not(.head) button').first()
+  await expect(group).toContainText(/\d+ hosts?$/)
+  const name = await group.evaluate((b) => b.firstChild?.textContent?.trim() ?? '')
   await group.click()
   await expect(panel(page, name)).toBeVisible()
   await expect(panel(page, `Uptime · ${name}`)).toContainText('%')
@@ -57,7 +59,7 @@ test('changed in place and kept at once, with undo; panels from the tray, told w
   // Empty: the tray is open already.
   const tray = page.getByRole('toolbar', { name: 'Add a panel' })
 
-  // A graph dragged onto the grid; its settings open on a list to browse.
+  // A graph dragged onto the grid; a list to browse opens inside it.
   const from = await tray.getByRole('button', { name: '+ Graph' }).boundingBox()
   const grid = await page.locator('.dash-grid').boundingBox()
   if (!from || !grid) throw new Error('no boxes')
@@ -67,29 +69,33 @@ test('changed in place and kept at once, with undo; panels from the tray, told w
   await expect(page.locator('.drop-ghost')).toBeVisible()
   await page.mouse.up()
   const settings = page.getByRole('complementary', { name: 'Panel settings' })
-  await settings.getByRole('button', { name: /^passive1\s*naemon$/ }).click()
-  await settings.getByRole('button', { name: /^a$/ }).click()
-  await settings.getByRole('button', { name: /^load\s*0\.5$/ }).click()
-  // Or a few words.
-  await settings.getByLabel('Add', { exact: true }).fill('passive1 users')
-  await settings.getByRole('button', { name: /passive1 · a · users/ }).click()
-  await expect(settings.locator('.series-list li')).toHaveCount(2)
-  await settings.getByRole('button', { name: 'Done' }).click()
+  const picker = page.getByRole('group', { name: 'Choose' })
+  await picker.getByRole('button', { name: /^passive1\s*naemon$/ }).click()
+  await picker.getByRole('button', { name: /^a$/ }).click()
+  await picker.getByRole('button', { name: /^load\s*0\.5$/ }).click()
+  await expect(picker).toHaveCount(0)
+  // Another number, from its settings, by a few words.
+  await panel(page, 'passive1 / a · load').getByRole('button', { name: 'Settings' }).click()
+  await settings.getByRole('button', { name: '+ Number' }).click()
+  await picker.getByLabel('Search', { exact: true }).fill('passive1 users')
+  await picker.getByRole('button', { name: /passive1 · a · users/ }).click()
   const metric = panel(page, 'passive1 / a')
+  await metric.getByRole('button', { name: 'Settings' }).click()
+  await expect(settings.locator('.series-list li')).toHaveCount(2)
+  await settings.getByRole('button', { name: 'Close' }).click()
   await expect(metric).toContainText('0.5')
 
   // Hosts: one host, from the same kind of search.
   await tray.getByRole('button', { name: '+ Hosts' }).click()
-  await expect(settings.getByRole('button', { name: 'All hosts' })).toBeVisible()
-  await settings.getByLabel('What').fill('passive1')
-  await settings.getByRole('button', { name: /^passive1\s*host · naemon$/ }).click()
-  await settings.getByRole('button', { name: 'Done' }).click()
+  await expect(picker.getByRole('button', { name: 'All hosts' })).toBeVisible()
+  await picker.getByLabel('Search', { exact: true }).fill('passive1')
+  await picker.getByRole('button', { name: /^passive1\s*host · naemon$/ }).click()
   await expect(tiles(page, 'passive1').first()).toBeVisible()
 
   // A note: its web address is a link, nothing else is markup.
   await tray.getByRole('button', { name: '+ Note' }).click()
   await settings.getByLabel('Text').fill('Runbook https://example.test/run <b>not bold</b>')
-  await settings.getByRole('button', { name: 'Done' }).click()
+  await settings.getByRole('button', { name: 'Close' }).click()
   const note = panel(page, 'Note')
   await expect(note.getByRole('link', { name: 'https://example.test/run' })).toHaveAttribute('href', 'https://example.test/run')
   await expect(note).toContainText('<b>not bold</b>')
@@ -148,11 +154,11 @@ test('a shared dashboard shows each user their own, and its outline shows troubl
   const tray = page.getByRole('toolbar', { name: 'Add a panel' })
   const settings = page.getByRole('complementary', { name: 'Panel settings' })
   await tray.getByRole('button', { name: '+ Hosts' }).click()
-  await settings.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('group', { name: 'Choose' }).getByRole('button', { name: 'All hosts' }).click()
   await tray.getByRole('button', { name: '+ Problems' }).click()
   await page.locator('.dash-grid > section').last().getByRole('button', { name: 'Settings' }).click()
   await settings.getByLabel('Host group').selectOption('passive')
-  await settings.getByRole('button', { name: 'Done' }).click()
+  await settings.getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'More' }).click()
   await page.getByLabel('Shared').check()
   await expect(tiles(page, 'All hosts')).toHaveCount(hosts)
@@ -183,8 +189,8 @@ test('a shared dashboard shows each user their own, and its outline shows troubl
 test('one dashboard for any host, chosen at the top', async ({ page }) => {
   await login(page, 'admin')
   await page.goto('/dashboards')
-  await page.getByRole('button', { name: 'For a host', exact: true }).click()
-  await page.getByLabel('Host', { exact: true }).fill('passive1')
+  await page.getByRole('button', { name: 'For a host or group' }).click()
+  await page.getByLabel('Host or group', { exact: true }).fill('passive1')
   await page.getByRole('button', { name: /^passive1\s*host · naemon$/ }).click()
   const chooser = page.getByRole('combobox', { name: 'Host' })
   await expect(chooser).toBeVisible()

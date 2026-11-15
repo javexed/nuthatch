@@ -4,7 +4,7 @@
 import type { GraphSeries } from '@nuthatch/api'
 import { computed, ref } from 'vue'
 import { dateTime } from '../lib/format'
-import { type Point, nearest, shape, short } from '../lib/graph'
+import { type Point, nearest, shape, withUnit } from '../lib/graph'
 import { useLoader } from '../stores/live'
 import PinButton from './PinButton.vue'
 import { api } from '../stores/session'
@@ -49,7 +49,7 @@ function clock(time: number): string {
   const text = dateTime(time)
   return now.value - time < 86400 ? text.slice(11, 16) : text.slice(5, 16)
 }
-const value = (v: number, unit: string) => `${short(v)}${unit === '' ? '' : unit.length > 1 ? ` ${unit}` : unit}`
+const value = (v: number, unit: string) => withUnit(v, unit)
 </script>
 
 <template>

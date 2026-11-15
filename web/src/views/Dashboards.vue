@@ -16,8 +16,7 @@ const session = useSession()
 const router = useRouter()
 const list = ref<Awaited<ReturnType<typeof api.dashboards>> | null>(null)
 const problem = ref('')
-const making = ref<'' | 'group' | 'host'>('')
-const groups = ref<string[]>([])
+const making = ref(false)
 const busy = ref(false)
 const clean = (t: string) => t.replace(/[\r\n]/g, ' ')
 
@@ -53,9 +52,10 @@ async function make(draft: DashboardDraft, query: Record<string, string> = {}) {
 async function makeOverview() {
   await make(overview(await hostGroups().catch(() => [])))
 }
-async function startGroup() {
-  making.value = 'group'
-  groups.value = await hostGroups().catch(() => [])
+/** One host group, or one host chosen at the top. */
+async function makeFor(scope: Scope) {
+  if (scope.hostgroup) await makeGroup(scope.hostgroup)
+  else await makeHost(scope)
 }
 /** A host group: a number of each host's own check, where it has one. */
 async function makeGroup(group: string) {
@@ -125,16 +125,11 @@ function startWall() {
   <h2>New</h2>
   <div class="templates">
     <button type="button" class="template" :disabled="busy" @click="makeOverview">Overview</button>
-    <button type="button" class="template" :disabled="busy" @click="startGroup">For a host group</button>
-    <button type="button" class="template" :disabled="busy" @click="making = 'host'">For a host</button>
+    <button type="button" class="template" :disabled="busy" :aria-pressed="making" @click="making = !making">For a host or group</button>
     <button type="button" class="template" :disabled="busy" @click="make(blank('New dashboard'))">Blank</button>
     <label class="template">Import <input type="file" accept="application/json,.json" class="file" @change="importFile" /></label>
   </div>
-  <div v-if="making === 'group'" class="card">
-    <p v-if="groups.length === 0" class="none">None</p>
-    <button v-for="g in groups" :key="g" type="button" class="quiet" :disabled="busy" @click="makeGroup(g)">{{ g }}</button>
-  </div>
-  <div v-if="making === 'host'" class="card">
-    <FindTarget mode="host" label="Host" @scope="makeHost" />
+  <div v-if="making" class="card">
+    <FindTarget mode="place" label="Host or group" focus @scope="makeFor" />
   </div>
 </template>
