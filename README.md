@@ -197,6 +197,9 @@ here and in the Android app, are made from `docs/logo.svg` by
     name = "site"
     livestatus = "unix:/var/cache/naemon/live"
 
+- A setting nuthatch does not know, anywhere in the file, stops it from
+  starting, as does `true` or `false` in quotes: a typo is never read as
+  a setting left out.
 - `htpasswd`: users and passwords, as `htpasswd -B` writes them (bcrypt);
   SHA-crypt and Apache's `$apr1$` are read too. A user is the contact of
   the same name.

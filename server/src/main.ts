@@ -37,6 +37,28 @@ function fail(message: string): never {
   process.exit(2)
 }
 
+/** A table of the config file, with only the settings named: a mistyped
+ * key is refused, not ignored. */
+function table(what: string, value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) fail(`${what} is a table`)
+  const unknown = Object.keys(value).filter((key) => !keys.includes(key))
+  if (unknown.length > 0) fail(`${what} has no setting ${unknown.map((k) => `'${k}'`).join(', ')}: its settings are ${keys.join(', ')}`)
+  return value as Record<string, unknown>
+}
+
+/** true or false, written as such: "true" in quotes is refused. */
+function flag(what: string, value: unknown): boolean {
+  if (value !== undefined && typeof value !== 'boolean') fail(`${what} is true or false, without quotes`)
+  return value === true
+}
+
+/** A list of tables, as [[backend]] gives. */
+function tables(what: string, value: unknown): unknown[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) fail(`${what} is a list of tables: write [[${what}]]`)
+  return value
+}
+
 function text(config: Record<string, unknown>, key: string): string | undefined {
   const value = config[key]
   if (value !== undefined && typeof value !== 'string') fail(`${key} is a text`)
@@ -65,7 +87,7 @@ function main(): void {
   if (socketPath !== undefined && Buffer.byteLength(socketPath) > 107) fail(`listen: the socket's path ${socketPath} is longer than 107 bytes, which a Unix socket cannot be`)
   if (socketPath === undefined && (at < 0 || isIP(hostname) === 0 || !Number.isInteger(port))) fail(`listen: '${listen}' is not address:port or unix:<path>`)
   const local = socketPath !== undefined || hostname === '::1' || hostname.startsWith('127.')
-  const behindProxy = config.behind_proxy === true
+  const behindProxy = flag('behind_proxy', config.behind_proxy)
   if (!local && !behindProxy) {
     fail(
       `listen = ${listen} reaches beyond this machine, and nuthatch speaks plain HTTP: passwords would cross the network in the clear. ` +
@@ -108,13 +130,15 @@ function main(): void {
     if (key.length < 32 || /\s/.test(key)) fail(`${path}: ${what}: a key is one word of at least 32 letters`)
     return key
   }
-  for (const entry of Array.isArray(config.backend) ? (config.backend as Record<string, unknown>[]) : []) {
+  for (const each of tables('backend', config.backend)) {
+    const entry = table(`${path}: a [[backend]]`, each, ['name', 'livestatus', 'push_url', 'http_token_file', 'config', 'agents', 'nuthatch', 'key_file'])
     const { name, livestatus } = entry
     if (typeof name !== 'string' || name === '' || name.includes('/') || backends.some((b) => b.name === name) || remotes.some((r) => r.name === name)) {
       fail(`${path}: each backend needs a name of its own, without '/'`)
     }
     if (typeof entry.nuthatch === 'string') {
       // A site reached through its own nuthatch.
+      table(`${path}: backend ${name}`, entry, ['name', 'nuthatch', 'key_file'])
       let url: URL
       try {
         url = new URL(entry.nuthatch)
@@ -127,6 +151,7 @@ function main(): void {
       continue
     }
     if (typeof livestatus !== 'string') fail(`${path}: backend ${name} needs livestatus = "unix:<socket>", or nuthatch = "https://..."`)
+    if (entry.key_file !== undefined) fail(`${path}: backend ${name}: key_file is for a site reached through its nuthatch`)
     try {
       const backend = new LivestatusBackend(name, livestatus)
       backends.push(backend)
@@ -151,7 +176,10 @@ function main(): void {
       }
       // [backend.config]: where its config can be changed.
       if (entry.config !== undefined) {
-        const c = entry.config as Record<string, unknown>
+        const c = table(`${path}: backend ${name}: config`, entry.config, ['dir', 'main', 'verify', 'reload', 'paths', 'plugins'])
+        if (c.paths !== undefined && (typeof c.paths !== 'object' || c.paths === null || Array.isArray(c.paths) || Object.values(c.paths).some((v) => typeof v !== 'string'))) {
+          fail(`${path}: backend ${name}: config.paths is a table of the engine's paths and this machine's, such as { "/etc/naemon" = "/srv/naemon" }`)
+        }
         const strings = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === 'string')
         if (typeof c.dir !== 'string' || typeof c.main !== 'string' || !strings(c.verify)) {
           fail(`${path}: backend ${name}: config needs dir, main and verify = ["program", ..., "{main}"]`)
@@ -164,8 +192,7 @@ function main(): void {
       }
       // [backend.agents]: checkd's agents directory, and how hosts reach the engine.
       if (entry.agents !== undefined) {
-        const { dir, engine, ca, server_name, ...rest } = entry.agents as Record<string, unknown>
-        if (Object.keys(rest).length > 0) fail(`${path}: backend ${name}: agents has no setting ${Object.keys(rest).join(', ')}`)
+        const { dir, engine, ca, server_name } = table(`${path}: backend ${name}: agents`, entry.agents, ['dir', 'engine', 'ca', 'server_name'])
         if (typeof dir !== 'string' || typeof ca !== 'string') fail(`${path}: backend ${name}: agents needs dir (checkd's agents=) and ca (the workers' ca.crt)`)
         if (typeof engine !== 'string' || !(/^([A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\])?:\d{1,5}$/.test(engine) || /^wss?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?(\/[A-Za-z0-9._~/-]*)?$/.test(engine))) {
           fail(`${path}: backend ${name}: agents.engine is host:port, the engine's worker listener as hosts reach it; :port at the address hosts reach nuthatch at; or wss://host/path through a proxy or tunnel`)
@@ -194,8 +221,7 @@ function main(): void {
   // for a proxy or tunnel in front (then url is what hosts reach).
   let agentListen: { hostname: string; port: number; addresses: string[]; pin?: Pin; cert?: string; key?: string } | undefined
   if (config.agents !== undefined) {
-    const { bin, url, listen: hostsListen, cert, key, addresses, ...rest } = (typeof config.agents === 'object' && config.agents !== null ? config.agents : {}) as Record<string, unknown>
-    if (Object.keys(rest).length > 0) fail(`${path}: [agents] has no setting ${Object.keys(rest).join(', ')}`)
+    const { bin, url, listen: hostsListen, cert, key, addresses } = table(`${path}: [agents]`, config.agents, ['bin', 'url', 'listen', 'cert', 'key', 'addresses'])
     if (typeof bin !== 'string') fail(`${path}: [agents] bin is the directory of checkd's dist/agent`)
     if (!existsSync(join(bin, 'SHA256SUMS'))) console.error(`warning: [agents] bin: no ${join(bin, 'SHA256SUMS')} yet (checkd's scripts/build-agents.sh)`)
     agentBin = bin
@@ -233,15 +259,18 @@ function main(): void {
 
   // Other nuthatches that may ask here for their users.
   const peers: Peer[] = []
-  for (const entry of Array.isArray(config.peer) ? (config.peer as Record<string, unknown>[]) : []) {
+  for (const each of tables('peer', config.peer)) {
+    const entry = table(`${path}: a [[peer]]`, each, ['name', 'key_file', 'read_only', 'config'])
     if (typeof entry.name !== 'string' || entry.name === '') fail(`${path}: each peer needs a name`)
     const key = keyOf(entry.key_file, `peer ${entry.name}`)
-    peers.push({ name: entry.name, keyHash: createHash('sha256').update(key).digest('hex'), readOnly: entry.read_only === true, config: entry.config === true })
+    const readOnly = flag(`${path}: peer ${entry.name}: read_only`, entry.read_only)
+    const configToo = flag(`${path}: peer ${entry.name}: config`, entry.config)
+    peers.push({ name: entry.name, keyHash: createHash('sha256').update(key).digest('hex'), readOnly, config: configToo })
   }
 
   let roles: RolesConfig
   try {
-    roles = new RolesConfig((config.roles ?? {}) as Record<string, unknown>)
+    roles = new RolesConfig(config.roles === undefined ? {} : table(`${path}: [roles]`, config.roles, Object.keys(config.roles as object)))
   } catch (err) {
     fail(`${path}: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -280,8 +309,7 @@ function main(): void {
   // [notifications]: to browsers, through their push services.
   let pusher: Pusher | undefined
   if (config.notifications !== undefined) {
-    const { subject, ...rest } = (typeof config.notifications === 'object' && config.notifications !== null ? config.notifications : {}) as Record<string, unknown>
-    if (Object.keys(rest).length > 0) fail(`${path}: [notifications] has no setting ${Object.keys(rest).join(', ')}`)
+    const { subject } = table(`${path}: [notifications]`, config.notifications, ['subject'])
     if (typeof subject !== 'string' || !/^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/.test(subject)) {
       fail(`${path}: [notifications] needs subject = "mailto:..." or "https://...": whom a push service may reach about this server`)
     }
@@ -291,8 +319,7 @@ function main(): void {
   // [graphs]: a short history of performance data, in a file beside the store.
   let graphs: Graphs | undefined
   if (config.graphs !== undefined) {
-    const { days = 7, ...rest } = (typeof config.graphs === 'object' && config.graphs !== null ? config.graphs : {}) as Record<string, unknown>
-    if (Object.keys(rest).length > 0) fail(`${path}: [graphs] has no setting ${Object.keys(rest).join(', ')}`)
+    const { days = 7 } = table(`${path}: [graphs]`, config.graphs, ['days'])
     if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 31) fail(`${path}: [graphs] days is a number of days, 1 to 31`)
     graphs = new Graphs(`${storePath}-graphs`, days, backends)
   }
