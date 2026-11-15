@@ -21,8 +21,8 @@ and is made to be used on a phone as much as at a desk.
   tried: it needs a Livestatus module of its own.
 - **Much of the code was written by an AI model** (Claude), directed and
   reviewed by one person: see [CONTRIBUTING.md](CONTRIBUTING.md).
-- **Version 0.0.0**, not packaged, no releases. The config file's keys
-  may change.
+- **Version 0.1.0**, not packaged. The config file's keys
+  may change before 1.0; the store is migrated from one version to the next.
 - The phone app is built for Android and tried in an emulator and on one
   phone; there is no iOS build. Installed from the browser, as a PWA, it
   works on both.
@@ -205,7 +205,9 @@ here and in the Android app, are made from `docs/logo.svg` by
   session's cookie is then marked `Secure`.
 - `store`: an SQLite file for sessions, API tokens, preferences and the
   audit log (logins, commands sent, commands refused). Nothing about what
-  is monitored is kept there.
+  is monitored is kept there. A newer nuthatch migrates an older file when
+  it starts; an older one refuses a newer file, so back it up before an
+  upgrade.
 - `listen = "unix:/run/nuthatch/http.sock"`: a Unix socket in place of
   an address, made so that only nuthatch's own user may open it. For a
   proxy on the same machine.

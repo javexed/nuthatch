@@ -2,7 +2,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, readFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
 import { Readable } from 'node:stream'
@@ -31,10 +31,10 @@ import { Forbidden, combine, combineStats, limits, rows, stats } from './query.t
 import { RemoteError, type RemoteSite } from './remote.ts'
 import { type Store, now } from './store.ts'
 
-/** The package's version and the git commit it runs from (`0.0.0+df39664`);
+/** The package's version and the git commit it runs from (`0.1.0+df39664`);
  * NUTHATCH_COMMIT gives the commit where git is not there. */
 export const VERSION = (() => {
-  const base = '0.0.0'
+  const base = (JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8')) as { version: string }).version
   let commit = process.env.NUTHATCH_COMMIT ?? ''
   if (!commit) {
     try {
