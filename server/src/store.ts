@@ -74,14 +74,8 @@ export interface AuditRow {
   detail: string
 }
 
-export class Store {
-  private readonly db: DatabaseSync
-
-  /** `path` is a file, or `:memory:` for tests. */
-  constructor(path: string) {
-    this.db = new DatabaseSync(path)
-    this.db.exec(`
-      PRAGMA journal_mode = WAL;
+/** The tables, as the latest version has them. */
+const SCHEMA = `
       CREATE TABLE IF NOT EXISTS sessions (
         hash TEXT PRIMARY KEY, user TEXT NOT NULL, csrf TEXT NOT NULL,
         created INTEGER NOT NULL, last_seen INTEGER NOT NULL);
@@ -108,8 +102,58 @@ export class Store {
         PRIMARY KEY (backend, host));
       CREATE TABLE IF NOT EXISTS reach (
         backend TEXT NOT NULL, contact TEXT NOT NULL, body TEXT NOT NULL,
-        PRIMARY KEY (backend, contact));`)
+        PRIMARY KEY (backend, contact));`
+
+/**
+ * A step from version n to n + 1, at index n - 1: SQL, or a function for
+ * what SQL cannot say (rewriting the JSON of dashboards). A step, once
+ * released, is never changed: a change is a new step, with a test from a
+ * store of the version before it. The schema is run after the steps, so
+ * a new table needs no step of its own.
+ */
+export type Step = string | ((db: DatabaseSync) => void)
+export const MIGRATIONS: readonly Step[] = []
+
+/** The version of the file: 1 + the number of steps. */
+export const SCHEMA_VERSION = 1 + MIGRATIONS.length
+
+/**
+ * Makes the tables of a new file, or brings an older one up to date in one
+ * transaction. A file from a newer nuthatch is refused. The version is
+ * SQLite's `user_version`; 0 is a new file.
+ */
+export function prepare(db: DatabaseSync, steps: readonly Step[] = MIGRATIONS): void {
+  const current = 1 + steps.length
+  const found = Number((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+  if (found > current) throw new Error(`the store is of version ${found}, from a newer nuthatch; this nuthatch knows version ${current}`)
+  if (found > 0 && found < current) {
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      for (const step of steps.slice(found - 1)) {
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
+      }
+      db.exec(`PRAGMA user_version = ${current}`)
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw new Error(`migrating the store from version ${found} to ${current}: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
+  db.exec(SCHEMA)
+  if (found === 0) db.exec(`PRAGMA user_version = ${current}`)
+}
+
+export class Store {
+  private readonly db: DatabaseSync
+
+  /** `path` is a file, or `:memory:` for tests. */
+  constructor(path: string, steps: readonly Step[] = MIGRATIONS) {
+    this.db = new DatabaseSync(path)
+    this.db.exec('PRAGMA journal_mode = WAL')
+    prepare(this.db, steps)
+  }
+
 
   /** Starts a session. The answer is the cookie's secret and the session. */
   newSession(user: string): { cookie: string; session: Session } {
