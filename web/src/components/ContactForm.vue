@@ -79,7 +79,7 @@ function result(): ManagedContact {
       <label>E-mail <input v-model.trim="form.email" name="email" type="email" maxlength="200" autocapitalize="none" /></label>
       <label v-if="form.pager || !delivery">Pager <input v-model.trim="form.pager" name="pager" maxlength="200" /></label>
       <fieldset v-if="delivery" class="wide reach">
-        <legend>Reach by</legend>
+        <legend>Channels</legend>
         <label class="check">
           <input v-model="form.byEmail" type="checkbox" name="by-email" :disabled="!delivery.email || !form.email" /> E-mail
           <button v-if="!delivery.email" type="button" class="plain" @click="emit('sending')">Set up</button>

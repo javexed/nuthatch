@@ -381,7 +381,7 @@ async function remove(host: ManagedHost) {
         <h2 class="groups-head">Contacts</h2>
         <p>
           <button type="button" class="quiet" :disabled="busy" @click="contact = 'new'">Add a contact</button>
-          <button v-if="delivery" type="button" class="quiet" :aria-pressed="sending" @click="sending = !sending">Sending</button>
+          <button v-if="delivery" type="button" class="quiet" :aria-pressed="sending" @click="sending = !sending">Notification channels</button>
         </p>
         <DeliveryForm v-if="sending && delivery && contact === null" :settings="delivery" @saved="savedDelivery" @close="sending = false" />
         <ul v-if="(state.contacts ?? []).length > 0" class="managed">

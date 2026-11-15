@@ -73,8 +73,8 @@ const test = (kind: 'email' | 'chat', name = '') =>
 </script>
 
 <template>
-  <form class="delivery card" aria-label="Sending" @submit.prevent="save">
-    <h2>Sending</h2>
+  <form class="delivery card" aria-label="Notification channels" @submit.prevent="save">
+    <h2>Notification channels</h2>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-else-if="said" class="by" role="status">{{ said }}</p>
 

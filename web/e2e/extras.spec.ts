@@ -186,8 +186,8 @@ test('a contact reached by chat and ntfy needs no command of their own, on check
   await goTo(page, 'Config')
   await chooseBackend(page, 'checkd')
   // How nuthatch sends: a chat link.
-  await page.getByRole('button', { name: 'Sending' }).click()
-  const sending = page.getByRole('form', { name: 'Sending' })
+  await page.getByRole('button', { name: 'Notification channels' }).click()
+  const sending = page.getByRole('form', { name: 'Notification channels' })
   if ((await sending.getByLabel('Name').count()) === 0) await sending.getByRole('button', { name: 'Add a chat' }).click()
   await sending.getByLabel('Name').first().fill('ops')
   await sending.getByLabel('Kind').first().selectOption('discord')

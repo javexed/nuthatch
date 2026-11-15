@@ -66,7 +66,7 @@ ntfy app, whether or not they log in to nuthatch. The same notifications
 go these ways, from the same log, one message per contact per pass.
 
 **How nuthatch sends** is set once, by the role `config_edit`: Config,
-Contacts, **Sending**.
+Contacts, **Notification channels**.
 
 - **E-mail** through a mail server that takes a password login (AUTH
   PLAIN) over TLS: port 465, or 587 with STARTTLS. The server's
@@ -82,7 +82,7 @@ Contacts, **Sending**.
 
 Each has a test, which saves first and sends by what is saved.
 
-**How each contact is reached** is in their form, **Reach by**: e-mail
+**How each contact is reached** is in their form, **Channels**: e-mail
 (to their address), a chat link, or ntfy. ntfy gives the contact a topic
 of its own, a random name, and a QR code: scanned with the phone, or the
 link opened, it subscribes the ntfy app. On a public ntfy server anyone
