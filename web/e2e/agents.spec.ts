@@ -34,7 +34,7 @@ test('a host added with an agent: base checks at once, the rest proposed', async
   await panel.getByRole('button', { name: 'Command instead' }).click()
   await panel.getByRole('button', { name: 'Make command' }).click()
   const command = (await panel.locator('pre.call code').textContent()) ?? ''
-  expect(command).toMatch(/^curl -fsSL 'http:\/\/127\.0\.0\.1:8092\/agent\/install\/[A-Za-z0-9_-]+' \| sudo sh$/)
+  expect(command).toMatch(/^curl -fsSL --connect-timeout 10 'http:\/\/127\.0\.0\.1:8092\/agent\/install\/[A-Za-z0-9_-]+' \| sudo sh$/)
   await expect(panel.getByText('Waiting for the agent')).toBeVisible()
   await fits(page)
 

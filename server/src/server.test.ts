@@ -1238,7 +1238,7 @@ describe('agents', () => {
     const made = await post({ host: 'web1', os: 'linux', nrpe: true, plugins: true })
     expect(made.status).toBe(200)
     const { command } = (await made.json()) as { command: string }
-    expect(command).toMatch(/^curl -fsSL --proto '=https' 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]{24}' \| sudo sh$/)
+    expect(command).toMatch(/^curl -fsSL --connect-timeout 10 --proto '=https' 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]{24}' \| sudo sh$/)
     // Nothing moves yet: a new token, and no reload.
     expect(reloads()).toBe(0)
     const token = readFileSync(join(dir, 'agents', 'web1.new'), 'utf8').trim()
@@ -1268,7 +1268,7 @@ describe('agents', () => {
   it('writes a PowerShell script for Windows', async () => {
     const { app, post } = site({ authorized_for_config_edit: ['ops'] })
     const { command } = (await (await post({ host: 'win1', os: 'windows', nrpe: true, plugins: false })).json()) as { command: string }
-    expect(command).toMatch(/^\[Net\.ServicePointManager\]::SecurityProtocol='Tls12';irm 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
+    expect(command).toMatch(/^\[Net\.ServicePointManager\]::SecurityProtocol='Tls12';irm -TimeoutSec 15 'https:\/\/nuthatch\.example\.test\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
     const text = await (await app.request(new URL(urlOf(command)).pathname)).text()
     expect(text).toContain('Register-ScheduledTask')
     expect(text).toContain("-UserId 'NT AUTHORITY\\LOCALSERVICE'")
@@ -1315,7 +1315,7 @@ describe('agents', () => {
 
     const win = (await (await post({ host: 'win1', os: 'windows', address: '192.0.2.7' })).json()) as { command: string }
     expect(win.command).toContain(`-eq '${pin.cert}'`)
-    expect(win.command).toMatch(/irm 'https:\/\/192\.0\.2\.7:0\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
+    expect(win.command).toMatch(/irm -TimeoutSec 15 'https:\/\/192\.0\.2\.7:0\/agent\/install\/[A-Za-z0-9_-]+' \| iex$/)
     const winScript = await (await app.request(new URL(urlOf(win.command)).pathname)).text()
     expect(winScript).toContain('--engine 192.0.2.7:4730')
     expect(winScript).toContain('ServerCertificateValidationCallback = $null')
