@@ -35,10 +35,12 @@ test('a host added with an agent: base checks at once, the rest proposed', async
   await panel.getByRole('button', { name: 'Make command' }).click()
   const command = (await panel.locator('pre.call code').textContent()) ?? ''
   expect(command).toMatch(/^curl -fsSL --connect-timeout 10 'http:\/\/127\.0\.0\.1:8092\/agent\/install\/[A-Za-z0-9_-]+' \| sudo sh$/)
-  await expect(panel.getByText('Waiting for the agent')).toBeVisible()
+  // Each step as it comes: fetched, then connected.
+  await expect(panel.getByText(`Waiting for ${name} to fetch the installer`)).toBeVisible()
   await fits(page)
 
   const script = await (await request.get(command.split("'")[1] ?? '')).text()
+  await expect(panel.getByText('Installer fetched; waiting for the agent')).toBeVisible({ timeout: 10_000 })
   expect(script).toContain(`--engine 127.0.0.1:4731 --name ${name}`)
   expect(script).toContain('--restrict-path /usr/local/lib/checkd-agent')
   expect(script).not.toContain('monitoring-plugins')

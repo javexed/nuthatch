@@ -112,6 +112,26 @@ Windows machine.
 the agent is shut out and the host's checks go back to where they ran.
 It stays installed on the host.
 
+## When an agent does not connect
+
+Almost always, the host cannot reach this machine: a firewall here or on
+the host, or an address of this machine the host has no way to.
+
+- **Over SSH**, nuthatch first checks from the host that it reaches this
+  machine at nuthatch's agent port and the engine's, at each address
+  under `[agents] addresses` (the one on the host's own network first),
+  and gives the agent the first that works. When none does, it installs
+  nothing and says which ports were not reached.
+- **With the command**, the host's page says each step as it comes:
+  waiting for the host to fetch the installer, then for its agent to
+  connect. A step not taken within a minute says what to check. The
+  command itself gives up within seconds when it cannot reach nuthatch.
+- **This machine's firewall**: when ufw is on and does not let the
+  agent ports in from the networks of `[agents] addresses`, nuthatch
+  says so when it starts, and the install panel shows the `ufw allow`
+  commands to run here. (It reads ufw's files; it changes nothing.)
+  Other firewalls are not read.
+
 ## Settings
 
     # The agent binaries: checkd's dist/agent (scripts/build-agents.sh).

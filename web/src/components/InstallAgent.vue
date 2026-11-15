@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Installs checkd-agent on one host: over SSH by default, nuthatch logging
 // in with a login given for this run alone; or a command to run there.
-import type { AgentInstall } from '@nuthatch/api'
+import type { AgentInstall, FirewallGap } from '@nuthatch/api'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../stores/session'
 
@@ -12,13 +12,19 @@ const os = ref<'linux' | 'windows'>(props.os ?? 'linux')
 const nrpe = ref(false)
 const plugins = ref(false)
 const addresses = ref<string[]>([])
+/** What this machine's firewall keeps out of the agent ports. */
+const firewall = ref<FirewallGap[]>([])
+const fixes = () => [...new Set(firewall.value.map((g) => g.command))].join('\n')
 const at = ref('')
 const error = ref('')
 const busy = ref(false)
 
 onMounted(async () => {
   try {
-    addresses.value = (await api.agents(props.backend)).addresses ?? []
+    // The address on the host's own network first.
+    const answer = await api.agents(props.backend, props.host)
+    addresses.value = answer.addresses ?? []
+    firewall.value = answer.firewall ?? []
     at.value = addresses.value[0] ?? ''
   } catch {
     // The server's own address, then.
@@ -124,6 +130,11 @@ const until = () => (made.value ? new Date(made.value.until).toLocaleTimeString(
 <template>
   <div class="install-agent">
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <section v-if="firewall.length > 0" class="firewall" aria-label="Firewall">
+      <p class="warning-text">This machine's firewall keeps agents out. Here, run:</p>
+      <pre class="call"><code>{{ fixes() }}</code></pre>
+      <button type="button" class="quiet" @click="copy(fixes())">{{ copied ? 'Copied' : 'Copy' }}</button>
+    </section>
     <div class="agent-form">
       <fieldset class="field">
         <legend>System</legend>

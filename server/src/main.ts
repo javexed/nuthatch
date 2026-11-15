@@ -6,6 +6,7 @@
 // commands, tells the browser when something changed, and serves the
 // interface's files.
 
+import { networksOf, ufwGaps } from './reach.ts'
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from 'node:fs'
 import { createServer as createHttpsServer } from 'node:https'
@@ -359,6 +360,13 @@ function main(): void {
       hostsServer = serve({ fetch: hostsOnly(app.fetch), hostname: h, port: p }, () => console.error(`agents: listening at ${where}`))
     }
     hostsServer.on('error', (err) => fail(`cannot listen at ${where} for agents: ${err.message}`))
+  }
+  // This machine's firewall: what it keeps out of the agent ports, said once at the start.
+  if (agentListen) {
+    const engines = [...agents.values()].map((a) => /^:(\d+)$/.exec(a.settings.engine)?.[1]).filter((p): p is string => p !== undefined).map(Number)
+    for (const gap of ufwGaps([agentListen.port, ...new Set(engines)], [...networksOf(agentListen.addresses).values()])) {
+      console.error(`agents: ufw keeps ${gap.from || 'everyone'} out of port ${gap.port}; to let it in: ${gap.command}`)
+    }
   }
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {

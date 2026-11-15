@@ -427,6 +427,20 @@ export interface AgentRow {
   os?: string
   /** Checks proposed from its inventory, not taken up or set aside yet. */
   proposals?: number
+  /** While waiting: when its command was made, when the host fetched the
+   * installer (ms), and where the host fetches it from and finds the
+   * engine (`address:port`); unknown after nuthatch restarted. */
+  made?: number
+  fetched?: number
+  from?: string
+  engine?: string
+}
+
+/** What this machine's firewall keeps out of the agent ports, and what lets it in. */
+export interface FirewallGap {
+  port: number
+  from: string
+  command: string
 }
 
 /** What an agent says its machine is and runs. Its word only: shown and

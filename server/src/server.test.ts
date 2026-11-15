@@ -26,6 +26,7 @@ import { PathMap, mainWith, parseObjects, templates, writeObjects } from './nagi
 import { RolesConfig, access, checkColumns, checkHeaders } from './policy.ts'
 import { Pusher, digestOf, messageOf, parseNotice } from './push.ts'
 import { compare, limits, merge, rows, stats } from './query.ts'
+import { bySubnet, inside, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
 import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 import { checkSubscription, encrypt, newServerKeys, publicKeyOf, vapid } from './webpush.ts'
@@ -1262,7 +1263,10 @@ describe('agents', () => {
     // Once only.
     expect((await app.request(path)).status).toBe(404)
     const listed = await app.request('/api/v1/agents/site')
-    expect(await listed.json()).toEqual({ agents: [{ host: 'web1', waiting: true }] })
+    // Waiting, and how far it came: fetched, from where, to which engine.
+    const [row] = ((await listed.json()) as { agents: Record<string, unknown>[] }).agents
+    expect(row).toMatchObject({ host: 'web1', waiting: true, from: 'nuthatch.example.test', engine: 'engine.example.test:4730' })
+    expect(row?.fetched).toBeGreaterThanOrEqual(Number(row?.made))
   })
 
   it('writes a PowerShell script for Windows', async () => {
@@ -1379,7 +1383,7 @@ describe('agents', () => {
       await agents.add('web1')
       await agents.add('web2')
       pools = 'checkd_pool_workers{pool="host_web1"} 1\n'
-      expect(await agents.list()).toEqual([{ host: 'web1', connected: true }, { host: 'web2', waiting: true, connected: false }])
+      expect(await agents.list()).toMatchObject([{ host: 'web1', connected: true }, { host: 'web2', waiting: true, connected: false }])
       await agents.settle()
       expect(reloads).toBe(0)
       expect(readFileSync(join(dir, 'web1.token'), 'utf8')).toBe('old\n')
@@ -1540,5 +1544,50 @@ describe('checks proposed from an inventory', () => {
     expect(guessSystem([port(22, 'SSH', 'SSH-2.0-OpenSSH_for_Windows_9.5')], 128)?.family).toBe('windows')
     expect(guessSystem([port(22, 'SSH', 'SSH-2.0-OpenSSH_9.6')], 63)?.family).toBe('linux')
     expect(guessSystem([port(80, 'HTTP')], undefined)).toBeUndefined()
+  })
+})
+
+describe('whether a host can reach this machine for its agent', () => {
+  it('puts the address on the host\'s network first', () => {
+    expect(inside('198.51.100.61', '198.51.100.0/24')).toBe(true)
+    expect(inside('203.0.113.5', '198.51.100.0/24')).toBe(false)
+    const interfaces = {
+      lan: [{ address: '198.51.100.69', netmask: '255.255.255.0', family: 'IPv4', mac: '', internal: false, cidr: '198.51.100.69/24' }],
+      wifi: [{ address: '203.0.113.198', netmask: '255.255.255.0', family: 'IPv4', mac: '', internal: false, cidr: '203.0.113.198/24' }],
+    } as unknown as ReturnType<typeof import('node:os').networkInterfaces>
+    const networks = networksOf(['198.51.100.69', '203.0.113.198'], interfaces)
+    expect([...networks.values()]).toEqual(['198.51.100.0/24', '203.0.113.0/24'])
+    expect(bySubnet(['198.51.100.69', '203.0.113.198'], ['203.0.113.40'], networks)).toEqual(['203.0.113.198', '198.51.100.69'])
+    // Nowhere near: as they were.
+    expect(bySubnet(['198.51.100.69', '203.0.113.198'], ['192.0.2.50'], networks)).toEqual(['198.51.100.69', '203.0.113.198'])
+  })
+
+  it("reads what ufw keeps out, and says what lets it in", () => {
+    const etc = mkdtempSync(join(tmpdir(), 'ufw-'))
+    mkdirSync(join(etc, 'ufw'))
+    writeFileSync(join(etc, 'ufw', 'ufw.conf'), 'ENABLED=yes\n')
+    writeFileSync(join(etc, 'ufw', 'user.rules'), ['-A ufw-user-input -p tcp --dport 22 -s 198.51.100.0/24 -j ACCEPT', '-A ufw-user-input -p tcp --dport 10444 -s 198.51.100.0/24 -j ACCEPT', '-A ufw-user-input -p tcp -m multiport --dports 4000:4800 -j ACCEPT'].join('\n'))
+    expect(ufwGaps([10444, 4730], ['198.51.100.0/24', '203.0.113.0/24'], etc)).toEqual([
+      { port: 10444, from: '203.0.113.0/24', command: 'sudo ufw allow from 203.0.113.0/24 to any port 10444 proto tcp' },
+    ])
+    // Turned off: nothing is kept out.
+    writeFileSync(join(etc, 'ufw', 'ufw.conf'), 'ENABLED=no\n')
+    expect(ufwGaps([10444], ['203.0.113.0/24'], etc)).toEqual([])
+    rmSync(etc, { recursive: true })
+  })
+
+  it('checks from the host, with what a host has, which ports it reaches', async () => {
+    const server = createServer().listen(0, '127.0.0.1')
+    await new Promise((resolve) => server.once('listening', resolve))
+    const open = (server.address() as { port: number }).port
+    const closed = createServer().listen(0, '127.0.0.1')
+    await new Promise((resolve) => closed.once('listening', resolve))
+    const shut = (closed.address() as { port: number }).port
+    await new Promise((resolve) => closed.close(resolve))
+    const command = probeCommand('linux', ['127.0.0.1'], [open, shut])
+    const output = execFileSync('sh', ['-c', command]).toString()
+    server.close()
+    expect(readProbe(output)).toEqual({ reached: [], missed: new Map([['127.0.0.1', [shut]]]) })
+    expect(readProbe('reach 198.51.100.69\r\nmiss 203.0.113.198 4730\n')).toEqual({ reached: ['198.51.100.69'], missed: new Map([['203.0.113.198', [4730]]]) })
   })
 })

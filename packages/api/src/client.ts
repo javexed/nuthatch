@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory } from './types.ts'
+import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -146,8 +146,10 @@ export class Client {
   }
 
   /** `addresses`: where hosts may reach nuthatch, when it has its own listener for them. */
-  agents(backend: string): Promise<{ agents: AgentRow[]; addresses?: string[] }> {
-    return this.call('GET', `/api/v1/agents/${encodeURIComponent(backend)}`)
+  /** With `host`, the address on that host's network comes first; `firewall`:
+   * what this machine's firewall keeps out of the agent ports. */
+  agents(backend: string, host?: string): Promise<{ agents: AgentRow[]; addresses?: string[]; firewall?: FirewallGap[] }> {
+    return this.call('GET', `/api/v1/agents/${encodeURIComponent(backend)}${host ? `?host=${encodeURIComponent(host)}` : ''}`)
   }
 
   installAgent(backend: string, host: string, os: 'linux' | 'windows', nrpe: boolean, plugins: boolean, address?: string): Promise<AgentInstall> {

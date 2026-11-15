@@ -20,20 +20,22 @@ const ticked = ref<Record<string, boolean>>({})
 const busy = ref(false)
 const error = ref('')
 const added = ref<string[]>([])
+const now = ref(Date.now())
 
 async function load() {
   try {
-    const now = await api.inventory(props.backend, props.host)
-    agent.value = now.agent
+    const answer = await api.inventory(props.backend, props.host)
+    now.value = Date.now()
+    agent.value = answer.agent
     const before = inventory.value
-    inventory.value = now.inventory
-    for (const p of now.inventory?.proposals ?? []) if (!(p.key in ticked.value)) ticked.value[p.key] = p.checked
+    inventory.value = answer.inventory
+    for (const p of answer.inventory?.proposals ?? []) if (!(p.key in ticked.value)) ticked.value[p.key] = p.checked
     // The base checks were added just now: the lists show them.
-    if (!before && now.inventory && now.inventory.base.length > 0) {
+    if (!before && answer.inventory && answer.inventory.base.length > 0) {
       live.nudge()
       emit('changed')
     }
-    if (now.agent && !now.agent.waiting) installing.value = false
+    if (answer.agent && !answer.agent.waiting) installing.value = false
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Server unreachable'
   } finally {
@@ -56,6 +58,19 @@ onMounted(async () => {
   next()
 })
 onUnmounted(() => clearTimeout(timer))
+
+/** How far an install has come, and after a minute stuck, why it may be. */
+const SLOW = 60_000
+const progress = computed(() => {
+  const a = agent.value
+  if (!a?.waiting) return null
+  if (a.fetched) {
+    if (a.engine && now.value - a.fetched > SLOW) return { slow: true, text: `${props.host} has the installer, but its agent has not connected. Can it reach ${a.engine}? A firewall here or on ${props.host} may keep it out.` }
+    return { slow: false, text: 'Installer fetched; waiting for the agent' }
+  }
+  if (a.from && a.made && now.value - a.made > SLOW) return { slow: true, text: `${props.host} has not fetched the installer. Can it reach ${a.from}? A firewall here or on ${props.host} may keep it out.` }
+  return { slow: false, text: a.from ? `Waiting for ${props.host} to fetch the installer` : 'Waiting for the agent' }
+})
 
 const proposals = computed(() => inventory.value?.proposals ?? [])
 const chosen = computed(() => proposals.value.filter((p) => ticked.value[p.key]).map((p) => p.key))
@@ -101,7 +116,7 @@ async function remove() {
         <InstallAgent v-if="installing" :backend="backend" :host="host" :address="address" :os="os" @started="next" />
         <button v-else type="button" @click="installing = true">Install agent</button>
       </template>
-      <p v-if="agent?.waiting" class="by" role="status">Waiting for the agent</p>
+      <p v-if="progress" :class="progress.slow ? 'warning-text' : 'by'" role="status">{{ progress.text }}</p>
 
       <template v-if="agent && !agent.waiting">
         <p class="agent-line">

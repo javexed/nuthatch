@@ -34,6 +34,11 @@ export interface AgentRow {
   connected?: boolean
   /** Made, not connected yet: the host's checks stay where they were. */
   waiting?: boolean
+  /** While waiting: when made and when fetched (ms); where from, and the engine (`address:port`). */
+  made?: number
+  fetched?: number
+  from?: string
+  engine?: string
 }
 
 /** A new token not used within this long is taken back. */
@@ -107,6 +112,20 @@ export class Agents {
   onInventory?: (host: string, text: string, received: number) => Promise<void>
   /** Each inventory file's time when last told of. */
   private told = new Map<string, number>()
+  /** Installs on their way, by host: where the host fetches from and finds
+   * the engine, and when it fetched the installer. In memory. */
+  private issued = new Map<string, { from: string; engine: string; fetched?: number }>()
+
+  /** An install command was made: where the host is to fetch and connect. */
+  noteIssued(host: string, from: string, engine: string): void {
+    this.issued.set(host, { from, engine })
+  }
+
+  /** The host fetched its installer. */
+  noteFetched(host: string, at = Date.now()): void {
+    const held = this.issued.get(host)
+    if (held) held.fetched = at
+  }
 
   constructor(backend: Backend, settings: AgentSettings, reload: () => Promise<void>) {
     this.backend = backend
@@ -165,9 +184,21 @@ export class Agents {
     const pools = await this.pools()
     const known = this.hosts()
     const waiting = this.files('.new').filter((h) => !known.includes(h))
-    const rows = [...known.map((host) => ({ host })), ...waiting.map((host) => ({ host, waiting: true }))]
+    const rows: AgentRow[] = [...known.map((host) => ({ host })), ...waiting.map((host) => ({ host, waiting: true, ...this.progress(host) }))]
     rows.sort((a, b) => a.host.localeCompare(b.host))
     return rows.map((row) => (pools ? { ...row, connected: (pools.get(`host_${row.host}`) ?? 0) + (pools.get(`waiting_${row.host}`) ?? 0) > 0 } : row))
+  }
+
+  /** How far a waiting install has come. */
+  private progress(host: string): Pick<AgentRow, 'made' | 'fetched' | 'from' | 'engine'> {
+    let made: number | undefined
+    try {
+      made = Math.floor(statSync(join(this.settings.dir, `${host}.new`)).mtimeMs)
+    } catch {
+      // Gone just now.
+    }
+    const held = this.issued.get(host)
+    return { ...(made ? { made } : {}), ...(held ? { from: held.from, engine: held.engine, ...(held.fetched ? { fetched: held.fetched } : {}) } : {}) }
   }
 
   /** Workers per pool, from checkd's `/metrics`. */
@@ -216,6 +247,7 @@ export class Agents {
       const file = join(this.settings.dir, `${host}.new`)
       if ((pools?.get(`waiting_${host}`) ?? 0) > 0) {
         renameSync(file, join(this.settings.dir, `${host}.token`))
+        this.issued.delete(host)
         joined = true
       } else if (now - statSync(file).mtimeMs > WAIT_FOR) {
         unlinkSync(file)
@@ -237,6 +269,7 @@ export class Agents {
       inUse ||= suffix === '.token'
     }
     this.told.delete(host)
+    this.issued.delete(host)
     if (inUse) await this.reload()
     return found
   }
@@ -290,7 +323,7 @@ interface ScriptFacts {
 }
 
 /** The engine as this host reaches it. */
-const engineOf = (install: Install, settings: AgentSettings) =>
+export const engineOf = (install: Pick<Install, 'address'>, settings: Pick<AgentSettings, 'engine'>) =>
   settings.engine.startsWith(':') ? `${install.address.includes(':') ? `[${install.address}]` : install.address}${settings.engine}` : settings.engine
 
 const sh = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`

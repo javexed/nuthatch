@@ -11,7 +11,8 @@ import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
-import { type Agents, InstallCodes, type Pin, agentName, binaries, installCommand, linuxScript, sshCommand, windowsScript } from './agents.ts'
+import { type Agents, InstallCodes, type Pin, agentName, binaries, engineOf, installCommand, linuxScript, sshCommand, windowsScript } from './agents.ts'
+import { nearestFirst, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
 import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
 import type { Backend } from './backend.ts'
 import { COMMAND_NAMES, type Target, checkCommand, isService } from './commands.ts'
@@ -971,10 +972,29 @@ export function buildApp(deps: Deps): Hono<Env> {
     return { ...row, ...(kept ? { os: kept.inventory.os.name || kept.inventory.os.family, proposals: kept.proposals.length } : {}) }
   }
 
+  /** The ports a host's agent comes in at, on this machine: nuthatch's
+   * listener, and the engine's when it is on this machine too. */
+  function agentPorts(agents: Agents): number[] {
+    const listen = deps.agentListen
+    if (!listen) return []
+    const engine = /^:(\d+)$/.exec(agents.settings.engine)?.[1]
+    return [listen.port, ...(engine ? [Number(engine)] : [])]
+  }
+
   app.get('/api/v1/agents/:backend', async (c) => {
     const { agents } = await agentsOf(c)
     const rows = await Promise.all((await agents.list()).map((row) => rowOf(agents, row)))
-    return c.json({ agents: rows, ...(deps.agentListen ? { addresses: deps.agentListen.addresses } : {}) })
+    const listen = deps.agentListen
+    if (!listen) return c.json({ agents: rows })
+    // For a host: the address on its network first.
+    const host = c.req.query('host')
+    let addresses = listen.addresses
+    if (host && agentName(host)) {
+      const found = await agents.backend.query(`GET hosts\nColumns: address\nFilter: name = ${host}`).catch(() => [])
+      addresses = await nearestFirst(addresses, String(found[0]?.[0] ?? '') || undefined)
+    }
+    const firewall = ufwGaps(agentPorts(agents), [...networksOf(listen.addresses).values()])
+    return c.json({ agents: rows, addresses, ...(firewall.length ? { firewall } : {}) })
   })
 
   app.get('/api/v1/agents/:backend/:host/inventory', async (c) => {
@@ -1037,6 +1057,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     const token = await agents.add(plan.host)
     const install = { backend: agents.backend.name, host: plan.host, token, os: plan.os, nrpe: plan.nrpe, plugins: plan.plugins, base: plan.base, address: plan.at, ...(plan.pin ? { pin: plan.pin } : {}) }
     const { code, until } = codes.make(install)
+    agents.noteIssued(plan.host, new URL(plan.base).host, engineOf(install, agents.settings).replace(/^wss?:\/\//, ''))
     return { install, until, url: `${plan.base}/agent/install/${code}` }
   }
 
@@ -1074,7 +1095,6 @@ export function buildApp(deps: Deps): Hono<Env> {
     if (!password === !key) throw new Refused('a password or a key')
     const seenKeys = (await hostKeys(login.address, port)).filter((k) => k.fingerprint === login.fingerprint)
     if (seenKeys.length === 0) throw new Refused("the host's key is not the one shown: look again")
-    const { install, url } = await issue(agents, plan)
     const sudo = text(login.sudo_password) ?? password ?? ''
     const id = randomBytes(12).toString('base64url')
     const job: Job = { owner: user, output: '', done: false, ok: false, at: Date.now() }
@@ -1082,20 +1102,54 @@ export function buildApp(deps: Deps): Hono<Env> {
     jobs.set(id, job)
     const where = `${login.user}@${login.address}:${port}`
     deps.store.audit(user, agents.backend.name, 'agent over ssh', `${plan.host} (${plan.os}${plan.nrpe ? ', nrpe' : ''}) as ${where}`)
-    void runOver(
-      { address: login.address, port, user: login.user, password, key, passphrase: text(login.passphrase) },
-      seenKeys,
-      sshCommand(install, url, login.user),
-      plan.os === 'linux' && login.user !== 'root' ? `${sudo}\n` : '',
-      (more) => {
-        job.output = (job.output + more).slice(-65536)
-      },
-    )
+    const sshLogin = { address: login.address, port, user: login.user, password, key, passphrase: text(login.passphrase) }
+    const say = (more: string) => {
+      job.output = (job.output + more).slice(-65536)
+    }
+    // First, from the host: does it reach this machine at the agent ports?
+    // The address it reaches is the one its agent is given.
+    const reachable = async (): Promise<typeof plan | null> => {
+      const listen = deps.agentListen
+      const ports = agentPorts(agents)
+      if (!listen || ports.length === 0) return plan
+      const order = [plan.at, ...listen.addresses.filter((a) => a !== plan.at)]
+      say(`Can ${plan.host} reach this machine (port ${ports.join(' and ')})?\n`)
+      let probed = ''
+      const code = await runOver(sshLogin, seenKeys, probeCommand(plan.os, order, ports), '', (more) => (probed += more), 2 * 60_000)
+      const { reached, missed } = readProbe(probed)
+      if (code === 255 && reached.length === 0 && missed.size === 0) {
+        say(probed)
+        return null
+      }
+      for (const a of order) say(reached.includes(a) ? `  ${a}: yes\n` : missed.has(a) ? `  ${a}: no (port ${missed.get(a)?.join(', ')})\n` : '')
+      const at = order.find((a) => reached.includes(a))
+      if (at === undefined) {
+        if (missed.size === 0) {
+          // The host could not run the check: install anyway, as asked.
+          say(probed.trim() ? `${probed.trim()}\n` : '')
+          return plan
+        }
+        const gaps = ufwGaps(ports, [...networksOf(listen.addresses).values()])
+        say(`\n${plan.host} cannot reach this machine, so its agent could not connect. Nothing was installed.\n`)
+        say(gaps.length ? `This machine's firewall keeps it out. Here, run:\n${[...new Set(gaps.map((g) => `  ${g.command}`))].join('\n')}\n` : `A firewall here or on ${plan.host} may keep it out.\n`)
+        return null
+      }
+      return at === plan.at ? plan : { ...plan, at, base: `https://${at.includes(':') ? `[${at}]` : at}:${listen.port}` }
+    }
+    void reachable()
+      .then(async (checked) => {
+        // Not reachable: said why already.
+        if (!checked) return -1
+        const { install, url } = await issue(agents, checked)
+        if (checked.at !== plan.at) say(`Using ${checked.at}.\n`)
+        say('\n')
+        return runOver(sshLogin, seenKeys, sshCommand(install, url, sshLogin.user), plan.os === 'linux' && sshLogin.user !== 'root' ? `${sudo}\n` : '', say)
+      })
       .then((code) => {
         job.ok = code === 0
         if (/Host key verification failed/.test(job.output)) job.output = "The host's key is not the one shown."
         else if (code === 255 && /kex_exchange_identification|Connection reset by/.test(job.output)) job.output += '\nThe SSH server refused the connection. After a wrong login it may refuse for a while: try again in a minute.'
-        else if (code !== 0) job.output += `\n(exit ${code})`
+        else if (code > 0) job.output += `\n(exit ${code})`
       })
       .catch((err: unknown) => {
         job.output += `\n${err instanceof Error ? err.message : String(err)}`
@@ -1135,6 +1189,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     if (!install || !agents || !deps.agentBin) return c.text('This install code is used or has expired. Make a new one in nuthatch.\n', 404)
     const facts = { install, settings: agents.settings, ca: agents.ca(), sums: binaries(deps.agentBin) }
     deps.store.audit('', install.backend, 'agent install fetched', `${install.host} from ${address(c)}`)
+    agents.noteFetched(install.host)
     return c.text(install.os === 'linux' ? linuxScript(facts) : windowsScript(facts), 200, { 'Cache-Control': 'no-store' })
   })
 
