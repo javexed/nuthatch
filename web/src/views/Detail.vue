@@ -15,7 +15,7 @@ import StateBadge from '../components/StateBadge.vue'
 import StatusList from '../components/StatusList.vue'
 import { type Target, deleteComment, deleteDowntime, recheck, removeAcknowledgement, setChecks, setNotifications } from '../lib/commands'
 import { ago, dateTime, duration } from '../lib/format'
-import { fraction, parsePerfdata } from '../lib/perfdata'
+import { fraction, labelText, parsePerfdata } from '../lib/perfdata'
 import { useLive, useLoader } from '../stores/live'
 import { api, useSession } from '../stores/session'
 
@@ -206,11 +206,11 @@ async function send(command: Command, done: string): Promise<boolean> {
         <thead><tr><th>Value</th><th></th><th>Warning</th><th>Critical</th><th></th></tr></thead>
         <tbody>
           <tr v-for="p in perf" :key="p.label">
-            <th scope="row">{{ p.label }}</th>
+            <th scope="row">{{ labelText(p.label) }}</th>
             <td>{{ p.value }}{{ p.unit }}</td>
             <td>{{ p.warn }}</td>
             <td>{{ p.crit }}</td>
-            <td><meter v-if="fraction(p) !== null" :value="fraction(p) ?? 0" :aria-label="`${p.label}: how full`"></meter></td>
+            <td><meter v-if="fraction(p) !== null" :value="fraction(p) ?? 0" :aria-label="`${labelText(p.label)}: how full`"></meter></td>
           </tr>
         </tbody>
       </table>

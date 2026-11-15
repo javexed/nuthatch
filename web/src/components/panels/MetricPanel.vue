@@ -8,6 +8,7 @@ import { computed, ref, watch } from 'vue'
 import { perfOf } from '../../lib/choices'
 import { type Point, nearest, shape, withUnit } from '../../lib/graph'
 import { type When, spanNow } from '../../lib/range'
+import { labelText } from '../../lib/perfdata'
 import { level } from '../../lib/thresholds'
 import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
@@ -51,7 +52,7 @@ watch(lines, (all) => emit('worst', Math.max(0, ...all.map((l) => l.state))), { 
 const sameBackend = computed(() => new Set(props.series.map((s) => s.backend)).size === 1)
 const sameHost = computed(() => new Set(props.series.map((s) => s.host)).size === 1)
 const sameService = computed(() => new Set(props.series.map((s) => s.service ?? '')).size === 1)
-const nameOf = (s: Series) => [sameHost.value ? '' : s.host, sameService.value ? '' : (s.service ?? ''), s.label, sameBackend.value ? '' : `(${s.backend})`].filter(Boolean).join(' · ')
+const nameOf = (s: Series) => [sameHost.value ? '' : s.host, sameService.value ? '' : (s.service ?? ''), labelText(s.label), sameBackend.value ? '' : `(${s.backend})`].filter(Boolean).join(' · ')
 const value = (v: number | undefined, unit: string) => (v === undefined ? '–' : withUnit(v, unit))
 const TONES = ['ok', 'warning', 'critical'] as const
 

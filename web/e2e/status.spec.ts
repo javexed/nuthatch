@@ -216,7 +216,7 @@ for (const engine of ENGINES) {
     const graphs = page.getByRole('region', { name: 'Graphs' })
     // The server asks the engines once a minute for what was checked.
     await expect(graphs).toBeVisible({ timeout: 90_000 })
-    const plot = graphs.getByRole('img', { name: /^time: now / })
+    const plot = graphs.getByRole('img', { name: /^latency: now / })
     await expect(plot).toBeVisible()
     expect(await plot.locator('path.line').getAttribute('d')).toMatch(/^M[\d.]+ [\d.]+/)
     // The value under the pointer.

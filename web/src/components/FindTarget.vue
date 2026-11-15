@@ -9,7 +9,7 @@
 import type { Scope, Series } from '@nuthatch/api'
 import { computed, onMounted, ref, watch } from 'vue'
 import { literal } from '../lib/filters'
-import { parsePerfdata } from '../lib/perfdata'
+import { labelText, parsePerfdata } from '../lib/perfdata'
 import { api, useSession } from '../stores/session'
 
 const props = defineProps<{ mode: 'scope' | 'series' | 'place'; chooser?: boolean; label?: string; focus?: boolean }>()
@@ -61,7 +61,7 @@ async function numbersOf(at: { backend: string; host: string; service?: string }
   })
   return parsePerfdata(String(answer.rows[0]?.perf_data ?? '')).map((p) => ({
     key: `n\n${p.label}`,
-    text: p.label,
+    text: labelText(p.label),
     detail: `${p.value}${p.unit}`,
     pick: () => emit('series', { backend: at.backend, host: at.host, ...(at.service ? { service: at.service } : {}), label: p.label }),
   }))
@@ -151,9 +151,11 @@ async function search(list: string[]): Promise<Found[]> {
     }
     return out
   }
+  // The engines know a number by the plugin's name for it, not the word shown.
+  const asked = list.map((w) => (w.toLowerCase() === 'latency' ? 'time' : w))
   const [hosts, services] = await Promise.all([
-    api.query({ table: 'hosts', columns: ['name', 'perf_data'], headers: ['Filter: perf_data != ', ...each(list, ['name', 'perf_data'])], sort: [{ column: 'name' }], limit: 20 }),
-    api.query({ table: 'services', columns: ['host_name', 'description', 'perf_data'], headers: ['Filter: perf_data != ', ...each(list, ['host_name', 'description', 'perf_data'])], sort: [{ column: 'host_name' }, { column: 'description' }], limit: 40 }),
+    api.query({ table: 'hosts', columns: ['name', 'perf_data'], headers: ['Filter: perf_data != ', ...each(asked, ['name', 'perf_data'])], sort: [{ column: 'name' }], limit: 20 }),
+    api.query({ table: 'services', columns: ['host_name', 'description', 'perf_data'], headers: ['Filter: perf_data != ', ...each(asked, ['host_name', 'description', 'perf_data'])], sort: [{ column: 'host_name' }, { column: 'description' }], limit: 40 }),
   ])
   const rows = [
     ...hosts.rows.map((r) => ({ backend: r.backend, host: String(r.name), service: undefined as string | undefined, perf: String(r.perf_data) })),
@@ -162,7 +164,7 @@ async function search(list: string[]): Promise<Found[]> {
   for (const r of rows) {
     // A few of each, so that one check with many numbers leaves room for others.
     for (const p of parsePerfdata(r.perf).slice(0, 6)) {
-      const text = [r.host, r.service, p.label].filter(Boolean).join(' · ')
+      const text = [r.host, r.service, labelText(p.label)].filter(Boolean).join(' · ')
       if (!has(text, list)) continue
       out.push({
         key: `${r.backend}\n${text}`,

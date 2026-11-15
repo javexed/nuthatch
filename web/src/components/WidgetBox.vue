@@ -5,6 +5,7 @@
 // shows.
 import type { Series, Target, Widget } from '@nuthatch/api'
 import { computed, ref } from 'vue'
+import { labelText } from '../lib/perfdata'
 import { type When, spanNow } from '../lib/range'
 import EventLog from './EventLog.vue'
 import AvailabilityPanel from './panels/AvailabilityPanel.vue'
@@ -52,7 +53,7 @@ const title = computed(() => {
     case 'metric': {
       const first = series.value[0] ?? w.series[0]
       if (!first) return compact.value ? 'Number' : 'Graph'
-      return `${name(first)}${w.series.length === 1 ? ` · ${first.label}` : ''}`
+      return `${name(first)}${w.series.length === 1 ? ` · ${labelText(first.label)}` : ''}`
     }
     case 'log':
       return w.lines === 'alerts' ? 'Alerts' : 'Notifications'

@@ -2,6 +2,7 @@
 // A number of a check now, large, with a line of how it went.
 import { computed } from 'vue'
 import { type Point, shape, withUnit } from '../lib/graph'
+import { labelText } from '../lib/perfdata'
 import { useLoader } from '../stores/live'
 import { api } from '../stores/session'
 
@@ -22,7 +23,7 @@ const last = computed(() => series.value?.points[series.value.points.length - 1]
 <template>
   <div class="stat">
     <p class="value">{{ last === undefined ? '–' : withUnit(last, series?.unit ?? '') }}</p>
-    <p v-if="series" class="by">{{ series.label }}</p>
+    <p v-if="series" class="by">{{ labelText(series.label) }}</p>
     <svg v-if="drawn" class="spark" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path :d="drawn.path" class="line" /></svg>
   </div>
 </template>

@@ -12,6 +12,7 @@ import WidgetBox from '../components/WidgetBox.vue'
 import { hostGroups, useList } from '../lib/choices'
 import { fromInput, toInput } from '../lib/format'
 import { type Box, COLUMNS, SIZES, clamp, move, place } from '../lib/layout'
+import { labelText } from '../lib/perfdata'
 import { type When, spanNow, spanText } from '../lib/range'
 import { api, useSession } from '../stores/session'
 
@@ -483,7 +484,7 @@ function toChosen() {
   if (w?.type === 'metric') w.series = w.series.map((s) => ({ ...s, backend: '$host', host: '$host' }))
 }
 const scopeText = (w: Scope) => (w.of ? (w.of.host === '$host' ? 'The chosen host' : [w.of.host, w.of.service].filter(Boolean).join(' · ')) : (w.hostgroup ?? 'All hosts'))
-const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, s.service, s.label].filter(Boolean).join(' · ')
+const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, s.service, labelText(s.label)].filter(Boolean).join(' · ')
 </script>
 
 <template>

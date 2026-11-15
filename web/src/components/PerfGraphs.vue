@@ -4,6 +4,7 @@
 import type { GraphSeries } from '@nuthatch/api'
 import { computed, ref } from 'vue'
 import { dateTime } from '../lib/format'
+import { labelText } from '../lib/perfdata'
 import { type Point, nearest, shape, withUnit } from '../lib/graph'
 import { useLoader } from '../stores/live'
 import PinButton from './PinButton.vue'
@@ -65,17 +66,17 @@ const value = (v: number, unit: string) => withUnit(v, unit)
     <div class="graph-grid">
       <figure v-for="graph in graphs" :key="graph.label" class="graph">
         <figcaption>
-          <span class="name">{{ graph.label }}</span>
+          <span class="name">{{ labelText(graph.label) }}</span>
           <span v-if="hover && hover.label === graph.label" class="now at">
             {{ value(hover.point[1], graph.unit) }} <span class="when">{{ clock(hover.point[0]) }}</span>
           </span>
           <span v-else-if="graph.last" class="now">{{ value(graph.last[1], graph.unit) }}</span>
-          <PinButton v-if="!fixed" :panel="{ type: 'metric', series: [{ backend, host, ...(service !== undefined ? { service } : {}), label: graph.label }] }" :label="graph.label" />
+          <PinButton v-if="!fixed" :panel="{ type: 'metric', series: [{ backend, host, ...(service !== undefined ? { service } : {}), label: graph.label }] }" :label="labelText(graph.label)" />
         </figcaption>
         <div
           class="plot"
           role="img"
-          :aria-label="`${graph.label}: now ${graph.last ? value(graph.last[1], graph.unit) : 'unknown'}, between ${value(graph.min, graph.unit)} and ${value(graph.max, graph.unit)} over the last ${hours} hours`"
+          :aria-label="`${labelText(graph.label)}: now ${graph.last ? value(graph.last[1], graph.unit) : 'unknown'}, between ${value(graph.min, graph.unit)} and ${value(graph.max, graph.unit)} over the last ${hours} hours`"
           @pointermove="point($event, graph)"
           @pointerdown="point($event, graph)"
           @pointerleave="hover = null"
