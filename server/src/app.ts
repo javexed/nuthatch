@@ -1,5 +1,6 @@
 // The HTTP side: who a request is from, and the routes.
 
+import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
@@ -30,7 +31,20 @@ import { Forbidden, combine, combineStats, limits, rows, stats } from './query.t
 import { RemoteError, type RemoteSite } from './remote.ts'
 import { type Store, now } from './store.ts'
 
-export const VERSION = '0.0.0'
+/** The package's version and the git commit it runs from (`0.0.0+df39664`);
+ * NUTHATCH_COMMIT gives the commit where git is not there. */
+export const VERSION = (() => {
+  const base = '0.0.0'
+  let commit = process.env.NUTHATCH_COMMIT ?? ''
+  if (!commit) {
+    try {
+      commit = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim()
+    } catch {
+      // Not a checkout.
+    }
+  }
+  return /^[0-9a-f]{4,40}$/.test(commit) ? `${base}+${commit}` : base
+})()
 const COOKIE = 'nuthatch_session'
 const CSRF_HEADER = 'x-nuthatch-csrf'
 

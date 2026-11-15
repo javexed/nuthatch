@@ -42,5 +42,6 @@ const headline = computed(() => {
       <template v-if="backend.ok"> answering<template v-if="backend.program_version"> · {{ backend.program_version }}</template></template>
       <span v-else class="error"> {{ backend.error ?? 'not answering' }}</span>
     </span>
+    <span v-if="backends.some((b) => b.program_version) && session.session?.version" class="by">nuthatch {{ session.session.version }}</span>
   </section>
 </template>
