@@ -143,8 +143,9 @@ pressed. The audit log has who asked and when each host fetched it.
   defence against that. Signed binaries are not done yet.
 - A new agent that runs `--version` but then fails is not put back: the
   host shows its agent not connected, and installing again mends it.
-- An agent installed before updates came does not ask: the page says to
-  install it again, once.
+- An agent installed before updates came does not ask: use **Install
+  again** on its host's page once, over SSH or by the command. The agent
+  it has goes on until the new one connects.
 - Windows: agents do not update themselves yet; install again.
 
 ## When an agent does not connect

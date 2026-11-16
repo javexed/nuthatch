@@ -181,6 +181,24 @@ test('an agent replaces itself when asked, as its own user', async ({ page }) =>
   expect(inTarget('ps', '-o', 'user=', '-C', 'checkd-agent').trim()).toBe('checkd-agent')
   expect(inTarget('stat', '-c', '%U', bin).trim()).toBe('checkd-agent')
 
+  // Installed again over SSH, over the agent it has: the way for an agent
+  // that does not ask.
+  inTarget('sh', '-c', `install -o checkd-agent -m 755 /tmp/older ${bin} && systemctl restart checkd-agent`)
+  const token = readFileSync(join(agentsDir, 'lab2.token'), 'utf8')
+  await agent.getByRole('button', { name: 'Install again' }).click()
+  await form.getByLabel('SSH address').fill('127.0.0.1')
+  await form.getByLabel('Port').fill('2222')
+  await form.getByLabel('User').fill('admin')
+  await form.getByRole('button', { name: 'Look up host key' }).click()
+  await form.locator('input[name=ssh-password]').fill('admin-pass')
+  await form.getByRole('button', { name: 'Install' }).click()
+  await expect(result.getByRole('status')).toHaveText('Installed', { timeout: 90_000 })
+  expect(have()).toBe(served)
+  await agent.getByRole('button', { name: 'Close' }).click()
+  await expect(form).toHaveCount(0)
+  await expect.poll(() => readFileSync(join(agentsDir, 'lab2.token'), 'utf8'), { timeout: 20_000 }).not.toBe(token)
+  await expect(agent).not.toContainText('not connected', { timeout: 30_000 })
+
   page.once('dialog', (dialog) => void dialog.accept())
   await agent.getByRole('button', { name: 'Remove' }).click()
   await expect(agent.getByRole('button', { name: 'Install agent' })).toBeVisible()

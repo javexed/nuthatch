@@ -16,6 +16,12 @@ const agent = ref<AgentRow | null>(null)
 const inventory = ref<HostInventory | null>(null)
 const loaded = ref(false)
 const installing = ref(props.install === true)
+/** Installing over the agent the host has, which goes on until the new one connects. */
+const again = ref(false)
+function installAgain(on: boolean) {
+  again.value = on
+  installing.value = on
+}
 const ticked = ref<Record<string, boolean>>({})
 const busy = ref(false)
 const error = ref('')
@@ -35,7 +41,7 @@ async function load() {
       live.nudge()
       emit('changed')
     }
-    if (answer.agent && !answer.agent.waiting) installing.value = false
+    if (answer.agent && !answer.agent.waiting && !again.value) installing.value = false
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Server unreachable'
   } finally {
@@ -47,7 +53,7 @@ async function load() {
 let timer: ReturnType<typeof setTimeout> | undefined
 function next() {
   clearTimeout(timer)
-  const soon = installing.value || agent.value?.waiting || (agent.value && !inventory.value)
+  const soon = (installing.value && !again.value) || agent.value?.waiting || (agent.value && !inventory.value)
   // Not connected: just taken on (checkd reloads, and the agent comes back
   // within seconds), or gone; either way, said soon when that changes.
   const away = agent.value?.connected === false
@@ -133,6 +139,7 @@ async function remove() {
     <template v-if="loaded">
       <template v-if="!agent || installing">
         <InstallAgent v-if="installing" :backend="backend" :host="host" :address="address" :os="os" @started="next" />
+        <button v-if="again" type="button" class="plain" @click="installAgain(false)">Close</button>
         <button v-else type="button" @click="installing = true">Install agent</button>
       </template>
       <p v-if="progress" :class="progress.slow ? 'warning-text' : 'by'" role="status">{{ progress.text }}</p>
@@ -146,8 +153,9 @@ async function remove() {
           <span v-if="agent.version" class="by">&nbsp;· {{ agent.version }}</span>
           <template v-if="outdated">
             <button v-if="agent.updater" type="button" class="quiet" :disabled="busy || agent.updating" @click="update">{{ agent.updating ? 'Updating…' : `Update to ${agent.current}` }}</button>
-            <span v-else class="warning-text">Older than {{ agent.current }}: install again to update</span>
+            <span v-else class="warning-text">Older than {{ agent.current }}</span>
           </template>
+          <button v-if="!again" type="button" class="plain" @click="installAgain(true)">Install again</button>
           <button type="button" class="plain" @click="remove">Remove</button>
         </p>
         <p v-if="!inventory" class="by" role="status">Waiting for its inventory</p>
