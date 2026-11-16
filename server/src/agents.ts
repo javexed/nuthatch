@@ -8,7 +8,7 @@
 // fetches a script with the token in it, once, within a quarter of an hour.
 
 import { X509Certificate, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { chmodSync, existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend } from './backend.ts'
 import { Refused } from './policy.ts'
@@ -132,10 +132,22 @@ export class Agents {
   private issued = new Map<string, { from: string; engine: string; fetched?: number }>()
   /** checkd refused /metrics: said once, until it answers again. */
   private refused = false
-  /** Hosts whose agent is to be updated at its next asking for updates. In memory. */
-  private wanted = new Set<string>()
-  /** When each host's agent last asked for updates (ms). In memory. */
-  private asked = new Map<string, number>()
+  // Kept beside the tokens, so that a restart of nuthatch forgets neither:
+  // `<host>.update` while an update is asked for and not done, and
+  // `<host>.asked`, whose time is when its agent last asked for updates.
+  private mark(host: string, suffix: '.update' | '.asked'): string {
+    return join(this.settings.dir, `${host}${suffix}`)
+  }
+  private wanted(host: string): boolean {
+    return existsSync(this.mark(host, '.update'))
+  }
+  private askedAt(host: string): number | undefined {
+    try {
+      return statSync(this.mark(host, '.asked')).mtimeMs
+    } catch {
+      return undefined
+    }
+  }
 
   /** An install command was made: where the host is to fetch and connect. */
   noteIssued(host: string, from: string, engine: string): void {
@@ -195,7 +207,7 @@ export class Agents {
   /** Asks for a host's agent to be updated, at its next asking for updates. */
   askUpdate(host: string): void {
     if (!this.hosts().includes(host)) throw new Refused(`no agent of '${host}'`)
-    this.wanted.add(host)
+    writeFileSync(this.mark(host, '.update'), '', { mode: 0o640 })
   }
 
   /** A host's agent asks, with its token checked already: the binary to
@@ -203,13 +215,19 @@ export class Agents {
    * differ from what it has, and updates are automatic or one was asked
    * for. */
   update(host: string, served: { file: string; sum: string } | undefined, have: string, auto: boolean, now = Date.now()): { file: string; sum: string } | undefined {
-    this.asked.set(host, now)
+    try {
+      const file = this.mark(host, '.asked')
+      if (existsSync(file)) utimesSync(file, now / 1000, now / 1000)
+      else writeFileSync(file, '', { mode: 0o640 })
+    } catch {
+      // Not kept: shown as not asking until the next time.
+    }
     if (!served) return undefined
     if (served.sum === have) {
-      this.wanted.delete(host)
+      rmSync(this.mark(host, '.update'), { force: true })
       return undefined
     }
-    return auto || this.wanted.has(host) ? served : undefined
+    return auto || this.wanted(host) ? served : undefined
   }
 
   /** Tells of inventories new since the last look, of agents in use only:
@@ -255,12 +273,12 @@ export class Agents {
     const rows: AgentRow[] = [
       ...known.map((host) => {
         const version = this.version(host)
-        const asked = this.asked.get(host)
+        const asked = this.askedAt(host)
         return {
           host,
           ...(version ? { version } : {}),
           ...(asked !== undefined && now - asked < ASKS_GONE ? { updater: true } : {}),
-          ...(this.wanted.has(host) ? { updating: true } : {}),
+          ...(this.wanted(host) ? { updating: true } : {}),
         }
       }),
       ...waiting.map((host) => ({ host, waiting: true, ...this.progress(host) })),
@@ -350,7 +368,7 @@ export class Agents {
     if (!agentName(host)) return false
     let found = false
     let inUse = false
-    for (const suffix of ['.new', '.token', '.inventory.json']) {
+    for (const suffix of ['.new', '.token', '.inventory.json', '.update', '.asked']) {
       const file = join(this.settings.dir, `${host}${suffix}`)
       if (!existsSync(file)) continue
       unlinkSync(file)
@@ -359,8 +377,6 @@ export class Agents {
     }
     this.told.delete(host)
     this.issued.delete(host)
-    this.wanted.delete(host)
-    this.asked.delete(host)
     if (inUse) await this.reload()
     return found
   }
@@ -506,17 +522,25 @@ mkdir -p -m 755 /usr/local/lib/checkd-agent
 id checkd-agent >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin checkd-agent 2>/dev/null || adduser -S -H -s /sbin/nologin checkd-agent
 # The binary, in a directory of the agent's own user, which replaces it
 # with what nuthatch gives when it is updated: no root needed then.
+# Root writes nothing inside it but by a rename, which replaces a link left
+# there instead of following it.
 bin=/var/lib/checkd-agent/bin
-mkdir -p -m 755 /var/lib/checkd-agent "$bin"
+mkdir -p -m 755 /var/lib/checkd-agent
+chown root:root /var/lib/checkd-agent
+chmod 755 /var/lib/checkd-agent
+[ -L "$bin" ] && rm -f "$bin"
+mkdir -p -m 755 "$bin"
 chown checkd-agent "$bin"
 chmod 755 "$bin"
 umask 077
 mkdir -p /etc/checkd-agent
-fetch "$url" "$bin/checkd-agent.new"
-echo "$sum  $bin/checkd-agent.new" | sha256sum -c - >/dev/null || { echo "The download does not match its checksum" >&2; rm -f "$bin/checkd-agent.new"; exit 1; }
-chmod 755 "$bin/checkd-agent.new"
-chown checkd-agent "$bin/checkd-agent.new"
-mv "$bin/checkd-agent.new" "$bin/checkd-agent"
+new=$(mktemp -d /var/lib/checkd-agent/.install.XXXXXX)
+fetch "$url" "$new/checkd-agent"
+echo "$sum  $new/checkd-agent" | sha256sum -c - >/dev/null || { echo "The download does not match its checksum" >&2; rm -rf "$new"; exit 1; }
+chmod 755 "$new/checkd-agent"
+chown checkd-agent "$new/checkd-agent"
+mv -f "$new/checkd-agent" "$bin/checkd-agent"
+rmdir "$new"
 printf '%s\\n' ${sh(install.token)} > /etc/checkd-agent/token
 cat > /etc/checkd-agent/ca.crt <<'CHECKD_AGENT_CA'
 ${ca.trim()}
@@ -600,7 +624,10 @@ $dir = Join-Path $env:ProgramFiles 'checkd-agent'
 $data = Join-Path $env:ProgramData 'checkd-agent'
 New-Item -ItemType Directory -Force -Path $dir, (Join-Path $dir 'plugins') | Out-Null
 # Made anew, so that nobody who made it first keeps a hold on it.
-if (Test-Path $data) { Remove-Item -Recurse -Force $data }
+# By cmd's rmdir, which takes a link (junction) away itself, there or
+# inside, and never what it points to, as Remove-Item may.
+if (Test-Path $data) { cmd /c rmdir /s /q "$data" | Out-Null }
+if (Test-Path $data) { throw "$data cannot be removed" }
 New-Item -ItemType Directory -Path $data | Out-Null
 icacls $data /setowner '*S-1-5-32-544' | Out-Null
 icacls $data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-19:(OI)(CI)R' | Out-Null

@@ -178,3 +178,14 @@ user alone: only a proxy that runs as that user can use it (as
     sudo systemctl restart nuthatch
 
 nuthatch's store is migrated when it starts; back it up first.
+
+## Going back
+
+An older nuthatch refuses a store a newer one has migrated. So: stop the
+service, check out the commit you came from, put the store's backup
+back, build, and start it.
+
+    sudo systemctl stop nuthatch
+    cd /opt/nuthatch && sudo git checkout <previous commit> && sudo pnpm install --frozen-lockfile && sudo pnpm build
+    sudo cp <backup of the store> <store>
+    sudo systemctl start nuthatch

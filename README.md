@@ -6,8 +6,9 @@ A web interface for monitoring engines of the Nagios family. It shows
 the state of hosts and services, and lets people act on them: check now,
 acknowledge, schedule a downtime, comment. It talks Livestatus, so it
 works with [Naemon](https://www.naemon.io/) and with checkd, the engine
-it is written beside. It covers the ground Thruk covers, written anew,
-and is made to be used on a phone as much as at a desk.
+it is written beside. It covers the everyday pages of Thruk (status,
+problems, history, availability, commands, config), written anew, and is
+made to be used on a phone as much as at a desk.
 
 ## Status: young, and honest about it
 
@@ -64,7 +65,9 @@ downtimes that come round. Naemon has none of those.
 nuthatch sends the engine external commands for the people logged in,
 and for one role writes the engine's config, which is as much as running
 programs as the engine's user. It keeps sessions, API tokens and an audit
-log in a file of its own, and nothing about what is monitored. See
+log in a file of its own, and, as far as they are used, what agents say
+of their hosts and the mail password and chat links for notifications;
+for the rest, pages ask the engine. See
 [SECURITY.md](SECURITY.md) for who may do what, what leaves the machine,
 and how to report a problem.
 
@@ -209,9 +212,9 @@ here and in the Android app, are made from `docs/logo.svg` by
 - nuthatch speaks plain HTTP. It refuses to listen beyond the machine
   unless `behind_proxy = true` says a proxy in front does TLS; the
   session's cookie is then marked `Secure`.
-- `store`: an SQLite file for sessions, API tokens, preferences and the
-  audit log (logins, commands sent, commands refused). Nothing about what
-  is monitored is kept there. A newer nuthatch migrates an older file when
+- `store`: an SQLite file for sessions, API tokens, preferences, the
+  audit log (logins, commands sent, commands refused), and what
+  [SECURITY.md](SECURITY.md#what-it-keeps) lists besides. A newer nuthatch migrates an older file when
   it starts; an older one refuses a newer file, so back it up before an
   upgrade.
 - `listen = "unix:/run/nuthatch/http.sock"`: a Unix socket in place of
@@ -251,12 +254,9 @@ Node runs the TypeScript as it is; nothing is compiled to install it.
 
 The last two need `dev/up naemon` and `dev/up checkd` running, and so
 Docker and a clone of checkd beside this repository. CI runs the first
-line in a container on each push (the workflow `ci.yml`); the rest run
-when started by hand, on a runner that runs jobs on its own machine,
-against the engines of dev/up there (the workflow `engines.yml`, label
-`desktop`): Naemon's container needs Docker
-to bind-mount the demo site, which a job inside a container cannot
-give it.
+line on each push (the workflow `ci.yml`); the rest are run by hand, on
+a machine with both engines up: Naemon's container needs Docker to
+bind-mount the demo site, which a job inside a container cannot give it.
 
 ## Licence
 

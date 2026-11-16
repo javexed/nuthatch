@@ -106,7 +106,8 @@ export async function runOver(
   if (!sshAddress(login.address) || !sshUser(login.user)) throw new Error('not an address or user ssh can be given')
   if (keys.length === 0) throw new Error("the host's key is not known")
   if (!login.password && !login.key) throw new Error('a password or a key is needed')
-  const secrets = [login.password, login.passphrase, login.key]
+  // What goes in on standard input (sudo's password) too: never echoed back in the output.
+  const secrets = [login.password, login.passphrase, login.key, input.trim()]
   const dir = workDir()
   let agent: ReturnType<typeof spawn> | undefined
   try {

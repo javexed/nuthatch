@@ -3,7 +3,8 @@
 # Debian container that runs systemd, with an SSH server on port 2222 and
 # the user admin (password "admin-pass", sudo with that password). It
 # shares this machine's network, so that it reaches the dev nuthatch and
-# checkd at 127.0.0.1 as a monitored host would reach them. Its SSH server
+# checkd at 127.0.0.1 as a monitored host would reach them; its SSH server
+# listens on 127.0.0.1 alone, as its password is no secret. It
 # does not hold back after a wrong login (PerSourcePenalties), so that a
 # test can try a wrong password and then the right one.
 #
@@ -11,7 +12,7 @@
 #   dev/ssh-target stop
 set -euo pipefail
 name=nuthatch-ssh-target
-image=nuthatch-ssh-target:2
+image=nuthatch-ssh-target:3
 
 docker rm -f "$name" >/dev/null 2>&1 || true
 [ "${1:-}" = stop ] && exit 0
@@ -22,7 +23,7 @@ FROM debian:trixie
 RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv openssh-server sudo curl ca-certificates procps \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -s /bin/bash -G sudo admin && echo 'admin:admin-pass' | chpasswd \
-    && printf 'Port 2222\nPasswordAuthentication yes\nPermitRootLogin no\nPerSourcePenalties no\n' > /etc/ssh/sshd_config.d/test.conf \
+    && printf 'Port 2222\nListenAddress 127.0.0.1\nPasswordAuthentication yes\nPermitRootLogin no\nPerSourcePenalties no\n' > /etc/ssh/sshd_config.d/test.conf \
     && systemctl enable ssh
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]

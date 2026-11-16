@@ -97,3 +97,10 @@ mail server, the chat's service, or the ntfy server, in the clear to
 them. Links in the messages lead to nuthatch when `subject` is its
 `https://` address. A message that cannot be sent is logged by nuthatch
 (`notify <backend>/<contact>: ...`) and not tried again.
+
+The engine counts a notification as sent when it is logged; nuthatch
+sends it on from the log. What is logged while nuthatch is stopped or
+restarting is sent, once, when it is back, as far back as six hours;
+older than that, it is not sent at all. Keep nuthatch running as the
+engine is, or give contacts who must be told a notification command of
+the engine's own besides.

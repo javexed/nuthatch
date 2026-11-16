@@ -51,8 +51,11 @@ async function load() {
 
 // Often while an agent is on its way; seldom once it has said what it is.
 let timer: ReturnType<typeof setTimeout> | undefined
+// Gone: a look still on its way when the page was left starts no other.
+let gone = false
 function next() {
   clearTimeout(timer)
+  if (gone) return
   const soon = (installing.value && !again.value) || agent.value?.waiting || (agent.value && !inventory.value)
   // Not connected: just taken on (checkd reloads, and the agent comes back
   // within seconds), or gone; either way, said soon when that changes.
@@ -66,7 +69,10 @@ onMounted(async () => {
   await load()
   next()
 })
-onUnmounted(() => clearTimeout(timer))
+onUnmounted(() => {
+  gone = true
+  clearTimeout(timer)
+})
 
 /** How far an install has come, and after a minute stuck, why it may be. */
 const SLOW = 60_000

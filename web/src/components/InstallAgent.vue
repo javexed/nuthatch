@@ -2,6 +2,7 @@
 // Installs checkd-agent on one host: over SSH by default, nuthatch logging
 // in with a login given for this run alone; or a command to run there.
 import type { AgentInstall, FirewallGap } from '@nuthatch/api'
+import { ApiError } from '@nuthatch/api'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../stores/session'
 
@@ -95,8 +96,15 @@ async function installOverSsh() {
           busy.value = false
           emit('done', now.ok)
         }
-      } catch {
-        // The next look.
+      } catch (err) {
+        // nuthatch restarted meanwhile, and the job with it: said, and no
+        // more looks. Anything else: the next look.
+        if (err instanceof ApiError && err.status === 404) {
+          clearInterval(following)
+          busy.value = false
+          job.value = null
+          error.value = 'nuthatch restarted during the install: look at the host, or install again'
+        }
       }
     }, 1000)
   } catch (err) {

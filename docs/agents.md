@@ -122,7 +122,8 @@ than the agents nuthatch serves (the `VERSION` file that checkd's
 On Linux the agent replaces itself. Every five minutes it asks nuthatch,
 with its token, whether it is to be replaced. nuthatch says yes when the
 binary it serves differs from the one the host has, and either **Update**
-was pressed for that host or
+was pressed for that host (kept until done, across a restart of nuthatch,
+as `<host>.update` beside the host's token) or
 
     [agents]
     update = "auto"     # "off" (the default): only when asked for

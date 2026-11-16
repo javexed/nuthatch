@@ -139,6 +139,10 @@ describe('delivery settings', () => {
     expect(JSON.stringify(shown(again))).not.toContain('abcdefgh')
     expect(shown(again).email?.has_password).toBe(true)
     expect(again.ntfy.server).toBe('https://ntfy.sh')
+    // Another server or login: the password kept is not sent to it.
+    expect(() => checkDelivery({ email: { host: 'smtp.example.test', port: 465, user: 'me@example.test', password: '' }, chats: [], ntfy: {} }, first)).toThrow(/password again/)
+    expect(() => checkDelivery({ email: { host: 'smtp.gmail.com', port: 465, user: 'other@example.test', password: '' }, chats: [], ntfy: {} }, first)).toThrow(/password again/)
+    expect(checkDelivery({ email: { host: 'smtp.example.test', port: 465, user: 'me@example.test', password: 'new' }, chats: [], ntfy: {} }, first).email?.password).toBe('new')
   })
 
   it('refuse what cannot be sent to', () => {
@@ -172,7 +176,7 @@ describe('chat', () => {
 })
 
 describe('a notification the engine logged', () => {
-  it('reaches a contact by chat and ntfy, as well as their browsers', async () => {
+  it('reaches a contact by chat and ntfy', async () => {
     const store = new Store(':memory:')
     const posts: { url: string; body: unknown }[] = []
     const fetcher = (async (url: string, init?: RequestInit) => {
@@ -201,5 +205,42 @@ describe('a notification the engine logged', () => {
     await pusher.pass(backend, 1700000000, new Set())
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(posts).toHaveLength(1)
+  })
+
+  it('is still passed on, once, when it was logged while nuthatch was down', async () => {
+    const store = new Store(':memory:')
+    const posts: string[] = []
+    const fetcher = (async (url: string) => {
+      posts.push(url)
+      return new Response('', { status: 200 })
+    }) as unknown as typeof fetch
+    const line = [1700000000, '[1700000000] SERVICE NOTIFICATION: ops;web1;HTTP;CRITICAL;nuthatch_notify;Connection refused']
+    const backend = { name: 'site', query: async (request: string) => (request.startsWith('GET log') ? [line] : []) } as unknown as Backend
+    const pusher = new Pusher(store, 'https://nuthatch.example.test', [backend], 0, fetcher)
+    pusher.setDelivery(checkDelivery({ chats: [{ name: 'ops', kind: 'slack', url: 'https://hooks.example.test/x' }] }, NO_DELIVERY))
+    store.setReach('site', 'ops', JSON.stringify({ chat: 'ops' }))
+
+    // The first start: from now.
+    expect(pusher.resumeAt('site', 1700000100)).toEqual({ since: 1700000100, seen: new Set() })
+    // Where the run before got to, before the line was logged.
+    store.setMark('notified:site', JSON.stringify({ since: 1699999990, seen: [] }))
+    const back = pusher.resumeAt('site', 1700000030)
+    expect(back.since).toBe(1699999990)
+    const next = await pusher.pass(backend, back.since, back.seen, 1700000030)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(posts).toEqual(['https://hooks.example.test/x'])
+    // Restarted again within the minute a line may come late: the line is
+    // still in the window, and kept as passed on, so not told again.
+    posts.length = 0
+    expect(next).toBe(1700000000)
+    store.setMark('notified:site', JSON.stringify({ since: next, seen: [...back.seen] }))
+    const again = pusher.resumeAt('site', 1700000040)
+    expect(again.seen.size).toBe(1)
+    await pusher.pass(backend, again.since, again.seen, 1700000040)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(posts).toEqual([])
+    // Down for days: no further back than six hours.
+    store.setMark('notified:site', JSON.stringify({ since: 1600000000, seen: [] }))
+    expect(pusher.resumeAt('site', 1700000100).since).toBe(1700000100 - 6 * 3600)
   })
 })

@@ -12,6 +12,10 @@ import { type Planned, open, plan, readInventory } from './proposals.ts'
 import { Refused } from './policy.ts'
 import type { Store } from './store.ts'
 
+/** Base checks that could not be added are tried again: this often, so many times. */
+const RETRY_AFTER = 60_000
+const RETRIES = 30
+
 export class HostSetup {
   private readonly store: Store
   private readonly admins: Map<string, ConfigAdmin>
@@ -42,17 +46,46 @@ export class HostSetup {
     return fresh.map((p) => p.key)
   }
 
+  /** One take at a time: two would each start from the same config
+   * revision, and the second be refused. */
+  private queue: Promise<void> = Promise.resolve()
+  /** Hosts whose base checks were looked at since nuthatch started. */
+  private readonly settled = new Set<string>()
+  private readonly tries = new Map<string, number>()
+
   /** An inventory that came from a host's agent. The first one adds the
-   * base checks. */
-  async take(backend: string, host: string, text: string, received: number): Promise<void> {
+   * base checks; when that fails (the config changed meanwhile, or the
+   * engine refused it for a while), it is tried again a minute later, for
+   * half an hour, and with every inventory after. */
+  take(backend: string, host: string, text: string, received: number): Promise<void> {
+    const run = this.queue.then(() => this.takeNow(backend, host, text, received))
+    this.queue = run.catch(() => undefined)
+    return run
+  }
+
+  private async takeNow(backend: string, host: string, text: string, received: number): Promise<void> {
     const inventory = readInventory(text)
     if (!inventory) return
+    const key = `${backend}/${host}`
     const known = this.store.inventory(backend, host)
-    if (known && known.received >= received) return
-    this.store.keepInventory(backend, host, JSON.stringify(inventory), received)
+    const fresh = !known || known.received < received
+    if (fresh) this.store.keepInventory(backend, host, JSON.stringify(inventory), received)
     if (known && known.base.length > 0) return
+    if (!fresh && this.settled.has(key)) return
     const base = plan(inventory).filter((p) => p.base)
-    const added = await this.add(backend, host, base)
+    let added: string[]
+    try {
+      added = await this.add(backend, host, base)
+    } catch (err) {
+      const tried = (this.tries.get(key) ?? 0) + 1
+      this.tries.set(key, fresh ? 1 : tried)
+      if ((fresh ? 1 : tried) < RETRIES) {
+        setTimeout(() => void this.take(backend, host, text, received).catch(() => undefined), RETRY_AFTER).unref()
+      }
+      throw err
+    }
+    this.settled.add(key)
+    this.tries.delete(key)
     if (added.length > 0) {
       this.store.setInventoryBase(backend, host, added)
       this.store.audit('nuthatch', backend, 'config', `base checks of ${host}: ${added.join(', ')}`)

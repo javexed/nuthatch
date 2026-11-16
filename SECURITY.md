@@ -83,6 +83,16 @@ maintainer and no promised time to answer. Only the newest commit of
   service stopped: `sqlite3 <store> "DELETE FROM sessions WHERE user =
   'name'; DELETE FROM tokens WHERE user = 'name'; DELETE FROM push WHERE
   user = 'name';"`.
+- With agents: in the store, what each host's agent said of its machine
+  (system, disks, services, listening ports) and which checks were added
+  from it; beside checkd's agent tokens, `<host>.update` and
+  `<host>.asked` for updates.
+- With e-mail, chat or ntfy for notifications: in the store, the mail
+  server's login and password, **in plain text** (it has to be sent;
+  for Gmail use an app password, which can be revoked alone), the chat
+  links, which are secrets of their own, and each contact's ntfy topic;
+  and how far the engine's log has been read, so that what is logged
+  while nuthatch is down is still sent.
 - With `[graphs]`: a second file with the numbers checks return, by host
   and service name, for the days configured.
 - Nothing else of what is monitored: pages ask the engine each time. The
@@ -102,6 +112,17 @@ maintainer and no promised time to answer. Only the newest commit of
   ([docs/sites.md](docs/sites.md)).
 - **checkd's `/metrics`**, with `[backend.agents]` and `push_url`: read to
   show which agents are connected.
+- **E-mail, chat and ntfy**, when set up for a contact: the host, service,
+  state and plugin output of each notification, to the mail server and
+  the contact's address, to the chat service of the link, or to the ntfy
+  server, which can read it (a public one: anyone who knows the topic).
+- **SSH to a host**, when an agent is installed that way: nuthatch logs
+  in with the login given for that run, keeps it nowhere, and runs the
+  installer there.
+- **Scan**, when adding a host: connections to the ports of the
+  address given, to see what answers.
+- Agents fetch their installer and binaries, and ask for updates, from
+  nuthatch: that comes in, from the hosts.
 - The page loads nothing from anywhere but the server itself.
 
 ## Not yet looked at by anyone else

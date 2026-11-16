@@ -102,7 +102,9 @@ const SCHEMA = `
         PRIMARY KEY (backend, host));
       CREATE TABLE IF NOT EXISTS reach (
         backend TEXT NOT NULL, contact TEXT NOT NULL, body TEXT NOT NULL,
-        PRIMARY KEY (backend, contact));`
+        PRIMARY KEY (backend, contact));
+      CREATE TABLE IF NOT EXISTS marks (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 
 /**
  * A step from version n to n + 1, at index n - 1: SQL, or a function for
@@ -261,6 +263,18 @@ export class Store {
 
   anyReach(): boolean {
     return this.db.prepare('SELECT 1 FROM reach LIMIT 1').get() !== undefined
+  }
+
+  /** Where nuthatch got to with something, kept across a restart: JSON. */
+  mark(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM marks WHERE key = ?').get(key) as { value: string } | undefined
+    return row?.value ?? null
+  }
+
+  /** `value` null: forgotten. */
+  setMark(key: string, value: string | null): void {
+    if (value === null) this.db.prepare('DELETE FROM marks WHERE key = ?').run(key)
+    else this.db.prepare('INSERT INTO marks (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
   }
 
   /** A user's own dashboards and the shared ones, by title. */

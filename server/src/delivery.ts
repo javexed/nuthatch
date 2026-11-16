@@ -51,8 +51,10 @@ export function checkDelivery(given: unknown, before: KeptDelivery): KeptDeliver
     if (!ADDRESS.test(user) && !/^[A-Za-z0-9._-]{1,100}$/.test(user)) throw new Refusal('the mail login is an address or a user name')
     if (!ADDRESS.test(from)) throw new Refusal('"From" is an e-mail address')
     const typed = typeof e.password === 'string' ? e.password.replace(/\s/g, '') : ''
-    const password = typed !== '' ? typed : before.email?.password ?? ''
-    if (password === '') throw new Refusal('the mail password is needed (for Gmail, an app password)')
+    // Kept only for the same server and login: never sent to another one.
+    const same = before.email?.host === host && before.email?.user === user
+    const password = typed !== '' ? typed : same ? (before.email?.password ?? '') : ''
+    if (password === '') throw new Refusal(before.email && !same ? 'the mail password again, for another server or login' : 'the mail password is needed (for Gmail, an app password)')
     email = { host, port, user, password, from }
   }
   const chats: KeptDelivery['chats'] = []

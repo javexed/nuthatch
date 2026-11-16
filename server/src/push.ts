@@ -88,6 +88,8 @@ const bad = (state: string) => !/^(OK|UP|RECOVERY)/.test(state) && !/\((OK|UP)\)
 
 /** How long after its time a notification may reach the log, in seconds. */
 const LAG = 60
+/** After nuthatch was down, how far back it looks for what it missed (s). */
+const BACK = 6 * 3600
 
 export class Pusher {
   private readonly store: Store
@@ -186,19 +188,49 @@ export class Pusher {
     return next
   }
 
+  /** Where the last pass over a backend's log got to, and what it had
+   * passed on there: kept, so that what is logged while nuthatch is down
+   * or restarting is still passed on, once, when it is back; but nothing
+   * older than BACK. */
+  resumeAt(backend: string, now = Date.now() / 1000): { since: number; seen: Set<string> } {
+    const from = Math.floor(now) - BACK
+    try {
+      const kept = JSON.parse(this.store.mark(`notified:${backend}`) ?? 'null') as { since?: unknown; seen?: unknown } | null
+      if (kept && typeof kept.since === 'number' && Array.isArray(kept.seen)) {
+        return { since: Math.min(Math.floor(now), Math.max(from, kept.since)), seen: new Set(kept.seen.filter((k): k is string => typeof k === 'string')) }
+      }
+    } catch {
+      // Not readable: from now, as on the first start.
+    }
+    return { since: Math.floor(now), seen: new Set() }
+  }
+
+  private keep(backend: string, since: number, seen: Set<string>): void {
+    this.store.setMark(`notified:${backend}`, JSON.stringify({ since, seen: [...seen] }))
+  }
+
   private async watch(backend: Backend, every: number): Promise<void> {
-    // From now: what was logged before nuthatch started is not news.
-    let since = Math.floor(Date.now() / 1000)
-    const seen = new Set<string>()
+    // From where the last run got to; on the first start, from now: what
+    // was logged before is not news.
+    let { since, seen } = this.resumeAt(backend.name)
     let failing = false
+    let idle = false
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, every).unref())
       try {
         if (!this.store.anyPush() && !this.store.anyReach()) {
+          // Nobody to tell: nothing to catch up on later either.
           since = Math.floor(Date.now() / 1000)
+          if (seen.size > 0 || !idle) this.store.setMark(`notified:${backend.name}`, null)
+          seen = new Set()
+          idle = true
           continue
         }
+        idle = false
+        const before = since
+        const known = seen.size
         since = await this.pass(backend, since, seen)
+        if (since !== before || seen.size !== known) this.keep(backend.name, since, seen)
         failing = false
       } catch (err) {
         // The engine away, or the store: said once, and the next turn tries again.

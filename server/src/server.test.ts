@@ -1341,7 +1341,7 @@ describe('agents', () => {
       const row = async () => ((await (await s.app.request('/api/v1/agents/site')).json()) as { agents: Record<string, unknown>[] }).agents[0]
       return { ...s, ask, row }
     }
-    const { app, ask, row, store } = setUp(false)
+    const { app, ask, row, store, dir } = setUp(false)
     for (const wrong of [await ask(old, 'not-it'), await ask(old, ''), await ask(old, 'the-token', 'x86_64', 'win1')]) expect(wrong.status).toBe(404)
     // Not asked for: nothing, though it is older; and now it is known to ask.
     expect(await (await ask(old)).text()).toBe('none\n')
@@ -1350,12 +1350,16 @@ describe('agents', () => {
     const asked = await app.request('/api/v1/agents/site/web1/update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: '{}' })
     expect(asked.status).toBe(200)
     expect(await row()).toMatchObject({ updating: true })
+    // Kept beside the token: a restart of nuthatch does not forget it.
+    expect(existsSync(join(dir, 'agents', 'web1.update'))).toBe(true)
+    expect(existsSync(join(dir, 'agents', 'web1.asked'))).toBe(true)
     expect(await (await ask(old, 'the-token', 'mips')).text()).toBe('none\n')
     expect(await (await ask(old)).text()).toBe(`update checkd-agent-linux-x86_64 ${sum}\n`)
     // Until it has it.
     expect(await (await ask(old)).text()).toBe(`update checkd-agent-linux-x86_64 ${sum}\n`)
     expect(await (await ask(sum)).text()).toBe('none\n')
     expect((await row())?.updating).toBeUndefined()
+    expect(existsSync(join(dir, 'agents', 'web1.update'))).toBe(false)
     expect(store.auditTail(10).map((a) => a.action)).toEqual(expect.arrayContaining(['agent update asked', 'agent update fetched']))
     const noAgent = await app.request('/api/v1/agents/site/win1/update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: '{}' })
     expect(noAgent.status).toBe(400)
@@ -1643,6 +1647,41 @@ describe('checks proposed from an inventory', () => {
     expect((await setup.view('site', 'other'))?.managed).toBe(false)
     await expect(setup.decide('site', 'other', ['memory'], [])).rejects.toThrow()
     expect(changes).toHaveLength(2)
+  })
+
+  it('adds the base checks of two hosts at once one after the other, and tries again when refused', async () => {
+    const store = new Store(':memory:')
+    const make = (name: string) => ({ name, address: '192.0.2.1', use: 'generic-host', hostgroups: [], contacts: [], contact_groups: [], services: [] as { description: string }[] })
+    const hosts = [make('web1'), make('web2')]
+    let revision = 1
+    let refuse = 0
+    const admin = {
+      async state() {
+        return { revision: `r${revision}`, hosts, templates: { host: ['generic-host'], service: ['generic-service'] }, extras: true }
+      },
+      async change(base: string, change: { host: { name: string; services: { description: string }[] } }) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        if (base !== `r${revision}`) throw new Error('Conflict: the config changed meanwhile')
+        if (refuse > 0) {
+          refuse--
+          throw new Error('the engine does not take this config')
+        }
+        revision++
+        hosts.find((h) => h.name === change.host.name)!.services = change.host.services
+        return { verified: true, applied: true, output: '' }
+      },
+    }
+    const setup = new HostSetup(store, new Map([['site', admin as never]]))
+    await Promise.all([setup.take('site', 'web1', JSON.stringify(linux), 100), setup.take('site', 'web2', JSON.stringify(linux), 100)])
+    expect(hosts.map((h) => h.services.length)).toEqual([4, 4])
+
+    // Refused once: the same inventory again (as the next look does) adds them.
+    hosts.push(make('web3'))
+    refuse = 1
+    await expect(setup.take('site', 'web3', JSON.stringify(linux), 100)).rejects.toThrow(/does not take/)
+    expect(store.inventory('site', 'web3')?.base).toEqual([])
+    await setup.take('site', 'web3', JSON.stringify(linux), 100)
+    expect(store.inventory('site', 'web3')?.base).toHaveLength(4)
   })
 
   it('a check of the machine runs on its agent, a look from outside on the engine', () => {
