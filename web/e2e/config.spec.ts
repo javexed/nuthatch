@@ -80,8 +80,11 @@ for (const engine of ENGINES) {
     await expect(page.getByRole('status')).toContainText(`${name} is taken out.`, { timeout: 90_000 })
     await expect(page.locator('.managed li', { hasText: name })).toHaveCount(0)
     expect((await livestatus(engine, `GET hosts\nFilter: name = ${name}\nStats: state >= 0`))[0]?.[0]).toBe(0)
-    expect((await livestatus(engine, `GET downtimes\nFilter: comment = ${kept}\nStats: id >= 0`))[0]?.[0]).toBe(1)
+    const [[id]] = (await livestatus(engine, `GET downtimes\nColumns: id\nFilter: comment = ${kept}`)) as [[number]]
     await fits(page)
+    // Not left to run out: the permission matrix counts the downtimes.
+    await send(engine, `DEL_HOST_DOWNTIME;${id}`)
+    await expect.poll(async () => (await livestatus(engine, `GET downtimes\nFilter: comment = ${kept}\nStats: id >= 0`))[0]?.[0]).toBe(0)
   })
 }
 
