@@ -576,12 +576,21 @@ export function buildApp(deps: Deps): Hono<Env> {
     if (found.length > MANY) throw new Refused(`more than ${MANY} fit; narrow it`)
     const matches = found.map((row) => row.map(String)).sort((a, b) => a.join('/').localeCompare(b.join('/')))
     if (sent.dry_run === true) return c.json({ matches })
-    for (const match of matches) {
-      const name = services === '' ? 'SCHEDULE_HOST_DOWNTIME' : 'SCHEDULE_SVC_DOWNTIME'
-      const checked = checkCommand(name, [...match, String(start), String(end), '1', '0', '0', '', comment], user, now())
-      await backend.command(checked.line)
+    const what = `${hosts}${services === '' ? '' : `/${services}`}, ${start} to ${end}: ${comment}`
+    let done = 0
+    try {
+      for (const match of matches) {
+        const name = services === '' ? 'SCHEDULE_HOST_DOWNTIME' : 'SCHEDULE_SVC_DOWNTIME'
+        const checked = checkCommand(name, [...match, String(start), String(end), '1', '0', '0', '', comment], user, now())
+        await backend.command(checked.line)
+        done++
+      }
+    } catch (err) {
+      // Some are set and some not: the audit log says how far it got.
+      deps.store.audit(user, backend.name, 'command failed', `downtime for ${done} of ${matches.length} that fit ${what}; then ${err instanceof Error ? err.message : String(err)}`.slice(0, 500))
+      throw err
     }
-    deps.store.audit(user, backend.name, 'command', `downtime for ${matches.length} that fit ${hosts}${services === '' ? '' : `/${services}`}, ${start} to ${end}: ${comment}`.slice(0, 500))
+    deps.store.audit(user, backend.name, 'command', `downtime for ${matches.length} that fit ${what}`.slice(0, 500))
     return c.json({ matches })
   })
 

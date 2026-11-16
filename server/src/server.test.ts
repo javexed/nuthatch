@@ -1215,6 +1215,20 @@ describe('a downtime for many', () => {
     expect(backend.asked.at(-1)).toContain('Filter: host_groups >= webs\nFilter: description ~ ^back.p$')
   })
 
+  it('says in the audit log how far it got when the engine stops taking them', async () => {
+    const { backend, store, post } = site({ authorized_for_all_host_commands: ['ops'] })
+    const send = backend.command.bind(backend)
+    backend.command = async (line: string) => {
+      if (backend.sent.length === 2) throw new Error('the engine went away')
+      return send(line)
+    }
+    expect((await post(asked)).status).toBe(500)
+    expect(backend.sent).toHaveLength(2)
+    const last = store.auditTail(10)[0]
+    expect(last).toMatchObject({ user: 'ops', action: 'command failed' })
+    expect(last?.detail).toMatch(/^downtime for 2 of 3 that fit web\*, .*: switch work; then the engine went away$/)
+  })
+
   it('covers only what a contact sees, and refuses what cannot be', async () => {
     const { backend, post } = site({})
     const answer = await post({ ...asked, dry_run: true })
