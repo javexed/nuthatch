@@ -107,9 +107,8 @@ maintainer and no promised time to answer. Only the newest commit of
 ## Not yet looked at by anyone else
 
 No outside review or audit has been done. The permission rules are
-tested on both engines for five kinds of user against twelve of the
-seventeen tables and a set of the commands (`dev/matrix`,
-[docs/permissions.md](docs/permissions.md)); the other five tables
-(state history, downtimes and the three by service group) were tried by
-hand to show an unknown user nothing. That shows what was thought of,
-not what was not.
+tested on both engines for five kinds of user against all seventeen
+tables and all 26 commands (`dev/matrix`,
+[docs/permissions.md](docs/permissions.md)). The demo site has no
+service groups, so those tables are only shown to refuse nobody and to
+give nothing. That shows what was thought of, not what was not.
