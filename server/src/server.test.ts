@@ -981,7 +981,7 @@ describe('notifications pushed to browsers', () => {
     expect(new Pusher(store, 'mailto:ops@example.test', [], 0, service).keys).toEqual(pusher.keys)
 
     const seen = new Set<string>()
-    let since = await pusher.pass(backend, 90, seen)
+    let since = await pusher.pass(backend, 90, seen, 101)
     await new Promise((done) => setTimeout(done, 50))
     expect(since).toBe(100)
     expect(backend.asked.at(-1)).toContain('Filter: time >= 90')
@@ -993,11 +993,20 @@ describe('notifications pushed to browsers', () => {
 
     // Asked again, the same second comes back and is not sent twice; what is new is.
     log = [...log, [103, 'SERVICE NOTIFICATION: bob;web1;http;OK;n;fine again']]
-    since = await pusher.pass(backend, since, seen)
+    since = await pusher.pass(backend, since, seen, 104)
     await new Promise((done) => setTimeout(done, 50))
     expect(since).toBe(103)
     expect(got.map((g) => [g.to, g.urgency])).toEqual([['ann', 'high'], ['bob', 'normal']])
     expect(seen.size).toBe(1)
+    // Nothing notified for a long while: the window moves on all the same,
+    // to a minute back, and nothing is sent twice.
+    since = await pusher.pass(backend, since, seen, 1000)
+    expect(since).toBe(940)
+    expect(seen.size).toBe(0)
+    since = await pusher.pass(backend, since, seen, 1010)
+    expect(backend.asked.at(-1)).toContain('Filter: time >= 940')
+    await new Promise((done) => setTimeout(done, 50))
+    expect(got).toHaveLength(2)
   })
 
   it('lets a user subscribe a browser, and take it out', async () => {
@@ -1037,7 +1046,7 @@ describe('a short history for graphs', () => {
     const backend = fake('site', (request) => (request.startsWith('GET services') ? rows : request.startsWith('GET hosts') ? [['web1', 990, 'rta=1.5ms pl=0%']] : []))
     const graphs = new Graphs(':memory:', 7, [backend], 0)
     expect(await graphs.sample(backend, 900)).toBe(1000)
-    expect(backend.asked.at(-1)).toContain('Filter: last_check > 900')
+    expect(backend.asked.at(-1)).toContain('Filter: last_check >= 780')
     // Asked again with an overlap: nothing is kept twice.
     rows = [...rows, ['web1', 'http', 1060, 'time=0.75s;1;2;0 size=512B']]
     expect(await graphs.sample(backend, 900)).toBe(1060)
@@ -1048,6 +1057,12 @@ describe('a short history for graphs', () => {
     expect(graphs.series('site', 'web1', 'disk', 24, 1100)).toEqual([{ label: '/ used', unit: '%', points: [[1000, 41]] }])
     expect(graphs.series('site', 'web1', '', 24, 1100).map((s) => s.label)).toEqual(['rta', 'pl'])
     expect(graphs.series('other', 'web1', 'http', 24, 1100)).toEqual([])
+    // A check of the same second as the newest seen, and one that started
+    // before it and ended after the last look, are not lost.
+    rows = [...rows, ['web1', 'late', 1060, 'x=1'], ['web1', 'slow', 1030, 'x=2']]
+    expect(await graphs.sample(backend, 1060)).toBe(1060)
+    expect(graphs.series('site', 'web1', 'late', 24, 1100)[0]?.points).toEqual([[1060, 1]])
+    expect(graphs.series('site', 'web1', 'slow', 24, 1100)[0]?.points).toEqual([[1030, 2]])
     // Only the hours asked for; and what is older than the days kept goes.
     expect(graphs.series('site', 'web1', 'http', 1, 1000 + 3600 + 30)[0]?.points).toEqual([[1060, 0.75]])
     // Or from one moment to another.

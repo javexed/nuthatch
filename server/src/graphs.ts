@@ -24,6 +24,9 @@ export interface Series {
   points: [number, number][]
 }
 
+/** How far back each look goes again, in seconds: longer than a check takes. */
+const OVERLAP = 120
+
 export class Graphs {
   private readonly db: DatabaseSync
   private readonly days: number
@@ -66,7 +69,12 @@ export class Graphs {
     }
   }
 
-  /** Asks a backend for what was checked since, and keeps it. The newest check seen. */
+  /** Asks a backend for what was checked since, and keeps it. The newest check seen.
+   *
+   * From `OVERLAP` seconds before `since`: a check's time is when it
+   * started, to the second, so one that started in the same second as the
+   * newest seen, or before it and ended after the last look, would be
+   * missed. What comes twice is kept once. */
   async sample(backend: Backend, since: number): Promise<number> {
     let latest = since
     const tables: [string, string][] = [
@@ -74,7 +82,7 @@ export class Graphs {
       ['services', 'host_name description'],
     ]
     for (const [table, names] of tables) {
-      const rows = await backend.query(`GET ${table}\nColumns: ${names} last_check perf_data\nFilter: last_check > ${since}\nFilter: perf_data != `)
+      const rows = await backend.query(`GET ${table}\nColumns: ${names} last_check perf_data\nFilter: last_check >= ${since - OVERLAP}\nFilter: perf_data != `)
       this.db.exec('BEGIN')
       try {
         for (const row of rows) {

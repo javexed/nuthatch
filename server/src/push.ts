@@ -86,6 +86,9 @@ export function digestOf(backend: string, notices: Notice[]): Message {
 
 const bad = (state: string) => !/^(OK|UP|RECOVERY)/.test(state) && !/\((OK|UP)\)/.test(state)
 
+/** How long after its time a notification may reach the log, in seconds. */
+const LAG = 60
+
 export class Pusher {
   private readonly store: Store
   private readonly subject: string
@@ -145,14 +148,19 @@ export class Pusher {
     return counts
   }
 
-  /** The notifications a backend logged from `since` on that were not seen yet, passed on. */
-  async pass(backend: Backend, since: number, seen: Set<string>): Promise<number> {
+  /** The notifications a backend logged from `since` on that were not seen
+   * yet, passed on. The answer is where the next pass starts: the newest
+   * seen, or, when nothing came, a little before now, so that the window
+   * does not grow for as long as nothing is notified. */
+  async pass(backend: Backend, since: number, seen: Set<string>, now = Date.now() / 1000): Promise<number> {
     const rows = await backend.query(`GET log\nColumns: time message\nFilter: time >= ${since}\nFilter: class = 3`)
     let latest = since
     // What this pass found, by contact: one notice is told as it is,
     // several as one message.
     const found = new Map<string, Notice[]>()
     for (const [time, message] of rows as [number, string][]) {
+      // Before the window: passed on already, or never news.
+      if (time < since) continue
       latest = Math.max(latest, time)
       const notice = parseNotice(String(message))
       if (!notice) continue
@@ -165,27 +173,38 @@ export class Pusher {
     for (const [contact, notices] of found) {
       const message = notices.length === 1 ? messageOf(backend.name, notices[0] as Notice) : digestOf(backend.name, notices)
       const urgent = notices.some((n) => bad(n.state))
-      void this.toUser(contact, message, urgent)
+      void this.toUser(contact, message, urgent).catch((err: unknown) => console.error(`push ${contact}: ${err instanceof Error ? err.message : String(err)}`))
       void this.toContact(backend, contact, message, urgent)
         .then((failed) => failed.forEach((f) => console.error(`notify ${backend.name}/${contact}: ${f}`)))
         .catch((err: unknown) => console.error(`notify ${backend.name}/${contact}: ${err instanceof Error ? err.message : String(err)}`))
     }
-    // What is older than the newest second cannot come again.
-    for (const key of seen) if (Number(key.split('|')[0]) < latest) seen.delete(key)
-    return latest
+    // A line is in the log a moment after its time: LAG back from now
+    // is still looked at again.
+    const next = Math.max(latest, Math.floor(now) - LAG)
+    // What is older than where the next pass starts cannot come again.
+    for (const key of seen) if (Number(key.split('|')[0]) < next) seen.delete(key)
+    return next
   }
 
   private async watch(backend: Backend, every: number): Promise<void> {
     // From now: what was logged before nuthatch started is not news.
     let since = Math.floor(Date.now() / 1000)
     const seen = new Set<string>()
+    let failing = false
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, every).unref())
-      if (!this.store.anyPush() && !this.store.anyReach()) {
-        since = Math.floor(Date.now() / 1000)
-        continue
+      try {
+        if (!this.store.anyPush() && !this.store.anyReach()) {
+          since = Math.floor(Date.now() / 1000)
+          continue
+        }
+        since = await this.pass(backend, since, seen)
+        failing = false
+      } catch (err) {
+        // The engine away, or the store: said once, and the next turn tries again.
+        if (!failing) console.error(`notify ${backend.name}: ${err instanceof Error ? err.message : String(err)}`)
+        failing = true
       }
-      since = await this.pass(backend, since, seen).catch(() => since)
     }
   }
 }
