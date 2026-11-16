@@ -5,6 +5,7 @@
 import { defineStore } from 'pinia'
 import { type Ref, type WatchSource, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ApiError } from '@nuthatch/api'
+import { reloader } from '../lib/reloader'
 import { api } from './session'
 
 /** How long a check that was asked for is waited for. */
@@ -96,50 +97,31 @@ export function useLoader<T>(load: () => Promise<T>, sources: WatchSource[] = []
   const data = ref<T | null>(null) as Ref<T | null>
   const error = ref('')
   const loading = ref(true)
-  let latest = 0
   let timer: ReturnType<typeof setInterval> | undefined
-  let soon: ReturnType<typeof setTimeout> | undefined
-
-  async function reload(): Promise<void> {
-    const mine = ++latest
-    try {
-      const got = await load()
-      // An older answer that comes late is dropped.
-      if (mine !== latest) return
-      data.value = got
+  const loads = reloader(load, (result) => {
+    if ('data' in result) {
+      data.value = result.data
       error.value = ''
-    } catch (err) {
-      if (mine !== latest) return
-      error.value = err instanceof ApiError ? err.message : 'Server unreachable'
-    } finally {
-      if (mine === latest) loading.value = false
+    } else {
+      error.value = result.error instanceof ApiError ? result.error.message : 'Server unreachable'
     }
-  }
+    loading.value = false
+  })
 
-  // Several events in a row load once.
-  if (follow) {
-    watch(
-      () => live.version,
-      () => {
-        clearTimeout(soon)
-        soon = setTimeout(() => void reload(), 250)
-      },
-    )
-  }
+  if (follow) watch(() => live.version, loads.poke)
   if (sources.length > 0) {
     watch(sources, () => {
       loading.value = true
-      void reload()
+      void loads.reload()
     })
   }
   onMounted(() => {
-    void reload()
-    if (follow) timer = setInterval(() => void reload(), 30_000)
+    void loads.reload()
+    if (follow) timer = setInterval(loads.refresh, 30_000)
   })
   onUnmounted(() => {
-    latest++
+    loads.stop()
     clearInterval(timer)
-    clearTimeout(soon)
   })
-  return { data, error, loading, reload }
+  return { data, error, loading, reload: loads.reload }
 }
