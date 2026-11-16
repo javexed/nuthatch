@@ -1,4 +1,4 @@
-// Phase 3: adding, changing and taking away a host from the interface, on
+// Adding, changing and taking away a host from the interface, on
 // each engine.
 import { execFileSync } from 'node:child_process'
 import { readdirSync, unlinkSync } from 'node:fs'

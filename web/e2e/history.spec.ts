@@ -1,4 +1,4 @@
-// Phase 2: history and availability, on a sequence of states that the
+// History and availability, on a sequence of states that the
 // test itself submits, on each engine, and again after the engine was
 // restarted.
 import { execFileSync } from 'node:child_process'

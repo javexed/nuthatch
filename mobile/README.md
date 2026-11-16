@@ -37,7 +37,8 @@ iOS, on a Mac with Xcode and CocoaPods:
 - `appId` in `capacitor.config.json` is a placeholder
   (`org.example.nuthatch`). It must be a name under a domain you own, and
   is fixed once the app is published.
-- Icons and a splash screen: none yet.
+- Icons and splash screens are made from `docs/logo.svg` by
+  `mobile/make-icons`; a store may want its own artwork besides.
 - A release build does not turn on debugging of its web view: Capacitor
   does so only for a debuggable app, and a release build is not one. On
   the two devices it was tried on, the emulator and one phone, the web

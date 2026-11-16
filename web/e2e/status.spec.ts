@@ -1,4 +1,4 @@
-// Phase 1: what people see and do, on both engines at once.
+// What people see and do, on both engines at once.
 import { type Page, expect, test } from '@playwright/test'
 import { ENGINES, fits, goTo, listed, livestatus, login, logout, openMore } from './helpers'
 

@@ -1,4 +1,4 @@
-// Phase 6: the app build, served from an origin of its own as a phone's
+// The app build, served from an origin of its own as a phone's
 // shell serves it, against a nuthatch server elsewhere: it asks for the
 // server, logs in for a token, and acts with it.
 import { expect, test } from '@playwright/test'
