@@ -14,7 +14,7 @@
 
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGroup, ManagedHost, ManagedService } from '@nuthatch/api'
 import type { Backend } from './backend.ts'
@@ -466,8 +466,16 @@ export class ConfigAdmin {
 
   constructor(backend: Backend, settings: ConfigSettings) {
     this.backend = backend
-    this.settings = { ...settings, dir: resolve(settings.dir), main: resolve(settings.main) }
-    mkdirSync(this.settings.dir, { recursive: true })
+    mkdirSync(resolve(settings.dir), { recursive: true })
+    // Without links: the engine's cfg_dir lines name the real directory.
+    const real = (path: string) => {
+      try {
+        return realpathSync(resolve(path))
+      } catch {
+        return resolve(path)
+      }
+    }
+    this.settings = { ...settings, dir: real(settings.dir), main: real(settings.main) }
   }
 
   private files(): Map<string, string> {

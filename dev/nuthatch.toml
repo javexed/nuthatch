@@ -20,7 +20,7 @@ days = 2
 
 # The agent binaries: checkd's scripts/build-agents.sh writes them.
 [agents]
-bin = "../checkd/dist/agent"
+bin = "dev/run/checkd/agent-bin"
 
 [roles]
 authorized_contactgroup_for_all_hosts = ["admins"]
@@ -52,7 +52,7 @@ push_url = "http://127.0.0.1:6560"
 [backend.config]
 dir = "dev/run/checkd/managed"
 main = "dev/run/checkd/naemon.cfg"
-verify = ["../checkd/target/debug/checkd", "verify", "--quiet", "{main}"]
+verify = ["dev/run/checkd/checkd", "verify", "--quiet", "{main}"]
 
 # checkd's agents (dev/up starts its workers listener).
 [backend.agents]

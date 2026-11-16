@@ -251,9 +251,10 @@ Node runs the TypeScript as it is; nothing is compiled to install it.
 
 The last two need `dev/up naemon` and `dev/up checkd` running, and so
 Docker and a clone of checkd beside this repository. CI runs the first
-line in a container (the workflow `ci.yml`), and the rest on a runner
-that runs jobs on its own machine, against the engines of dev/up there
-(the workflow `engines.yml`, label `desktop`): Naemon's container needs Docker
+line in a container on each push (the workflow `ci.yml`); the rest run
+when started by hand, on a runner that runs jobs on its own machine,
+against the engines of dev/up there (the workflow `engines.yml`, label
+`desktop`): Naemon's container needs Docker
 to bind-mount the demo site, which a job inside a container cannot
 give it.
 

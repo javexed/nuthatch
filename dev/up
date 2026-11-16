@@ -74,8 +74,14 @@ checkd)
     echo "\$USER1\$=$here/plugins" > "$run/resource.cfg"
     rm -f "$run/live"
     echo "checkd: Livestatus at $run/live"
-    # For dev/restart.
+    # For dev/restart, and the binary for checking configs: a checkout
+    # whose dev/run links here (as CI's does) uses this one.
     echo $$ > "$run/pid"
+    ln -sfn "$(realpath "$checkd")" "$run/checkd"
+    # The agents nuthatch installs, as checkd's scripts/build-agents.sh
+    # left them beside the binary's checkout.
+    agents=$(dirname "$(realpath "$checkd")")/../../dist/agent
+    [ -d "$agents" ] && ln -sfn "$(realpath "$agents")" "$run/agent-bin"
     # --http: where services that take pushes are told their results.
     exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" --http 127.0.0.1:6560 \
         --workers "$run/workers/workers.cfg" "$run/naemon.cfg"

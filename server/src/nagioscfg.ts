@@ -6,7 +6,7 @@
 // <type> {`, a directive and its value to a line, `}`; `#` starts a
 // comment line and `;` a comment anywhere.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 export interface Definition {
@@ -52,7 +52,15 @@ export class PathMap {
 
   /** `map`: engine path prefix → local path prefix. */
   constructor(map: Record<string, string> = {}) {
-    this.pairs = Object.entries(map).map(([engine, local]) => [engine.replace(/\/+$/, ''), resolve(local)])
+    // Without links, as the config admin's own paths are.
+    const real = (path: string) => {
+      try {
+        return realpathSync(resolve(path))
+      } catch {
+        return resolve(path)
+      }
+    }
+    this.pairs = Object.entries(map).map(([engine, local]) => [engine.replace(/\/+$/, ''), real(local)])
   }
 
   private move(path: string, from: 0 | 1): string {
