@@ -445,6 +445,13 @@ export interface AgentRow {
   os?: string
   /** Checks proposed from its inventory, not taken up or set aside yet. */
   proposals?: number
+  /** The version the agent says it is, and that of the agents nuthatch serves. */
+  version?: string
+  current?: string
+  /** It asks for updates (Linux, installed since updates came), and asked lately. */
+  updater?: boolean
+  /** An update is asked for and not done yet. */
+  updating?: boolean
   /** While waiting: when its command was made, when the host fetched the
    * installer (ms), and where the host fetches it from and finds the
    * engine (`address:port`); unknown after nuthatch restarted. */

@@ -130,3 +130,58 @@ test('over SSH with a key and its passphrase, sudo by its own password', async (
   inTarget('systemctl', 'disable', '--now', 'checkd-agent')
   inTarget('rm', '-f', '/home/admin/.ssh/authorized_keys')
 })
+
+test('an agent replaces itself when asked, as its own user', async ({ page }) => {
+  test.skip(!target(), 'needs dev/ssh-target')
+  test.skip(test.info().project.name !== 'desktop', 'one install is enough')
+  test.setTimeout(300_000)
+  await login(page, 'admin')
+  await page.goto('/host/checkd/lab2')
+  const agent = page.getByRole('region', { name: 'Agent of lab2' })
+  await agent.getByRole('button', { name: 'Install agent' }).click()
+  const form = agent.getByRole('form', { name: 'Over SSH' })
+  await form.getByLabel('SSH address').fill('127.0.0.1')
+  await form.getByLabel('Port').fill('2222')
+  await form.getByLabel('User').fill('admin')
+  await form.getByRole('button', { name: 'Look up host key' }).click()
+  await form.locator('input[name=ssh-password]').fill('admin-pass')
+  await form.getByRole('button', { name: 'Install' }).click()
+  const result = page.getByRole('region', { name: 'Install over SSH' })
+  await expect(result.getByRole('status')).toHaveText('Installed', { timeout: 90_000 })
+  await expect.poll(() => existsSync(join(agentsDir, 'lab2.token')), { timeout: 20_000 }).toBe(true)
+  // Its version, from its inventory.
+  await expect(agent).toContainText(/Agent · Debian.*GiB\s· \d+\.\d+\.\d+/, { timeout: 30_000 })
+
+  // The binary is the agent's user's, and differs now from what nuthatch serves.
+  const bin = '/var/lib/checkd-agent/bin/checkd-agent'
+  expect(inTarget('stat', '-c', '%U', bin).trim()).toBe('checkd-agent')
+  inTarget('sh', '-c', `cp ${bin} /tmp/older && printf x >> /tmp/older && install -o checkd-agent -m 755 /tmp/older ${bin} && systemctl restart checkd-agent`)
+  const served = readFileSync(join(here, '../../dev/run/checkd/agent-bin/SHA256SUMS'), 'utf8').match(/^([0-9a-f]{64}) +checkd-agent-linux-x86_64$/m)?.[1]
+  const have = () => inTarget('sha256sum', bin).split(' ')[0]
+  expect(have()).not.toBe(served)
+
+  // As Update on the page does; the page shows it only for an older version.
+  const { csrf } = (await (await page.request.get('/api/v1/session')).json()) as { csrf: string }
+  const asked = await page.request.post('/api/v1/agents/checkd/lab2/update', { headers: { 'X-Nuthatch-CSRF': csrf }, data: {} })
+  expect(asked.status()).toBe(200)
+  // It asks within a minute and a half of its start.
+  await expect.poll(have, { timeout: 150_000, intervals: [5000] }).toBe(served)
+  await expect.poll(() => inTarget('journalctl', '-u', 'checkd-agent', '--no-pager', '-n', '50'), { timeout: 30_000 }).toContain('Updated:')
+  // Started again by systemd, after its RestartSec.
+  const active = () => {
+    try {
+      return inTarget('systemctl', 'is-active', 'checkd-agent').trim()
+    } catch {
+      return 'not yet'
+    }
+  }
+  await expect.poll(active, { timeout: 30_000 }).toBe('active')
+  // And it connects again, as the new one.
+  await expect.poll(() => inTarget('journalctl', '-u', 'checkd-agent', '--no-pager', '-n', '5'), { timeout: 30_000 }).toMatch(/Updated:[\s\S]*Connected to/)
+  expect(inTarget('ps', '-o', 'user=', '-C', 'checkd-agent').trim()).toBe('checkd-agent')
+  expect(inTarget('stat', '-c', '%U', bin).trim()).toBe('checkd-agent')
+
+  page.once('dialog', (dialog) => void dialog.accept())
+  await agent.getByRole('button', { name: 'Remove' }).click()
+  await expect(agent.getByRole('button', { name: 'Install agent' })).toBeVisible()
+})

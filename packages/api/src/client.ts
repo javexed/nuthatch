@@ -180,6 +180,11 @@ export class Client {
     return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}/${encodeURIComponent(host)}/proposals`, { add, dismiss })
   }
 
+  /** Asks for a host's agent to be updated, at its next asking for updates. */
+  updateAgent(backend: string, host: string): Promise<Record<string, never>> {
+    return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}/${encodeURIComponent(host)}/update`, {})
+  }
+
   removeAgent(backend: string, host: string): Promise<Record<string, never>> {
     return this.call('DELETE', `/api/v1/agents/${encodeURIComponent(backend)}/${encodeURIComponent(host)}`)
   }

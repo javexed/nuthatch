@@ -1266,7 +1266,7 @@ describe('how a service takes pushes', () => {
 
 describe('agents', () => {
   const urlOf = (command: string) => /'(https?:\/\/[^']+)'/.exec(command)?.[1] ?? ''
-  function site(roles: Record<string, string[]>, agentBase: string | undefined = 'https://nuthatch.example.test', agentListen?: Parameters<typeof buildApp>[0]['agentListen'], engine = 'engine.example.test:4730') {
+  function site(roles: Record<string, string[]>, agentBase: string | undefined = 'https://nuthatch.example.test', agentListen?: Parameters<typeof buildApp>[0]['agentListen'], engine = 'engine.example.test:4730', agentUpdate = false) {
     const dir = mkdtempSync(join(tmpdir(), 'nuthatch-agents-'))
     mkdirSync(join(dir, 'agents'))
     mkdirSync(join(dir, 'bin'))
@@ -1287,7 +1287,7 @@ describe('agents', () => {
     const store = new Store(':memory:')
     const app = buildApp({
       backends: [backend], store, events: new Events([]), roles: new RolesConfig(roles), limiter: new Limiter(), cookieSecure: false, devUser: 'ops',
-      agents: new Map([['site', agents]]), agentBin: join(dir, 'bin'), agentBase, agentListen,
+      agents: new Map([['site', agents]]), agentBin: join(dir, 'bin'), agentBase, agentListen, agentUpdate,
     })
     const post = (body: unknown) => app.request('/api/v1/agents/site', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify(body) })
     return { dir, app, post, store, reloads: () => reloads }
@@ -1326,6 +1326,67 @@ describe('agents', () => {
     const [row] = ((await listed.json()) as { agents: Record<string, unknown>[] }).agents
     expect(row).toMatchObject({ host: 'web1', waiting: true, from: 'nuthatch.example.test', engine: 'engine.example.test:4730' })
     expect(row?.fetched).toBeGreaterThanOrEqual(Number(row?.made))
+  })
+
+  it('updates an agent when asked for, or always with update = "auto", and only for its own token', async () => {
+    const sum = createHash('sha256').update('ELF').digest('hex')
+    const old = createHash('sha256').update('older').digest('hex')
+    const setUp = (auto: boolean) => {
+      const s = site({ authorized_for_config_edit: ['ops'] }, undefined, undefined, undefined, auto)
+      writeFileSync(join(s.dir, 'agents', 'web1.token'), 'the-token\n')
+      writeFileSync(join(s.dir, 'agents', 'web1.inventory.json'), '{"agent":"0.1.0+aaaaaaa","version":1}')
+      writeFileSync(join(s.dir, 'bin', 'VERSION'), '0.1.0+bbbbbbb\n')
+      const ask = (have: string, token = 'the-token', arch = 'x86_64', host = 'web1') =>
+        s.app.request(`/agent/update/site/${host}?arch=${arch}&have=${have}`, token ? { headers: { authorization: `Bearer ${token}` } } : {})
+      const row = async () => ((await (await s.app.request('/api/v1/agents/site')).json()) as { agents: Record<string, unknown>[] }).agents[0]
+      return { ...s, ask, row }
+    }
+    const { app, ask, row, store } = setUp(false)
+    for (const wrong of [await ask(old, 'not-it'), await ask(old, ''), await ask(old, 'the-token', 'x86_64', 'win1')]) expect(wrong.status).toBe(404)
+    // Not asked for: nothing, though it is older; and now it is known to ask.
+    expect(await (await ask(old)).text()).toBe('none\n')
+    expect(await row()).toMatchObject({ host: 'web1', version: '0.1.0+aaaaaaa', current: '0.1.0+bbbbbbb', updater: true })
+    expect((await row())?.updating).toBeUndefined()
+    const asked = await app.request('/api/v1/agents/site/web1/update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: '{}' })
+    expect(asked.status).toBe(200)
+    expect(await row()).toMatchObject({ updating: true })
+    expect(await (await ask(old, 'the-token', 'mips')).text()).toBe('none\n')
+    expect(await (await ask(old)).text()).toBe(`update checkd-agent-linux-x86_64 ${sum}\n`)
+    // Until it has it.
+    expect(await (await ask(old)).text()).toBe(`update checkd-agent-linux-x86_64 ${sum}\n`)
+    expect(await (await ask(sum)).text()).toBe('none\n')
+    expect((await row())?.updating).toBeUndefined()
+    expect(store.auditTail(10).map((a) => a.action)).toEqual(expect.arrayContaining(['agent update asked', 'agent update fetched']))
+    const noAgent = await app.request('/api/v1/agents/site/win1/update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: '{}' })
+    expect(noAgent.status).toBe(400)
+    // Automatic: each older agent, without asking.
+    const auto = setUp(true)
+    expect(await (await auto.ask(old)).text()).toBe(`update checkd-agent-linux-x86_64 ${sum}\n`)
+    expect(await (await auto.ask(sum)).text()).toBe('none\n')
+    // nuthatch's own listener lets the asking through, and nothing else new.
+    const reached: string[] = []
+    const only = hostsOnly((request) => {
+      reached.push(new URL(request.url).pathname)
+      return new Response('ok')
+    })
+    for (const path of ['/agent/update/site/web1', '/agent/update/site/web1/x', '/agent/update/site']) await only(new Request(`https://h${path}?arch=x86_64`))
+    expect(reached).toEqual(['/agent/update/site/web1'])
+  })
+
+  it('installs on Linux an agent that replaces itself: its binary its own, no root after the install', async () => {
+    const { app, post } = site({ authorized_for_config_edit: ['ops'] }, undefined, { port: 4731, addresses: ['192.0.2.7'], pin: { key: Buffer.alloc(32, 0xab).toString('base64'), cert: 'C' } }, ':4730')
+    const { command } = (await (await post({ host: 'web1', os: 'linux' })).json()) as { command: string }
+    const text = await (await app.request(new URL(urlOf(command)).pathname)).text()
+    expect(text).toContain(`--update-from https://192.0.2.7:4731/agent/update/site/web1 --update-pin ${'ab'.repeat(32)}`)
+    expect(text).toContain('ExecStart=/var/lib/checkd-agent/bin/checkd-agent ')
+    expect(text).toContain('chown checkd-agent "$bin"')
+    expect(text).not.toContain('checkd-agent-update')
+    // Without a pin (a public certificate): no --update-pin.
+    const plain = site({ authorized_for_config_edit: ['ops'] })
+    const made = (await (await plain.post({ host: 'web1', os: 'linux' })).json()) as { command: string }
+    const script = await (await plain.app.request(new URL(urlOf(made.command)).pathname)).text()
+    expect(script).toContain('--update-from https://nuthatch.example.test/agent/update/site/web1')
+    expect(script).not.toContain('--update-pin')
   })
 
   it('writes a PowerShell script for Windows', async () => {

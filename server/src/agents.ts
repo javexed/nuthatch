@@ -7,7 +7,7 @@
 // An install command carries a short-lived code, not the token: the code
 // fetches a script with the token in it, once, within a quarter of an hour.
 
-import { X509Certificate, createHash, randomBytes } from 'node:crypto'
+import { X509Certificate, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { chmodSync, existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend } from './backend.ts'
@@ -41,7 +41,20 @@ export interface AgentRow {
   fetched?: number
   from?: string
   engine?: string
+  /** The version the agent says it is, from its inventory. */
+  version?: string
+  /** The version of the agents nuthatch serves (their VERSION file). */
+  current?: string
+  /** It asks for updates, and asked lately (Linux, installed since updates came). */
+  updater?: boolean
+  /** An update is asked for, and not done yet. */
+  updating?: boolean
 }
+
+/** How often an agent asks for updates (checkd's update.rs), and how long
+ * after its last asking it still counts as asking. */
+export const ASKS_EVERY = 5 * 60_000
+const ASKS_GONE = 3 * ASKS_EVERY
 
 /** A new token not used within this long is taken back. */
 const WAIT_FOR = 60 * 60_000
@@ -119,6 +132,10 @@ export class Agents {
   private issued = new Map<string, { from: string; engine: string; fetched?: number }>()
   /** checkd refused /metrics: said once, until it answers again. */
   private refused = false
+  /** Hosts whose agent is to be updated at its next asking for updates. In memory. */
+  private wanted = new Set<string>()
+  /** When each host's agent last asked for updates (ms). In memory. */
+  private asked = new Map<string, number>()
 
   /** An install command was made: where the host is to fetch and connect. */
   noteIssued(host: string, from: string, engine: string): void {
@@ -147,6 +164,52 @@ export class Agents {
     } catch {
       return undefined
     }
+  }
+
+  /** The version a host's agent says it is, from its inventory; absent
+   * from agents older than that. */
+  version(host: string): string | undefined {
+    const found = this.inventoryFile(host)
+    if (!found) return undefined
+    try {
+      const agent: unknown = (JSON.parse(found.text) as Record<string, unknown>).agent
+      return typeof agent === 'string' && /^[A-Za-z0-9._+-]{1,64}$/.test(agent) ? agent : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Whether `given` is the token of the host's agent in use. */
+  tokenOf(host: string, given: string): boolean {
+    if (!agentName(host) || !this.hosts().includes(host)) return false
+    let token: string
+    try {
+      token = readFileSync(join(this.settings.dir, `${host}.token`), 'utf8').trim()
+    } catch {
+      return false
+    }
+    const [a, b] = [Buffer.from(token), Buffer.from(given)]
+    return token !== '' && a.length === b.length && timingSafeEqual(a, b)
+  }
+
+  /** Asks for a host's agent to be updated, at its next asking for updates. */
+  askUpdate(host: string): void {
+    if (!this.hosts().includes(host)) throw new Refused(`no agent of '${host}'`)
+    this.wanted.add(host)
+  }
+
+  /** A host's agent asks, with its token checked already: the binary to
+   * put in place, if it is to be replaced. It is when the agents served
+   * differ from what it has, and updates are automatic or one was asked
+   * for. */
+  update(host: string, served: { file: string; sum: string } | undefined, have: string, auto: boolean, now = Date.now()): { file: string; sum: string } | undefined {
+    this.asked.set(host, now)
+    if (!served) return undefined
+    if (served.sum === have) {
+      this.wanted.delete(host)
+      return undefined
+    }
+    return auto || this.wanted.has(host) ? served : undefined
   }
 
   /** Tells of inventories new since the last look, of agents in use only:
@@ -188,7 +251,20 @@ export class Agents {
     const pools = await this.pools()
     const known = this.hosts()
     const waiting = this.files('.new').filter((h) => !known.includes(h))
-    const rows: AgentRow[] = [...known.map((host) => ({ host })), ...waiting.map((host) => ({ host, waiting: true, ...this.progress(host) }))]
+    const now = Date.now()
+    const rows: AgentRow[] = [
+      ...known.map((host) => {
+        const version = this.version(host)
+        const asked = this.asked.get(host)
+        return {
+          host,
+          ...(version ? { version } : {}),
+          ...(asked !== undefined && now - asked < ASKS_GONE ? { updater: true } : {}),
+          ...(this.wanted.has(host) ? { updating: true } : {}),
+        }
+      }),
+      ...waiting.map((host) => ({ host, waiting: true, ...this.progress(host) })),
+    ]
     rows.sort((a, b) => a.host.localeCompare(b.host))
     return rows.map((row) => (pools ? { ...row, connected: (pools.get(`host_${row.host}`) ?? 0) + (pools.get(`waiting_${row.host}`) ?? 0) > 0 } : row))
   }
@@ -283,6 +359,8 @@ export class Agents {
     }
     this.told.delete(host)
     this.issued.delete(host)
+    this.wanted.delete(host)
+    this.asked.delete(host)
     if (inUse) await this.reload()
     return found
   }
@@ -326,6 +404,22 @@ export function binaries(dir: string): Map<string, string> {
     // None.
   }
   return sums
+}
+
+/** The version of the agent binaries nuthatch serves: their VERSION file
+ * (checkd's scripts/build-agents.sh). */
+export function binariesVersion(dir: string): string | undefined {
+  try {
+    const text = readFileSync(join(dir, 'VERSION'), 'utf8').trim()
+    return /^[A-Za-z0-9._+-]{1,64}$/.test(text) ? text : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The Linux binary for a machine as the agent names it (Rust's ARCH, as `uname -m`). */
+export function linuxBinary(arch: string): string | undefined {
+  return arch === 'x86_64' ? 'checkd-agent-linux-x86_64' : arch === 'aarch64' ? 'checkd-agent-linux-aarch64' : undefined
 }
 
 interface ScriptFacts {
@@ -373,6 +467,9 @@ export function linuxScript({ install, settings, ca, sums }: ScriptFacts): strin
     // checkd's own checks need no program; plugins only from these places.
     ...(install.plugins ? ['--restrict-path', '/usr/lib/nagios/plugins', '--restrict-path', '/usr/lib64/nagios/plugins'] : []),
     '--restrict-path', '/usr/local/lib/checkd-agent',
+    // It asks nuthatch for updates, and replaces itself (docs/agents.md).
+    '--update-from', `${base}/agent/update/${encodeURIComponent(install.backend)}/${install.host}`,
+    ...(pin ? ['--update-pin', Buffer.from(pin.key, 'base64').toString('hex')] : []),
   ]
   return `#!/bin/sh
 # checkd-agent for ${install.host}, from nuthatch.
@@ -406,13 +503,20 @@ else packages nagios-plugins-all || packages monitoring-plugins
 fi
 ` : ''}
 mkdir -p -m 755 /usr/local/lib/checkd-agent
+id checkd-agent >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin checkd-agent 2>/dev/null || adduser -S -H -s /sbin/nologin checkd-agent
+# The binary, in a directory of the agent's own user, which replaces it
+# with what nuthatch gives when it is updated: no root needed then.
+bin=/var/lib/checkd-agent/bin
+mkdir -p -m 755 /var/lib/checkd-agent "$bin"
+chown checkd-agent "$bin"
+chmod 755 "$bin"
 umask 077
 mkdir -p /etc/checkd-agent
-fetch "$url" /usr/local/bin/checkd-agent.new
-echo "$sum  /usr/local/bin/checkd-agent.new" | sha256sum -c - >/dev/null || { echo "The download does not match its checksum" >&2; rm -f /usr/local/bin/checkd-agent.new; exit 1; }
-chmod 755 /usr/local/bin/checkd-agent.new
-mv /usr/local/bin/checkd-agent.new /usr/local/bin/checkd-agent
-id checkd-agent >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin checkd-agent 2>/dev/null || adduser -S -H -s /sbin/nologin checkd-agent
+fetch "$url" "$bin/checkd-agent.new"
+echo "$sum  $bin/checkd-agent.new" | sha256sum -c - >/dev/null || { echo "The download does not match its checksum" >&2; rm -f "$bin/checkd-agent.new"; exit 1; }
+chmod 755 "$bin/checkd-agent.new"
+chown checkd-agent "$bin/checkd-agent.new"
+mv "$bin/checkd-agent.new" "$bin/checkd-agent"
 printf '%s\\n' ${sh(install.token)} > /etc/checkd-agent/token
 cat > /etc/checkd-agent/ca.crt <<'CHECKD_AGENT_CA'
 ${ca.trim()}
@@ -430,7 +534,7 @@ Wants=network-online.target
 
 [Service]
 User=checkd-agent
-ExecStart=/usr/local/bin/checkd-agent ${args.map((a) => (/^[A-Za-z0-9_./:@=-]+$/.test(a) ? a : `"${a.replace(/(["\\])/g, '\\$1')}"`)).join(' ')}
+ExecStart=/var/lib/checkd-agent/bin/checkd-agent ${args.map((a) => (/^[A-Za-z0-9_./:@=-]+$/.test(a) ? a : `"${a.replace(/(["\\])/g, '\\$1')}"`)).join(' ')}
 Restart=always
 RestartSec=5
 
@@ -440,6 +544,8 @@ CHECKD_AGENT_UNIT
 systemctl daemon-reload
 systemctl enable checkd-agent >/dev/null 2>&1
 systemctl restart checkd-agent
+# Where the agent was before it could replace itself.
+rm -f /usr/local/bin/checkd-agent
 echo "checkd-agent runs for ${install.host}"
 ${install.nrpe ? nrpeLinux(engineHost(engine)) : ''}
 }

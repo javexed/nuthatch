@@ -48,10 +48,13 @@ let timer: ReturnType<typeof setTimeout> | undefined
 function next() {
   clearTimeout(timer)
   const soon = installing.value || agent.value?.waiting || (agent.value && !inventory.value)
+  // Not connected: just taken on (checkd reloads, and the agent comes back
+  // within seconds), or gone; either way, said soon when that changes.
+  const away = agent.value?.connected === false
   timer = setTimeout(async () => {
     await load()
     next()
-  }, soon ? 2000 : 30000)
+  }, soon ? 2000 : away ? 5000 : 30000)
 }
 onMounted(async () => {
   await load()
@@ -96,6 +99,22 @@ async function decide(add: string[], dismiss: string[]) {
   }
 }
 
+/** Older than the agents nuthatch serves (or too old to say). */
+const outdated = computed(() => !!agent.value?.current && agent.value.version !== agent.value.current)
+
+async function update() {
+  busy.value = true
+  error.value = ''
+  try {
+    await api.updateAgent(props.backend, props.host)
+    await load()
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Server unreachable'
+  } finally {
+    busy.value = false
+  }
+}
+
 async function remove() {
   if (!confirm(`Remove the agent of ${props.host}?`)) return
   try {
@@ -124,6 +143,11 @@ async function remove() {
           <span v-if="inventory" class="by">
             · {{ inventory.inventory.os.name || inventory.inventory.os.family }} · {{ inventory.inventory.cpus }} CPU · {{ gib(inventory.inventory.memory) }}
           </span>
+          <span v-if="agent.version" class="by">&nbsp;· {{ agent.version }}</span>
+          <template v-if="outdated">
+            <button v-if="agent.updater" type="button" class="quiet" :disabled="busy || agent.updating" @click="update">{{ agent.updating ? 'Updating…' : `Update to ${agent.current}` }}</button>
+            <span v-else class="warning-text">Older than {{ agent.current }}: install again to update</span>
+          </template>
           <button type="button" class="plain" @click="remove">Remove</button>
         </p>
         <p v-if="!inventory" class="by" role="status">Waiting for its inventory</p>

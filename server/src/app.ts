@@ -12,7 +12,7 @@ import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
-import { type Agents, InstallCodes, type Pin, agentName, binaries, engineOf, installCommand, linuxScript, sshCommand, windowsScript } from './agents.ts'
+import { type Agents, InstallCodes, type Pin, agentName, binaries, binariesVersion, engineOf, installCommand, linuxBinary, linuxScript, sshCommand, windowsScript } from './agents.ts'
 import { nearestFirst, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
 import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
 import type { Backend } from './backend.ts'
@@ -87,6 +87,8 @@ export interface Deps {
   agentBin?: string
   /** This nuthatch's address as monitored hosts reach it; else the request's. */
   agentBase?: string
+  /** `[agents] update = "auto"`: agents are updated without asking. */
+  agentUpdate?: boolean
   /** nuthatch's own TLS listener for hosts: its port, the addresses hosts
    * reach this machine at, and its certificate's pins. */
   agentListen?: { port: number; addresses: string[]; pin: Pin }
@@ -1052,7 +1054,8 @@ export function buildApp(deps: Deps): Hono<Env> {
   async function rowOf(agents: Agents, row: AgentRow): Promise<AgentRow> {
     const backend = agents.backend.name
     const kept = deps.setup ? await deps.setup.view(backend, row.host).catch(() => null) : null
-    return { ...row, ...(kept ? { os: kept.inventory.os.name || kept.inventory.os.family, proposals: kept.proposals.length } : {}) }
+    const current = deps.agentBin ? binariesVersion(deps.agentBin) : undefined
+    return { ...row, ...(kept ? { os: kept.inventory.os.name || kept.inventory.os.family, proposals: kept.proposals.length } : {}), ...(current && !row.waiting ? { current } : {}) }
   }
 
   /** The ports a host's agent comes in at, on this machine: nuthatch's
@@ -1251,6 +1254,16 @@ export function buildApp(deps: Deps): Hono<Env> {
     return c.json({ done: job.done, ok: job.ok, output: job.output })
   })
 
+  // An update of a host's agent, at its next asking for updates.
+  app.post('/api/v1/agents/:backend/:host/update', async (c) => {
+    const { agents, user } = await agentsOf(c)
+    const host = c.req.param('host')
+    if (!agentName(host)) throw new Refused('a host name of letters, digits, ., - and _')
+    agents.askUpdate(host)
+    deps.store.audit(user, agents.backend.name, 'agent update asked', host)
+    return c.json({})
+  })
+
   app.delete('/api/v1/agents/:backend/:host', async (c) => {
     const { agents, user } = await agentsOf(c)
     const host = c.req.param('host')
@@ -1274,6 +1287,24 @@ export function buildApp(deps: Deps): Hono<Env> {
     deps.store.audit('', install.backend, 'agent install fetched', `${install.host} from ${address(c)}`)
     agents.noteFetched(install.host)
     return c.text(install.os === 'linux' ? linuxScript(facts) : windowsScript(facts), 200, { 'Cache-Control': 'no-store' })
+  })
+
+  // A host's agent asks whether it is to be replaced: with the
+  // host's token, the machine and the checksum of the binary it has. The
+  // answer is `update <file> <sha256>` or `none`.
+  app.get('/agent/update/:backend/:host', (c) => {
+    const host = c.req.param('host')
+    const agents = deps.agents?.get(c.req.param('backend'))
+    const token = /^Bearer (\S+)$/.exec(c.req.header('authorization') ?? '')?.[1] ?? ''
+    if (!agents || !agents.tokenOf(host, token)) return c.text('not found\n', 404)
+    const have = c.req.query('have') ?? ''
+    const file = linuxBinary(c.req.query('arch') ?? '')
+    const sum = file && deps.agentBin ? binaries(deps.agentBin).get(file) : undefined
+    const served = file && sum ? { file, sum } : undefined
+    const update = agents.update(host, served, have, deps.agentUpdate === true)
+    if (!update) return c.text('none\n', 200, { 'Cache-Control': 'no-store' })
+    deps.store.audit('', agents.backend.name, 'agent update fetched', `${host} from ${address(c)}`)
+    return c.text(`update ${update.file} ${update.sum}\n`, 200, { 'Cache-Control': 'no-store' })
   })
 
   app.get('/agent/bin/:file', async (c) => {
@@ -1323,7 +1354,8 @@ export function buildApp(deps: Deps): Hono<Env> {
 export function hostsOnly(fetch: (request: Request, env?: unknown) => Response | Promise<Response>) {
   return (request: Request, env?: unknown): Response | Promise<Response> => {
     const { pathname } = new URL(request.url)
-    const wanted = (request.method === 'GET' || request.method === 'HEAD') && /^\/agent\/(install|bin)\/[A-Za-z0-9._-]+$/.test(pathname)
+    const wanted =
+      (request.method === 'GET' || request.method === 'HEAD') && (/^\/agent\/(install|bin)\/[A-Za-z0-9._-]+$/.test(pathname) || /^\/agent\/update\/[A-Za-z0-9._%-]+\/[A-Za-z0-9._-]+$/.test(pathname))
     return wanted ? fetch(request, env) : new Response('not found\n', { status: 404 })
   }
 }

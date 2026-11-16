@@ -217,11 +217,14 @@ function main(): void {
   // [agents]: where the agent binaries are, and this nuthatch's address as hosts reach it.
   let agentBin: string | undefined
   let agentBase: string | undefined
+  let agentUpdate = false
   // Hosts-only listener: TLS with cert and key, or plain HTTP on loopback
   // for a proxy or tunnel in front (then url is what hosts reach).
   let agentListen: { hostname: string; port: number; addresses: string[]; pin?: Pin; cert?: string; key?: string } | undefined
   if (config.agents !== undefined) {
-    const { bin, url, listen: hostsListen, cert, key, addresses } = table(`${path}: [agents]`, config.agents, ['bin', 'url', 'listen', 'cert', 'key', 'addresses'])
+    const { bin, url, listen: hostsListen, cert, key, addresses, update } = table(`${path}: [agents]`, config.agents, ['bin', 'url', 'listen', 'cert', 'key', 'addresses', 'update'])
+    if (update !== undefined && update !== 'auto' && update !== 'off') fail(`${path}: [agents] update is "auto" or "off"`)
+    agentUpdate = update === 'auto'
     if (typeof bin !== 'string') fail(`${path}: [agents] bin is the directory of checkd's dist/agent`)
     if (!existsSync(join(bin, 'SHA256SUMS'))) console.error(`warning: [agents] bin: no ${join(bin, 'SHA256SUMS')} yet (checkd's scripts/build-agents.sh)`)
     agentBin = bin
@@ -343,6 +346,7 @@ function main(): void {
     agents,
     agentBin,
     agentBase,
+    agentUpdate,
     agentListen: agentListen?.pin && { port: agentListen.port, addresses: agentListen.addresses, pin: agentListen.pin },
     remotes,
     peers,

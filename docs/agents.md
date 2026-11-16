@@ -113,6 +113,40 @@ Windows machine.
 the agent is shut out and the host's checks go back to where they ran.
 It stays installed on the host.
 
+## Updates
+
+The host's page shows the version of its agent, and when that is older
+than the agents nuthatch serves (the `VERSION` file that checkd's
+`scripts/build-agents.sh` writes beside them), **Update to …**.
+
+On Linux the agent replaces itself. Every five minutes it asks nuthatch,
+with its token, whether it is to be replaced. nuthatch says yes when the
+binary it serves differs from the one the host has, and either **Update**
+was pressed for that host or
+
+    [agents]
+    update = "auto"     # "off" (the default): only when asked for
+
+Then the agent fetches the binary from nuthatch, by the same pin as the
+installer, checks it against the checksum nuthatch gave, runs it once
+(`--version`), puts it in place of its own and ends, and systemd starts
+the new one. So an update takes up to five minutes after **Update** is
+pressed. The audit log has who asked and when each host fetched it.
+
+- No root after the install: the binary is in `/var/lib/checkd-agent/bin`,
+  which belongs to the agent's user `checkd-agent`. The other side of
+  that: whoever takes over that user can change the agent, and so keep
+  their hold across restarts; still only as that user.
+- With `update = "auto"`, whoever can change the binaries in `[agents]
+  bin` on this machine can change every agent within five minutes. The
+  binaries are checked against `SHA256SUMS` beside them, which is no
+  defence against that. Signed binaries are not done yet.
+- A new agent that runs `--version` but then fails is not put back: the
+  host shows its agent not connected, and installing again mends it.
+- An agent installed before updates came does not ask: the page says to
+  install it again, once.
+- Windows: agents do not update themselves yet; install again.
+
 ## When an agent does not connect
 
 Almost always, the host cannot reach this machine: a firewall here or on
@@ -172,8 +206,8 @@ certificate. Pick one setup:
 | Let's Encrypt, certificate files | own listener with the files | open or forwarded |
 | Cloudflare Tunnel | own listener on loopback, tunnel in front | `wss://` through the tunnel |
 
-nuthatch's own listener (`[agents] listen`) answers `/agent/install/`
-and `/agent/bin/` only, never the interface.
+nuthatch's own listener (`[agents] listen`) answers `/agent/install/`,
+`/agent/bin/` and `/agent/update/` only, never the interface.
 
 **VPN.** nuthatch as a whole at an `https` address on the VPN, for
 example `tailscale serve`:
