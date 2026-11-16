@@ -1,7 +1,8 @@
-# Installing beside an existing Naemon
+# Installing
 
-For a Naemon that runs as a system service with Livestatus (the Consol
-packages, or a build with the Livestatus module), on the same machine.
+Beside an engine on the same machine: a Naemon that runs as a system
+service with Livestatus (the Consol packages, or a build with the
+Livestatus module), or checkd ([beside checkd](#beside-checkd)).
 The paths are those of the Naemon packages; change them where yours
 differ.
 
@@ -88,6 +89,55 @@ and a host template and a service template in Naemon's config
 
 The unit keeps `/etc` read-only but for `/etc/naemon/conf.d`
 (`ReadWritePaths`); with another `dir`, change that line.
+
+## Beside checkd
+
+The same steps, with checkd installed as its install notes say
+(checkd's `docs/install.md`): the user and group `checkd`, the config in
+`/etc/checkd`, the Livestatus socket at `/run/checkd/live`. What differs:
+
+- The group is `checkd`, not `naemon`. checkd makes its socket and
+  command file `0660` for that group, and `/run/checkd` is the group's
+  only:
+
+      sudo usermod -aG checkd nuthatch
+
+- The backend:
+
+      [[backend]]
+      name = "checkd"
+      livestatus = "unix:/run/checkd/live"
+
+- For the Config page, checkd checks the copy, and the directory is
+  under `/etc/checkd`:
+
+      [backend.config]
+      dir = "/etc/checkd/conf.d/nuthatch"
+      main = "/etc/checkd/naemon.cfg"
+      verify = ["checkd", "verify", "--quiet", "{main}"]
+
+      sudo mkdir -p /etc/checkd/conf.d/nuthatch
+      sudo chown nuthatch:checkd /etc/checkd/conf.d/nuthatch
+      sudo chgrp checkd /etc/checkd/conf.d && sudo chmod g+w /etc/checkd/conf.d
+      echo 'cfg_dir=/etc/checkd/conf.d/nuthatch' | sudo tee -a /etc/checkd/naemon.cfg
+
+  checkd takes `RESTART_PROGRAM` through the socket as Naemon does, and
+  reads its config again only when it can be used.
+
+- The unit: `ReadWritePaths=-/etc/checkd/conf.d` in place of
+  `/etc/naemon/conf.d` (`sudo systemctl edit nuthatch`, or in the copied
+  unit).
+
+- What only checkd has, each optional:
+  - services whose results are pushed over HTTP: start checkd with
+    `--http 127.0.0.1:6559`
+    (`systemctl edit checkd`: an empty `ExecStart=`, then the unit's
+    line with `--http 127.0.0.1:6559` added) and give the backend
+    `push_url = "http://127.0.0.1:6559"`; with `CHECKD_HTTP_TOKEN` set
+    for checkd, `http_token_file` names the file that holds it
+    ([config](config.md));
+  - agents on other hosts: `[agents]` and `[backend.agents]`
+    ([agents](agents.md)).
 
 ## A proxy in front
 
