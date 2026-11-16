@@ -1,5 +1,5 @@
 # Types, unit tests and the build. The tests that need the engines
-# (dev/matrix and the browser tests) are run by hand for now.
+# (dev/matrix and the browser tests) are run by hand: see README, Tests.
 name: check
 on: [push, pull_request]
 permissions:

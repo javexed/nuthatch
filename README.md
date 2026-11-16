@@ -95,8 +95,9 @@ Everything is TypeScript, in one pnpm workspace:
 Node 22.18 or later, pnpm, and Docker for the demo site on Naemon.
 
     dev/up naemon            # in one terminal: the demo site on Naemon, in a container
-    dev/up checkd            # in another: the same on checkd (built from a checkout
-                             # of checkd beside this one, or $CHECKD)
+    dev/up checkd            # in another: the same on checkd, built from a clone of
+                             # checkd's repository beside this one (../checkd, needs
+                             # Rust), or CHECKD=/path/to/checkd
     dev/users                # users admin, ops, viewer, nobody, stranger; password nuthatch-dev
     pnpm install && pnpm build
     pnpm start dev/nuthatch.toml
@@ -248,7 +249,12 @@ Node runs the TypeScript as it is; nothing is compiled to install it.
                                # user sees is compared with what the engines
                                # give that user, and every action is done on both
 
-The last two need `dev/up naemon` and `dev/up checkd` running.
+The last two need `dev/up naemon` and `dev/up checkd` running, and so
+Docker and a clone of checkd beside this repository. CI runs the first
+line only: the engines' tests need Docker to bind-mount the demo site
+into Naemon's container, which a CI job inside a container cannot give
+it, and running them on the runner's own machine would run every pushed
+commit there.
 
 ## Licence
 

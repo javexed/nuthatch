@@ -56,6 +56,12 @@ naemon)
 checkd)
     checkd=${CHECKD:-$here/../../checkd/target/debug/checkd}
     if [ -z "${CHECKD:-}" ]; then
+        if [ ! -f "$here/../../checkd/Cargo.toml" ]; then
+            echo "dev/up checkd: no checkd beside nuthatch. Clone checkd's repository next to this one" >&2
+            echo "(so that ../checkd is its checkout; Rust 1.88 or later builds it), or give" >&2
+            echo "CHECKD=/path/to/a/checkd built with --features workers." >&2
+            exit 2
+        fi
         (cd "$here/../../checkd" && cargo build --quiet -p checkd --features workers)
     fi
     # Agents (docs/agents.md): a workers listener on this machine, with
