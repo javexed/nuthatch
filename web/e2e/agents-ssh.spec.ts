@@ -3,12 +3,12 @@
 // sudo takes the same password, the agent joins checkd, and its token
 // becomes the host's.
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { fits, login } from './helpers'
+import { fits, livestatus, login, send } from './helpers'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const agentsDir = join(here, '../../dev/run/checkd/workers/agents')
@@ -20,6 +20,38 @@ const target = () => {
   }
 }
 const inTarget = (...command: string[]) => execFileSync('docker', ['exec', 'nuthatch-ssh-target', ...command], { encoding: 'utf8' })
+
+/**
+ * No agent of lab2 before a test or after one, passed or failed: one left
+ * running, or a token left in checkd's agents directory, would make the
+ * next run start from an agent that is already there.
+ */
+async function reset() {
+  if (!target()) return
+  try {
+    inTarget('systemctl', 'disable', '--now', 'checkd-agent')
+  } catch {
+    // Never installed.
+  }
+  inTarget('rm', '-f', '/home/admin/.ssh/authorized_keys')
+  const tokens = ['lab2.token', 'lab2.new'].map((name) => join(agentsDir, name)).filter((path) => existsSync(path))
+  if (tokens.length === 0) return
+  for (const path of tokens) rmSync(path, { force: true })
+  // checkd forgets the agent when it reads its configuration again.
+  const before = (await livestatus('checkd', 'GET status\nColumns: program_start'))[0]?.[0] as number
+  await send('checkd', 'RESTART_PROGRAM')
+  await expect
+    .poll(async () => ((await livestatus('checkd', 'GET status\nColumns: program_start').catch(() => []))[0]?.[0] as number) ?? 0, { timeout: 30_000 })
+    .toBeGreaterThan(before)
+}
+
+// The tests run on the desktop project only.
+test.beforeEach(async ({ page: _ }, info) => {
+  if (info.project.name === 'desktop') await reset()
+})
+test.afterEach(async ({ page: _ }, info) => {
+  if (info.project.name === 'desktop') await reset()
+})
 
 test('an agent installed over SSH, with a password for that run alone', async ({ page }) => {
   test.skip(!target(), 'needs dev/ssh-target')
