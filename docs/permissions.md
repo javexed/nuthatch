@@ -61,7 +61,7 @@ nothing.
   backend, and every minute, nuthatch asks for the hosts as a user that
   cannot exist. An engine that shows that user any host does not enforce
   `AuthUser`: nuthatch then keeps it closed to everyone but users with
-  `all_hosts`, and says so. checkd is such an engine today.
+  `all_hosts`, and says so. Naemon and checkd both enforce it.
 - **Changes.** A browser session's requests that change something must
   carry the session's CSRF value in a header. API tokens need none; a
   token is made by a user who logged in with a password and stands for
@@ -69,16 +69,20 @@ nothing.
 - **Live updates** carry no data, only "something changed on backend X";
   the browser then asks again through the queries.
 - **Logins.** Five failures in five minutes for a user name or from an
-  address, then that name or address waits.
+  address, then that name or address waits. Behind `tailscale serve`,
+  listed tailnet logins come in without a password (README).
 
 ## Tested
 
-`dev/matrix` logs in as five kinds of user and tries every table and a set
-of commands on each engine, and changes the config: about 290 checks.
+`dev/matrix` logs in as five kinds of user and tries every table (17) and
+every command (26) on each engine, on what each user sees and on what they
+do not, and changes the config: about 800 checks, and as many again
+through a central nuthatch (`--federated`).
 
 ## Not done
 
-- A user header set by a proxy (single sign-on).
+- A user header set by any proxy other than `tailscale serve` (single
+  sign-on).
 - Naemon's Livestatus options `service_authorization` and
   `group_authorization` change what a contact sees; nuthatch follows
   whatever the engine is set to. Only the defaults were tried.

@@ -5,7 +5,7 @@
 
 Needs `dev/up naemon` and `dev/up checkd` running. Starts a nuthatch of its
 own (port 8091, a store of its own), logs in as each user of the demo site
-and tries every table and a set of commands on each engine, then compares
+and tries every table and every command on each engine, then compares
 with what must happen:
 
   admin     all roles
@@ -34,6 +34,10 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# What nuthatch serves (server/src/policy.ts TABLES) and sends
+# (server/src/commands.ts): the matrix tries each one.
+TABLES = ["hosts", "services", "hostgroups", "servicegroups", "hostsbygroup", "servicesbygroup", "servicesbyhostgroup", "comments",
+          "downtimes", "log", "statehist", "contacts", "contactgroups", "commands", "timeperiods", "status", "columns"]
 ROOT = os.path.dirname(HERE)
 PORT = 8091
 BASE = f"http://127.0.0.1:{PORT}"
@@ -258,20 +262,31 @@ def tests():
 
         # user -> rows of each table. A number is a count of rows, 403 a
         # refusal for want of a role.
-        full = {"hosts": 11, "services": 36, "hostgroups": 7, "hostsbygroup": 11, "comments": "some", "log": "some", "columns": "some"}
+        # The demo site has no service groups and, here, no downtimes: those
+        # tables are asked all the same, for a refusal that must not come;
+        # downtimes are tried with some below.
+        full = {"hosts": 11, "services": 36, "hostgroups": 7, "servicegroups": 0, "hostsbygroup": 11, "servicesbygroup": 0,
+                "servicesbyhostgroup": 36, "comments": "some", "downtimes": 0, "log": "some", "statehist": "some", "columns": "some"}
         want = {
             "admin": {**full, "contacts": 4, "contactgroups": 1, "commands": 2, "timeperiods": 1, "status": 1},
             "viewer": {**full, "contacts": 403, "contactgroups": 403, "commands": 403, "timeperiods": 403, "status": 403},
-            "ops": {"hosts": 2, "services": 9, "hostgroups": 1, "hostsbygroup": 2, "comments": 1, "log": "some", "columns": "some",
+            "ops": {"hosts": 2, "services": 9, "hostgroups": 1, "servicegroups": 0, "hostsbygroup": 2, "servicesbygroup": 0,
+                    "servicesbyhostgroup": 9, "comments": 1, "downtimes": 0, "log": "some", "statehist": "some", "columns": "some",
                     "contacts": 403, "contactgroups": 403, "commands": 403, "timeperiods": 403, "status": 403},
         }
         for user in ("nobody", "stranger"):
-            want[user] = {**want["ops"], "hosts": 0, "services": 0, "hostgroups": 0, "hostsbygroup": 0, "comments": 0, "log": 0}
-        column = {"hosts": "name", "services": "description", "hostgroups": "name", "hostsbygroup": "name", "comments": "id", "log": "time",
-                  "columns": "name", "contacts": "name", "contactgroups": "name", "commands": "name", "timeperiods": "name", "status": "program_start"}
+            want[user] = {**want["ops"], "hosts": 0, "services": 0, "hostgroups": 0, "hostsbygroup": 0, "servicesbyhostgroup": 0,
+                          "comments": 0, "log": 0, "statehist": 0}
+        column = {"hosts": "name", "services": "description", "hostgroups": "name", "servicegroups": "name", "hostsbygroup": "name",
+                  "servicesbygroup": "description", "servicesbyhostgroup": "description", "comments": "id", "downtimes": "id", "log": "time",
+                  "statehist": "host_name", "columns": "name", "contacts": "name", "contactgroups": "name", "commands": "name",
+                  "timeperiods": "name", "status": "program_start"}
+        # The state history wants the start of its time.
+        extra = {"statehist": [f"Filter: time >= {int(time.time()) - 3600}"]}
+        check(f"{backend}: every table nuthatch serves is tried", sorted(column), sorted(TABLES))
         for user in USERS:
             for table, expected in want[user].items():
-                got = clients[user].rows(backend, table, [column[table]])
+                got = clients[user].rows(backend, table, [column[table]], extra.get(table, ()))
                 limited_user = user in ("ops", "nobody", "stranger")
                 if closed and limited_user and expected != 403 and table != "columns":
                     expected = "closed"
@@ -284,28 +299,81 @@ def tests():
         got = "closed" if body.get("errors") else body["groups"][0]["values"][0]
         check(f"{backend}: ops' totals count the same services", got, "closed" if closed else 9.0)
 
-        # user -> status of each command.
-        def commands(user):
-            c = clients[user]
+        # user -> status of each command nuthatch sends: on web1 and
+        # web1/http, which ops sees, and on db1 and db1/disk, which ops does
+        # not. What a downtime or comment is deleted by is its id: admin
+        # makes some of each on both first.
+        t = int(time.time())
+        for host, service in (("web1", "http"), ("db1", "disk")):
+            admin.command(backend, "SCHEDULE_HOST_DOWNTIME", host, t + 86400, t + 90000, 1, 0, 0, "x", "matrix ids")
+            admin.command(backend, "SCHEDULE_SVC_DOWNTIME", host, service, t + 86400, t + 90000, 1, 0, 0, "x", "matrix ids")
+            admin.command(backend, "ADD_SVC_COMMENT", host, service, 1, "x", "matrix ids")
+        made = {}
+        for _ in range(30):
+            downtimes = admin.call("POST", "/api/v1/query", {"table": "downtimes", "columns": ["id", "host_name", "is_service"], "headers": ["Filter: comment = matrix ids"], "backends": [backend]})[1]
+            comments = admin.call("POST", "/api/v1/query", {"table": "comments", "columns": ["id", "host_name", "is_service"], "headers": ["Filter: comment = matrix ids", "Filter: entry_type = 1"], "backends": [backend]})[1]
+            for row in downtimes.get("rows", []):
+                made[("downtime", row["host_name"], bool(row["is_service"]))] = row["id"]
+            for row in comments.get("rows", []):
+                made[("comment", row["host_name"], True)] = row["id"]
+            if len(made) == 6:
+                break
+            time.sleep(0.5)
+        check(f"{backend}: admin's downtimes and comments to delete are there", len(made), 6)
+        check(f"{backend}: admin reads downtimes", admin.rows(backend, "downtimes", ["id"], ["Filter: comment = matrix ids"]), 4)
+        check(f"{backend}: ops reads the downtimes of what ops sees", clients["ops"].rows(backend, "downtimes", ["id"], ["Filter: comment = matrix ids"]), "closed" if closed else 2)
+        check(f"{backend}: nobody reads none", clients["nobody"].rows(backend, "downtimes", ["id"], ["Filter: comment = matrix ids"]), "closed" if closed else 0)
+
+        def every_command(host, service, user):
+            t = int(time.time())
+            text = f"by {user}"
             return {
-                "comment on web1": c.command(backend, "ADD_HOST_COMMENT", "web1", 1, "x", f"by {user}"),
-                "comment on db1": c.command(backend, "ADD_HOST_COMMENT", "db1", 1, "x", f"by {user}"),
-                "comment on web1/http": c.command(backend, "ADD_SVC_COMMENT", "web1", "http", 1, "x", f"by {user}"),
-                "comment on db1/postgres": c.command(backend, "ADD_SVC_COMMENT", "db1", "postgres", 1, "x", f"by {user}"),
-                "comment on db1/disk": c.command(backend, "ADD_SVC_COMMENT", "db1", "disk", 1, "x", f"by {user}"),
-                "recheck web1": c.command(backend, "SCHEDULE_FORCED_HOST_CHECK", "web1", int(time.time())),
-                "delete admin's comment on db1": c.command(backend, "DEL_HOST_COMMENT", ids.get("db1", 0)),
+                "ACKNOWLEDGE_HOST_PROBLEM": [host, 1, 0, 0, "x", "matrix ack"],
+                "ACKNOWLEDGE_SVC_PROBLEM": [host, service, 1, 0, 0, "x", "matrix ack"],
+                "REMOVE_HOST_ACKNOWLEDGEMENT": [host],
+                "REMOVE_SVC_ACKNOWLEDGEMENT": [host, service],
+                "SCHEDULE_HOST_DOWNTIME": [host, t + 86400, t + 90000, 1, 0, 0, "x", "matrix dt"],
+                "SCHEDULE_SVC_DOWNTIME": [host, service, t + 86400, t + 90000, 1, 0, 0, "x", "matrix dt"],
+                "SCHEDULE_HOST_SVC_DOWNTIME": [host, t + 86400, t + 90000, 1, 0, 0, "x", "matrix dt"],
+                "DEL_HOST_DOWNTIME": [made.get(("downtime", host, False), 0)],
+                "DEL_SVC_DOWNTIME": [made.get(("downtime", host, True), 0)],
+                "ADD_HOST_COMMENT": [host, 1, "x", text],
+                "ADD_SVC_COMMENT": [host, service, 1, "x", text],
+                "DEL_HOST_COMMENT": [ids.get(host, 0)],
+                "DEL_SVC_COMMENT": [made.get(("comment", host, True), 0)],
+                "SCHEDULE_FORCED_HOST_CHECK": [host, t],
+                "SCHEDULE_FORCED_SVC_CHECK": [host, service, t],
+                "SCHEDULE_FORCED_HOST_SVC_CHECKS": [host, t],
+                "ENABLE_HOST_NOTIFICATIONS": [host],
+                "DISABLE_HOST_NOTIFICATIONS": [host],
+                "ENABLE_SVC_NOTIFICATIONS": [host, service],
+                "DISABLE_SVC_NOTIFICATIONS": [host, service],
+                "ENABLE_HOST_CHECK": [host],
+                "DISABLE_HOST_CHECK": [host],
+                "ENABLE_SVC_CHECK": [host, service],
+                "DISABLE_SVC_CHECK": [host, service],
+                "PROCESS_HOST_CHECK_RESULT": [host, 0, "matrix"],
+                "PROCESS_SERVICE_CHECK_RESULT": [host, service, 0, "matrix"],
             }
-        everything = dict.fromkeys(["comment on web1", "comment on db1", "comment on web1/http", "comment on db1/postgres", "comment on db1/disk",
-                                    "recheck web1", "delete admin's comment on db1"], 403)
-        ops = {**everything, "comment on web1": 200, "comment on web1/http": 200, "comment on db1/postgres": 200, "recheck web1": 200}
-        wanted = {"viewer": everything, "nobody": everything, "stranger": everything, "ops": everything if closed else ops,
-                  "admin": dict.fromkeys(everything, 200)}
+
+        names = list(every_command("web1", "http", "admin"))
+        check(f"{backend}: every command nuthatch sends is tried", len(names), 26)
         for user in ("viewer", "nobody", "stranger", "ops", "admin"):
-            got = commands(user)
-            for name in everything:
-                check(f"{backend}: {user}: {name}", got[name], wanted[user][name])
-        check(f"{backend}: ops deletes the comment on web1", clients["ops"].command(backend, "DEL_HOST_COMMENT", ids.get("web1", 0)), 403 if closed else 200)
+            for host, service, ops_sees in (("db1", "disk", False), ("web1", "http", True)):
+                # In the order of the list, the DISABLE after the ENABLE: what
+                # is turned off is turned on again below.
+                for name, args in every_command(host, service, user).items():
+                    allowed = user == "admin" or (user == "ops" and ops_sees and not closed)
+                    check(f"{backend}: {user}: {name} on {host}", clients[user].command(backend, name, *args), 200 if allowed else 403)
+        # What the commands turned off goes on again, and what they made goes.
+        for host, service in (("web1", "http"), ("db1", "disk")):
+            for name, args in (("ENABLE_HOST_NOTIFICATIONS", [host]), ("ENABLE_HOST_CHECK", [host]), ("ENABLE_SVC_NOTIFICATIONS", [host, service]),
+                               ("ENABLE_SVC_CHECK", [host, service]), ("REMOVE_HOST_ACKNOWLEDGEMENT", [host]), ("REMOVE_SVC_ACKNOWLEDGEMENT", [host, service])):
+                admin.command(backend, name, *args)
+        time.sleep(1)
+        rows = admin.call("POST", "/api/v1/query", {"table": "downtimes", "columns": ["id", "is_service"], "headers": ["Filter: comment ~ ^matrix "], "backends": [backend]})[1].get("rows", [])
+        for row in rows:
+            admin.command(backend, "DEL_SVC_DOWNTIME" if row["is_service"] else "DEL_HOST_DOWNTIME", row["id"])
 
         # What was sent is by the user who sent it, whatever author they gave.
         time.sleep(2)
@@ -366,7 +434,11 @@ def config(clients, backend):
         check(f"{backend}: {user} may not change it", clients[user].call("POST", path, {"revision": "", "change": {"kind": "delete", "name": "x"}})[0], 403)
     status, state = admin.call("GET", path)
     check(f"{backend}: admin reads the config", (status, state.get("hosts"), state.get("templates")), (200, [], {"host": ["demo-host"], "service": ["demo-service"]}))
-    check(f"{backend}: the engine's commands are there to choose from", state["choices"]["commands"], ["demo", "notify"])
+    # The engine's own, and nuthatch's catalogue: checkd's own checks for checkd only.
+    catalogue = ["nuthatch_cert", "nuthatch_http", "nuthatch_https", "nuthatch_imap", "nuthatch_imaps", "nuthatch_notify", "nuthatch_smtp", "nuthatch_ssh", "nuthatch_tcp"]
+    if backend == "checkd":
+        catalogue += ["nuthatch_aggregate", "nuthatch_cpu", "nuthatch_disk", "nuthatch_load", "nuthatch_memory", "nuthatch_pushed", "nuthatch_service"]
+    check(f"{backend}: the engine's commands are there to choose from", state["choices"]["commands"], sorted(["demo", "notify"] + catalogue))
     host = {"name": "added1", "alias": "Added by the matrix", "address": "192.0.2.80", "use": "demo-host", "hostgroups": ["web"], "contact_groups": ["admins"],
             "contacts": [], "services": [{"description": "extra", "use": "demo-service", "check_command": "demo!extra!30!0", "servicegroups": [], "contacts": ["ops"], "contact_groups": []}]}
     put = lambda host, revision=None, **more: admin.call("POST", path, {"revision": revision or state["revision"], "change": {"kind": "put", "host": host}, **more})
