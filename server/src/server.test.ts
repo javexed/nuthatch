@@ -1523,7 +1523,7 @@ describe('checks proposed from an inventory', () => {
     expect(readInventory('{"os": null}')).toBeUndefined()
     const planned = plan(inventory!)
     const base = planned.filter((p) => p.base).map((p) => p.check_command)
-    expect(base).toEqual(['nuthatch_disk!/!85!95', 'nuthatch_disk!/boot/efi!85!95', 'nuthatch_memory!90!95', 'nuthatch_load!8,6,4.8!16,12,8'])
+    expect(base).toEqual(['nuthatch_disk!/!85!95', 'nuthatch_disk!/boot/efi!85!95', 'nuthatch_memory!90!95', 'nuthatch_load!12,10,8!24,20,16'])
     const rest = Object.fromEntries(planned.filter((p) => !p.base).map((p) => [p.description, [p.check_command, p.checked]]))
     expect(rest).toEqual({
       CPU: ['nuthatch_cpu!90!98', false],

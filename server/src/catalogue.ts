@@ -30,11 +30,13 @@ const COMMANDS: [string, string][] = [
   // service that takes pushes, run when freshness finds nothing came.
   [AGGREGATE_COMMAND, 'checkd:aggregate $ARG1$'],
   [PUSHED_COMMAND, 'checkd:dummy 2 "nothing was pushed in time"'],
-  // checkd only: the machine itself, made by its agent (agent.md).
-  ['nuthatch_disk', 'checkd:disk -p $ARG1$ -w $ARG2$ -c $ARG3$'],
-  ['nuthatch_memory', 'checkd:memory -w $ARG1$ -c $ARG2$'],
-  ['nuthatch_load', 'checkd:load -w $ARG1$ -c $ARG2$'],
-  ['nuthatch_cpu', 'checkd:cpu -w $ARG1$ -c $ARG2$'],
+  // checkd only: the machine itself, made by its agent (agent.md). A
+  // state ends only when the value is clearly back under its limit (-C),
+  // so one that wavers at a limit does not notify each time it crosses.
+  ['nuthatch_disk', 'checkd:disk -p $ARG1$ -w $ARG2$ -c $ARG3$ -C 2 -P $SERVICESTATEID$'],
+  ['nuthatch_memory', 'checkd:memory -w $ARG1$ -c $ARG2$ -C 5 -P $SERVICESTATEID$'],
+  ['nuthatch_load', 'checkd:load -w $ARG1$ -c $ARG2$ -C 10% -P $SERVICESTATEID$'],
+  ['nuthatch_cpu', 'checkd:cpu -w $ARG1$ -c $ARG2$ -C 10% -P $SERVICESTATEID$'],
   ['nuthatch_service', 'checkd:service -s $ARG1$'],
   [NOTIFY_COMMAND, '{nothing}'],
 ]

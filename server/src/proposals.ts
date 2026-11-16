@@ -85,7 +85,8 @@ const PLUMBING = /^(systemd-|dbus|user@|getty@|serial-getty@|polkit|udisks|upowe
 function loadLimits(cpus: number): [string, string] {
   const n = Math.max(1, Math.min(512, Math.floor(cpus) || 1))
   const at = (a: number, b: number, c: number) => [a * n, b * n, c * n].map((v) => String(Math.round(v * 10) / 10)).join(',')
-  return [at(2, 1.5, 1.2), at(4, 3, 2)]
+  // Per processor; a machine busy most of the time is not a problem.
+  return [at(3, 2.5, 2), at(6, 5, 4)]
 }
 
 /** Everything the inventory leads to, base and the rest. */
