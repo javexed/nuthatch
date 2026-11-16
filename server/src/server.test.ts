@@ -257,6 +257,27 @@ describe('the HTTP side', () => {
     return { app, backend, store, as, post }
   }
 
+  it("serves the interface's files, and 404 for a file of the build that is not there", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'nuthatch-web-'))
+    mkdirSync(join(root, 'assets'))
+    writeFileSync(join(root, 'index.html'), '<!doctype html>')
+    writeFileSync(join(root, 'assets', 'app-1234.js'), 'console.log(1)')
+    writeFileSync(join(root, 'favicon.svg'), '<svg/>')
+    const app = buildApp({ backends: [], store: new Store(':memory:'), events: new Events([]), roles: new RolesConfig({}), limiter: new Limiter(), cookieSecure: false, webRoot: root })
+    const got = async (path: string) => {
+      const answer = await app.request(path)
+      return [answer.status, (answer.headers.get('content-type') ?? '').split(';')[0]]
+    }
+    expect(await got('/assets/app-1234.js')).toEqual([200, 'text/javascript'])
+    expect(await got('/favicon.svg')).toEqual([200, 'image/svg+xml'])
+    // Gone after an update: not index.html in its place.
+    expect(await got('/assets/app-old.js')).toEqual([404, 'text/plain'])
+    expect(await got('/icon-old.png')).toEqual([404, 'text/plain'])
+    // The router's pages, a host with dots in its name among them.
+    expect(await got('/problems')).toEqual([200, 'text/html'])
+    expect(await got('/host/site/web1.example.test')).toEqual([200, 'text/html'])
+  })
+
   it('knows nobody without a login', async () => {
     const { app } = site()
     expect((await app.request('/api/v1/session')).status).toBe(401)

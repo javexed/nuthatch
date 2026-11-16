@@ -1278,13 +1278,19 @@ export function buildApp(deps: Deps): Hono<Env> {
 
   // The interface's files hold nothing secret and are served to anyone,
   // so that the login page can load. A path that is no file is the
-  // interface's own (its router's), and gets index.html.
+  // interface's own (its router's), and gets index.html; but a file of
+  // the build that is not there (an old script after an update) is 404,
+  // never index.html in its place, which a browser or the service worker
+  // would keep as that script.
   const root = deps.webRoot
   if (root !== undefined) {
     app.get('*', async (c) => {
-      const wanted = normalize(join(root, decodeURIComponent(c.req.path)))
+      const path = decodeURIComponent(c.req.path)
+      const wanted = normalize(join(root, path))
       const inside = wanted === root || wanted.startsWith(root.endsWith(sep) ? root : root + sep)
-      for (const file of inside && extname(wanted) !== '' ? [wanted, join(root, 'index.html')] : [join(root, 'index.html')]) {
+      const buildFile = path.startsWith('/assets/') || (/^\/[^/]+$/.test(path) && TYPES[extname(path)] !== undefined)
+      const files = !inside ? [join(root, 'index.html')] : buildFile ? [wanted] : extname(wanted) !== '' ? [wanted, join(root, 'index.html')] : [join(root, 'index.html')]
+      for (const file of files) {
         try {
           const data = await readFile(file)
           const hashed = file.includes(`${sep}assets${sep}`)

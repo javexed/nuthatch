@@ -3,7 +3,8 @@
 // assets/, which never change, and the icons. Pages and everything under
 // api/ always go to the server, so no monitoring data is kept on the
 // device and a new version shows at the next load.
-const CACHE = 'nuthatch-files-v1'
+// v2: v1 may hold index.html kept as a script that was gone.
+const CACHE = 'nuthatch-files-v2'
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (event) => {
@@ -28,7 +29,9 @@ self.addEventListener('fetch', (event) => {
       const kept = await cache.match(request)
       if (kept) return kept
       const response = await fetch(request)
-      if (response.ok) cache.put(request, response.clone())
+      // Only the file itself: never an error, nor a page in its place.
+      const type = response.headers.get('content-type') ?? ''
+      if (response.ok && response.status === 200 && !type.startsWith('text/html')) cache.put(request, response.clone())
       return response
     }),
   )
