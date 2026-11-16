@@ -74,7 +74,7 @@ and how to report a problem.
 
 Everything is TypeScript, in one pnpm workspace:
 
-- `server/`: the nuthatch server, on Node 22 or later. The browser talks
+- `server/`: the nuthatch server, on Node 22.18 or later. The browser talks
   only to it. It checks every request against the user's rights, asks the
   engines, and puts the answers of several engines together.
 - `packages/api/`: the shapes of requests and answers, and the client of
@@ -92,7 +92,7 @@ Everything is TypeScript, in one pnpm workspace:
 
 ## Try it
 
-Node 22 or later, pnpm, and Docker for the demo site on Naemon.
+Node 22.18 or later, pnpm, and Docker for the demo site on Naemon.
 
     dev/up naemon            # in one terminal: the demo site on Naemon, in a container
     dev/up checkd            # in another: the same on checkd (built from a checkout
@@ -106,9 +106,11 @@ Then open <http://127.0.0.1:8080>.
 ## Running it as a service
 
 `contrib/systemd/nuthatch.service`: the repository at `/opt/nuthatch`
-after `pnpm install && pnpm build`, Node 22 or later, a user `nuthatch`
+after `pnpm install && pnpm build`, Node 22.18 or later, a user `nuthatch`
 that may read the engine's Livestatus socket, and the config at
 `/etc/nuthatch/nuthatch.toml`. It passes `systemd-analyze verify`.
+Beside an existing Naemon, step by step, with a proxy in front:
+[docs/install.md](docs/install.md).
 
 Without root, beside a checkd that runs as a user service:
 `contrib/systemd/nuthatch-user.service` in `~/.config/systemd/user/`,
@@ -183,7 +185,7 @@ here and in the Android app, are made from `docs/logo.svg` by
 ## The config file
 
     listen = "127.0.0.1:8080"
-    web_root = "/usr/share/nuthatch/web"
+    web_root = "/opt/nuthatch/web/dist"
     store = "/var/lib/nuthatch/nuthatch.sqlite"
     htpasswd = "/etc/nuthatch/htpasswd"
     behind_proxy = true

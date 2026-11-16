@@ -1,7 +1,7 @@
 # nuthatch, the web interface. Install the repository at /opt/nuthatch
-# (pnpm install && pnpm build), Node 22 or later, a user `nuthatch` that
-# may read the engine's Livestatus socket, and the config at
-# /etc/nuthatch/nuthatch.toml (README.md).
+# (pnpm install && pnpm build), Node 22.18 or later, a user `nuthatch`
+# that may read the engine's Livestatus socket, and the config at
+# /etc/nuthatch/nuthatch.toml (docs/install.md).
 [Unit]
 Description=nuthatch web interface
 After=network-online.target checkd.service naemon.service
@@ -18,6 +18,12 @@ RestartSec=2s
 StateDirectory=nuthatch
 NoNewPrivileges=yes
 ProtectSystem=full
+# /etc is read-only but for the directory above [backend.config] dir,
+# where nuthatch writes hosts and the copy it checks. Change it to yours.
+ReadWritePaths=-/etc/naemon/conf.d
+# For listen = "unix:/run/nuthatch/http.sock".
+RuntimeDirectory=nuthatch
+RuntimeDirectoryMode=0750
 ProtectHome=yes
 PrivateTmp=yes
 
