@@ -39,7 +39,8 @@ onMounted(() => dialog.value?.showModal())
 function commandsFor(target: Target): Command[] {
   switch (props.action) {
     case 'acknowledge':
-      return [acknowledge(target, { comment: text.value, sticky: sticky.value, notify: notify.value, persistent: persistent.value })]
+      // Naemon refuses an acknowledgement without a comment.
+      return [acknowledge(target, { comment: text.value.trim() || 'Acknowledged', sticky: sticky.value, notify: notify.value, persistent: persistent.value })]
     case 'comment':
       return [comment(target, text.value)]
     case 'downtime':
@@ -85,7 +86,7 @@ async function submit() {
       <p class="subject">{{ subject }}</p>
       <label>
         Comment
-        <textarea v-model="text" name="comment" rows="2" required autofocus></textarea>
+        <textarea v-model="text" name="comment" rows="2" :required="action !== 'acknowledge'" autofocus></textarea>
       </label>
       <template v-if="action === 'acknowledge'">
         <label class="check"><input v-model="sticky" type="checkbox" /> Until it recovers, not only until its state changes</label>

@@ -127,7 +127,7 @@ for (const engine of ENGINES) {
     await expect(card('Comments')).toContainText('admin')
 
     await page.getByRole('button', { name: 'Acknowledge' }).click()
-    await page.getByRole('textbox', { name: 'Comment' }).fill(`${stamp} ack`)
+    // Without a comment: optional for acknowledging only.
     await page.getByRole('dialog').getByRole('button', { name: 'Acknowledge' }).click()
     await expect(page.locator('.headline')).toContainText('acknowledged')
     const [[acknowledged]] = (await livestatus(engine, 'GET services\nColumns: acknowledged\nFilter: host_name = mail1\nFilter: description = queue')) as [[number]]
