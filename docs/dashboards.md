@@ -75,8 +75,12 @@ ticking several and **Wall** shows them in turn, every so many seconds.
 
 ## Whose
 
-- A dashboard is changed by its owner, and a shared one by anyone; only
-  its owner deletes it.
+- A dashboard is changed by its owner, and a shared one by anyone who is
+  not read-only; only its owner deletes it. Each change is in the audit
+  log. A user keeps at most 100.
+- A shared dashboard shows everyone the names its panels were given:
+  hosts, services, groups, titles and notes, also to those who may not
+  see those hosts.
 - A dashboard holds no data, only what its panels ask for, and each panel
   asks as the one who looks: the same dashboard shows an administrator
   everything and another user what is theirs.

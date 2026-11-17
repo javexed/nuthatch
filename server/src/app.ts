@@ -9,6 +9,7 @@ import { Readable } from 'node:stream'
 import type { AgentRow, BackendStatus, QueryAnswer, Role, Session as SessionAnswer, StatsAnswer } from '@nuthatch/api'
 import { getConnInfo } from '@hono/node-server/conninfo'
 import { Hono, type Context } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
@@ -216,6 +217,9 @@ export function buildApp(deps: Deps): Hono<Env> {
     console.error(err)
     return c.json({ error: 'nuthatch failed on this request; see its log' }, 500)
   })
+
+  // No request needs more; a larger one is not read at all.
+  app.use('/api/*', bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: 'the body is larger than 1 MB' }, 413) }))
 
   async function body(c: Context): Promise<Record<string, unknown>> {
     const parsed: unknown = await c.req.json()
@@ -759,7 +763,9 @@ export function buildApp(deps: Deps): Hono<Env> {
   app.post('/api/v1/dashboards', async (c) => {
     const { user } = c.get('identity')
     const draft = checkDraft(await body(c))
+    if (deps.store.dashboards(user).filter((d) => d.owner === user).length >= 100) throw new Refused('a user keeps at most 100 dashboards')
     const id = deps.store.newDashboard(user, draft.title, draft.shared, bodyOf(draft))
+    deps.store.audit(user, '', 'dashboard made', `${id} ${draft.title}`.slice(0, 200))
     const row = deps.store.dashboard(user, id)
     return row ? c.json(fromRow(row)) : c.json({ error: 'not kept' }, 500)
   })
@@ -768,10 +774,13 @@ export function buildApp(deps: Deps): Hono<Env> {
     const { user } = c.get('identity')
     const id = Number(c.req.param('id'))
     const draft = checkDraft(await body(c))
-    // Its owner, or anyone for a shared one.
-    if (!Number.isInteger(id) || !deps.store.saveDashboard(user, id, draft.title, draft.shared, bodyOf(draft))) {
+    // Its owner, or anyone for a shared one but a read-only user.
+    const was = Number.isInteger(id) ? deps.store.dashboard(user, id) : null
+    if (was && was.owner !== user && (await who(user)).roles.has('read_only')) throw new Forbidden('this user is read-only: only its own dashboards')
+    if (!was || !deps.store.saveDashboard(user, id, draft.title, draft.shared, bodyOf(draft))) {
       return c.json({ error: 'not found' }, 404)
     }
+    deps.store.audit(user, '', 'dashboard changed', `${id} ${draft.title}${was.owner !== user ? ` (of ${was.owner})` : ''}`.slice(0, 200))
     const row = deps.store.dashboard(user, id)
     return row ? c.json(fromRow(row)) : c.json({ error: 'not kept' }, 500)
   })
@@ -779,6 +788,7 @@ export function buildApp(deps: Deps): Hono<Env> {
   app.delete('/api/v1/dashboards/:id', (c) => {
     const id = Number(c.req.param('id'))
     if (!Number.isInteger(id) || !deps.store.deleteDashboard(c.get('identity').user, id)) return c.json({ error: 'no such dashboard of yours' }, 404)
+    deps.store.audit(c.get('identity').user, '', 'dashboard deleted', String(id))
     return c.json({})
   })
 

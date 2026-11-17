@@ -134,7 +134,10 @@ function banner(address: string, port: number): Promise<string | undefined> {
   return new Promise((done) => {
     const socket: Socket = tcpConnect({ host: address, port, timeout: PROBE_MS })
     let got = ''
+    // However slowly it talks: done in PROBE_MS.
+    const deadline = setTimeout(() => end(), PROBE_MS)
     const end = () => {
+      clearTimeout(deadline)
       socket.destroy()
       const line = got.split(/\r?\n/)[0]?.trim()
       // Only what prints: a banner is shown, and a binary greeting is not one.
@@ -168,7 +171,9 @@ function certificate(address: string, port: number, serverName: string | undefin
       done(undefined)
       return
     }
+    const deadline = setTimeout(() => end(undefined), PROBE_MS)
     const end = (seen?: TlsSeen) => {
+      clearTimeout(deadline)
       socket.destroy()
       done(seen)
     }
@@ -201,9 +206,15 @@ function page(address: string, port: number, secure: boolean, hostHeader: string
   return new Promise((done) => {
     const get = secure ? https.get : http.get
     let finished = false
+    // A page that trickles in is not waited for: done in twice PROBE_MS.
+    const deadline = setTimeout(() => {
+      request.destroy()
+      end(undefined)
+    }, 2 * PROBE_MS)
     const end = (seen?: HttpSeen) => {
       if (finished) return
       finished = true
+      clearTimeout(deadline)
       done(seen)
     }
     const request = get(
@@ -374,7 +385,20 @@ export function suggest(target: Target, found: FoundPort[], pinged: boolean | nu
 
 /** Looks at what was typed, and suggests a host and its checks. */
 /** `also`: further ports to try, those a host's checks are of, so that one that is checked is not taken for gone. */
+/** Scans running now: a few at once, each with its sockets. */
+let scanning = 0
+
 export async function discover(given: unknown, also: unknown = []): Promise<Discovery> {
+  if (scanning >= 3) throw new Refused('three hosts are being looked at already; try again in a moment')
+  scanning++
+  try {
+    return await look(given, also)
+  } finally {
+    scanning--
+  }
+}
+
+async function look(given: unknown, also: unknown): Promise<Discovery> {
   const target = parseTarget(given)
   let addresses: string[]
   try {

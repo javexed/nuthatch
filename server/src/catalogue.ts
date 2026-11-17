@@ -1,6 +1,7 @@
 // The check commands nuthatch brings, for the checks it suggests when a
 // host is looked at (discover.ts). They are fixed here, never made from
-// what anyone types, and written into nuthatch's own directory of the
+// what anyone types (an argument that may hold `&` or `?` is quoted),
+// and written into nuthatch's own directory of the
 // engine's config only when a host needs one the engine does not have.
 
 import type { Definition } from './nagioscfg.ts'
@@ -19,8 +20,8 @@ export const NOTIFY_COMMAND = 'nuthatch_notify'
 /** Name, then the plugin and its arguments; `{plugins}` is the plugins' directory. */
 const COMMANDS: [string, string][] = [
   ['nuthatch_tcp', '{plugins}/check_tcp -H $HOSTADDRESS$ -p $ARG1$'],
-  ['nuthatch_http', '{plugins}/check_http -H $HOSTADDRESS$ -p $ARG1$ -u $ARG2$ -t 10'],
-  ['nuthatch_https', '{plugins}/check_http -H $HOSTADDRESS$ -p $ARG1$ -u $ARG2$ -S --sni -t 10'],
+  ['nuthatch_http', "{plugins}/check_http -H $HOSTADDRESS$ -p $ARG1$ -u '$ARG2$' -t 10"],
+  ['nuthatch_https', "{plugins}/check_http -H $HOSTADDRESS$ -p $ARG1$ -u '$ARG2$' -S --sni -t 10"],
   ['nuthatch_cert', '{plugins}/check_http -H $HOSTADDRESS$ -p $ARG1$ -S --sni -C 21,7 -t 10'],
   ['nuthatch_ssh', '{plugins}/check_ssh -H $HOSTADDRESS$ -p $ARG1$'],
   ['nuthatch_smtp', '{plugins}/check_smtp -H $HOSTADDRESS$ -p $ARG1$'],

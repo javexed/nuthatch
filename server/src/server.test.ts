@@ -16,7 +16,7 @@ import { Htpasswd, Limiter, tailnetUsers, verify } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { checkCommand, isService } from './commands.ts'
 import { CATALOGUE_NAMES, catalogueFile, pluginsDir } from './catalogue.ts'
-import { aggregateArgs, aggregateOf, checkContact, checkGroup, contactText, readContactFile, checkHost, groupFile, groupText, hostFile, readGroupFile, readHostFile } from './configadmin.ts'
+import { ConfigAdmin, aggregateArgs, aggregateOf, checkContact, checkGroup, contactText, readContactFile, checkHost, groupFile, groupText, hostFile, readGroupFile, readHostFile } from './configadmin.ts'
 import { discover, guessSystem, hostName, parseTarget, suggest, tailnetMachines } from './discover.ts'
 import { HostSetup } from './hostsetup.ts'
 import { open as openProposals, plan, readInventory } from './proposals.ts'
@@ -405,6 +405,21 @@ describe('object files', () => {
     expect(mainWith(main, '/etc/n/managed', '/tmp/copy').split('\n')).toEqual(['cfg_file=/etc/n/objects.cfg', 'cfg_dir=/tmp/copy', 'log_file=x.log', 'resource_file = /etc/n/r.cfg'])
   })
 
+  it('leaves a group file changed by hand alone', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nuthatch-cfg-'))
+    const managed = join(dir, 'managed')
+    mkdirSync(managed)
+    writeFileSync(join(dir, 'naemon.cfg'), `cfg_dir=${managed}\n`)
+    const hand = 'define hostgroup {\n hostgroup_name web\n members a\n notes_url http://x\n}\n'
+    writeFileSync(join(managed, groupFile('hostgroup', 'web')), hand)
+    const backend = { name: 'site', query: async () => [], command: async () => undefined, enforcesAuth: async () => true } as unknown as Backend
+    const admin = new ConfigAdmin(backend, { dir: managed, main: join(dir, 'naemon.cfg'), verify: ['true'], paths: new PathMap({}) })
+    const state = await admin.state()
+    expect(state.unreadable.map((u) => u.file)).toEqual([groupFile('hostgroup', 'web')])
+    await expect(admin.change(state.revision, { kind: 'put-group', group: { type: 'hostgroup', name: 'web', members: ['b'] } } as never, false)).rejects.toThrow(/already keeps/)
+    expect(readFileSync(join(managed, groupFile('hostgroup', 'web')), 'utf8')).toBe(hand)
+  })
+
   it('finds templates', () => {
     const dir = mkdtempSync(join(tmpdir(), 'nuthatch-cfg-'))
     writeFileSync(join(dir, 'a.cfg'), 'define host {\n name generic-host\n register 0\n}\ndefine host {\n host_name real\n}\ndefine service {\n name generic-service\n register 0\n}\n')
@@ -426,6 +441,10 @@ describe('a host to write', () => {
     contact_groups: ['admins'],
     services: [{ description: 'ping', use: 'generic-service', check_command: 'check_ping!100,20%!500,60%', servicegroups: [], contacts: ['ann'], contact_groups: [] }],
   }
+
+  it('refuses a value that would join the next line', () => {
+    expect(() => checkHost({ ...host, alias: 'web nine\\' }, choices, known)).toThrow(/at the end/)
+  })
 
   it('goes into a file and comes back the same', () => {
     const checked = checkHost(host, choices, known)
@@ -581,6 +600,23 @@ describe('dashboards', () => {
     // Every panel has its place.
     expect((await call('ann', 'POST', '/api/v1/dashboards', { title: 'x', widgets: [{ type: 'status' }] })).status).toBe(400)
     expect((await call('ann', 'DELETE', `/api/v1/dashboards/${made.id}`)).status).toBe(200)
+  })
+
+  it('are not changed by a read-only user unless its own, are audited, and are kept to a size', async () => {
+    const store = new Store(':memory:')
+    const app = buildApp({ backends: [], store, events: new Events([]), roles: new RolesConfig({ authorized_for_read_only: ['reader'] }), limiter: new Limiter(), cookieSecure: false })
+    const call = (user: string, method: string, path: string, body?: unknown) =>
+      app.request(path, { method, headers: { Authorization: `Bearer ${store.newToken(user, 't').token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) })
+    const draft = { title: 'Wall', shared: true, widgets: [] }
+    const made = (await (await call('ann', 'POST', '/api/v1/dashboards', draft)).json()) as { id: number }
+    expect((await call('reader', 'PUT', `/api/v1/dashboards/${made.id}`, { ...draft, title: 'ignore alerts' })).status).toBe(403)
+    const own = (await (await call('reader', 'POST', '/api/v1/dashboards', { ...draft, title: 'Reader' })).json()) as { id: number }
+    expect((await call('reader', 'PUT', `/api/v1/dashboards/${own.id}`, { ...draft, title: 'Reader 2' })).status).toBe(200)
+    expect((await call('bob', 'PUT', `/api/v1/dashboards/${made.id}`, { ...draft, title: 'Wall 2' })).status).toBe(200)
+    expect(store.auditTail(10).map((row) => row.action)).toEqual(expect.arrayContaining(['dashboard made', 'dashboard changed']))
+    expect(store.auditTail(10).some((row) => row.detail.includes('(of ann)'))).toBe(true)
+    // A body over 1 MB is not read.
+    expect((await call('ann', 'POST', '/api/v1/dashboards', JSON.stringify({ ...draft, title: 'x'.repeat(1_100_000) }))).status).toBe(413)
   })
 })
 

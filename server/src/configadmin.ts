@@ -14,7 +14,7 @@
 
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGroup, ManagedHost, ManagedService } from '@nuthatch/api'
 import type { Backend } from './backend.ts'
@@ -77,7 +77,8 @@ export function aggregateOf(args: string): ManagedService['aggregate'] | undefin
 function passiveOf(given: unknown, what: string): ManagedService['passive'] {
   if (typeof given !== 'object' || given === null) throw new Refused(`${what}: what it takes passive results with is needed`)
   const p = given as Record<string, unknown>
-  // A token is made here, never taken on trust from a form's default.
+  // An empty token is made here. One given is kept: config_edit may as
+  // well write any token into the files.
   const token = p.token === undefined || p.token === '' ? randomBytes(16).toString('hex') : p.token
   if (typeof token !== 'string' || !TOKEN.test(token)) throw new Refused(`${what}: a token is 16 to 64 letters, digits, '-' and '_'`)
   if (p.every === undefined || p.every === null || p.every === '') return { token }
@@ -105,8 +106,9 @@ function text(value: unknown, what: string, required = false): string | undefine
   }
   if (typeof value !== 'string') throw new Refused(`${what} is a text`)
   const trimmed = value.trim()
-  // A `;` starts a comment in an object file, and a line ends a value.
-  if (/[;\n\r\0]/.test(trimmed) || trimmed.length > 500) throw new Refused(`${what} is one line of at most 500 letters, without ';'`)
+  // A `;` starts a comment in an object file, a line ends a value, and a
+  // `\` at the end joins the next line to it.
+  if (/[;\n\r\0]/.test(trimmed) || trimmed.endsWith('\\') || trimmed.length > 500) throw new Refused(`${what} is one line of at most 500 letters, without ';' or a '\\' at the end`)
   if (trimmed === '' && required) throw new Refused(`${what} is needed`)
   return trimmed === '' ? undefined : trimmed
 }
@@ -599,7 +601,7 @@ export class ConfigAdmin {
       name = group.name
       const kept_ = (state.groups ?? []).filter((g) => g.type === group.type)
       const before = typeof change.previous === 'string' ? change.previous : undefined
-      const taken = kept_.some((g) => g.name === group.name)
+      const taken = kept_.some((g) => g.name === group.name) || state.unreadable.some((u) => u.file === groupFile(group.type, group.name))
       if (before === undefined && taken) throw new Refused(`nuthatch already keeps a ${group.type} '${group.name}'`)
       if (before !== undefined && !kept_.some((g) => g.name === before)) throw new Refused(`nuthatch keeps no ${group.type} '${before}'`)
       if (before !== undefined && before !== group.name) {
@@ -622,7 +624,7 @@ export class ConfigAdmin {
       name = contact.name
       const kept_ = state.contacts ?? []
       const before = typeof change.previous === 'string' ? change.previous : undefined
-      const taken = kept_.some((k) => k.name === contact.name)
+      const taken = kept_.some((k) => k.name === contact.name) || state.unreadable.some((u) => u.file === CONTACT_FILE(contact.name))
       if (before === undefined && taken) throw new Refused(`nuthatch already keeps a contact '${contact.name}'`)
       if (before !== undefined && !kept_.some((k) => k.name === before)) throw new Refused(`nuthatch keeps no contact '${before}'`)
       if (before !== undefined && before !== contact.name) {
@@ -663,13 +665,34 @@ export class ConfigAdmin {
 
     // Taken: written, and the engine told.
     const write = (files: Map<string, string>, gone: string[]) => {
+      for (const file of gone) if (!existsSync(join(dir, file))) throw new Error(`${file} is gone already`)
       for (const [file, content] of files) {
         writeFileSync(join(dir, `.${file}.new`), content)
         renameSync(join(dir, `.${file}.new`), join(dir, file))
       }
       for (const file of gone) unlinkSync(join(dir, file))
     }
-    write(writes, removes)
+    // Every touched file as it was, and the new ones gone: also when only
+    // some were written (a full disk), so the engine never meets a mix.
+    const putBack = () => {
+      for (const file of new Set([...writes.keys(), ...removes])) {
+        try {
+          const was = before.get(file)
+          if (was !== undefined) {
+            writeFileSync(join(dir, `.${file}.new`), was)
+            renameSync(join(dir, `.${file}.new`), join(dir, file))
+          } else rmSync(join(dir, file), { force: true })
+        } catch {
+          // The others are still put back.
+        }
+      }
+    }
+    try {
+      write(writes, removes)
+    } catch (err) {
+      putBack()
+      throw new Error(`the files could not be written (${err instanceof Error ? err.message : String(err)}); they are as they were`)
+    }
     if (kept.name === '') kept = { table: 'hosts', name }
     const wanted = change.kind === 'put' || change.kind === 'put-group' || change.kind === 'put-contact'
     let shown = false
@@ -692,8 +715,7 @@ export class ConfigAdmin {
     }
     if (!shown) {
       // Put back as it was, and the engine told again.
-      const restore = new Map([...before].filter(([file]) => writes.has(file) || removes.includes(file)))
-      write(restore, [...writes.keys()].filter((file) => !before.has(file)))
+      putBack()
       await this.reload().catch(() => undefined)
       throw new Error(`the engine did not take up the change within 30 seconds${problem ? ` (${problem})` : ''}; the files are as they were`)
     }

@@ -71,7 +71,9 @@ audit log with the user's name.
 Only users with the role `config_edit`. Whoever can set a check command
 can make the engine run a program as its user, so this is not given by
 being a contact. Commands themselves are not edited here: a check command
-is chosen from those the engine has, with arguments.
+is chosen from those the engine has, with arguments. That is no sandbox:
+an argument, an alias, notes or a contact's e-mail and pager reach shell
+command lines, so the role is as much as a shell as the engine's user.
 
 ## What is edited
 
