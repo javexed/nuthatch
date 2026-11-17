@@ -539,3 +539,32 @@ fieldset.inline { border: 0; padding: 0; margin: 0; display: flex; gap: 0.75rem;
 .delivery h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }
 .delivery .chats { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.8rem; }
 .delivery > .check { display: block; margin: 0.4rem 0; }
+
+/* The assistant (AssistantPanel.vue): a button at the corner, and a
+   panel at the side; on a narrow screen, over the page above the bar. */
+.assistant-open {
+  position: fixed; z-index: 11; right: 1rem; bottom: calc(1rem + env(safe-area-inset-bottom));
+  display: grid; place-items: center; width: 3rem; height: 3rem; padding: 0; border-radius: 50%;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+}
+.assistant {
+  position: fixed; z-index: 11; right: 1rem; bottom: 1rem; top: 4.5rem; width: min(26rem, calc(100vw - 2rem));
+  display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line);
+  border-radius: 0.8rem; box-shadow: 0 4px 24px rgb(0 0 0 / 25%);
+}
+.assistant header { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line); }
+.assistant header .by { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assistant .turns { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0.8rem; display: grid; align-content: start; gap: 0.8rem; }
+.assistant .turns > li.turn-user { justify-self: end; max-width: 85%; padding: 0.5rem 0.75rem; border-radius: 0.8rem; background: var(--bg); }
+.assistant .turns .text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assistant .looked { list-style: none; margin: 0 0 0.4rem; padding: 0; color: var(--muted); font-size: 0.8rem; }
+.assistant .looked li::before { content: '↳ '; }
+.assistant form { display: flex; gap: 0.5rem; align-items: end; padding: 0.6rem 0.8rem; border-top: 1px solid var(--line); }
+.assistant textarea { flex: 1; resize: none; font: inherit; }
+main.with-assistant { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+@media (max-width: 40rem) {
+  main.with-tabbar.with-assistant { padding-bottom: calc(8.5rem + env(safe-area-inset-bottom)); }
+  .assistant-open { bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
+  .assistant { left: 0; right: 0; top: 0; bottom: calc(3.9rem + env(safe-area-inset-bottom)); width: auto; border-radius: 0; border: 0; padding-top: env(safe-area-inset-top); }
+}
+.assistant-key .buttons { display: flex; gap: 0.5rem; justify-content: flex-end; }

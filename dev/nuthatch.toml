@@ -18,6 +18,10 @@ subject = "mailto:ops@example.test"
 [graphs]
 days = 2
 
+# The assistant (docs/assistant.md): the key is set on the Config page.
+[assistant]
+users = ["admin", "ops"]
+
 # The agent binaries: checkd's scripts/build-agents.sh writes them.
 [agents]
 bin = "dev/run/checkd/agent-bin"

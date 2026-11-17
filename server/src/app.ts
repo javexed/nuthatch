@@ -6,13 +6,14 @@ import { createReadStream, readFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, normalize, sep } from 'node:path'
 import { Readable } from 'node:stream'
-import type { AgentRow, BackendStatus, QueryAnswer, Role, Session as SessionAnswer, StatsAnswer } from '@nuthatch/api'
+import type { AgentRow, AssistantState, BackendStatus, QueryAnswer, Role, Session as SessionAnswer, StatsAnswer } from '@nuthatch/api'
 import { getConnInfo } from '@hono/node-server/conninfo'
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
+import { type Assistant, type Reader, conversation } from './assistant.ts'
 import { type Agents, InstallCodes, type Pin, agentName, binaries, binariesVersion, engineOf, installCommand, linuxBinary, linuxScript, sshCommand, windowsScript } from './agents.ts'
 import { nearestFirst, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
 import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
@@ -23,7 +24,7 @@ import type { HostSetup } from './hostsetup.ts'
 import { bodyOf, checkDraft, fromRow } from './dashboards.ts'
 import { type TailnetMachine, askTailscale, discover } from './discover.ts'
 import type { Events } from './events.ts'
-import type { Graphs } from './graphs.ts'
+import type { Graphs, Series } from './graphs.ts'
 import type { Pusher } from './push.ts'
 import { anyWay, checkDelivery, checkReach, newTopic, sendChat, sendMail, sendNtfy, shown } from './delivery.ts'
 import { ROLES, Refused, type Roles, type RolesConfig, TABLES, access, checkHeaders } from './policy.ts'
@@ -99,6 +100,8 @@ export interface Deps {
   appOrigins?: string[]
   /** Other nuthatches that may ask here for their users. */
   peers?: Peer[]
+  /** The assistant ([assistant]); without it, there is none. */
+  assistant?: Assistant
 }
 
 /** A nuthatch elsewhere that shows this site to its users. */
@@ -413,6 +416,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       backends,
       config_backends: configBackends,
       agent_backends: roles.has('config_edit') && deps.agentBin ? [...(deps.agents?.keys() ?? [])] : [],
+      ...assistantFor(identity, roles),
     }
     return c.json(answer)
   })
@@ -485,19 +489,20 @@ export function buildApp(deps: Deps): Hono<Env> {
     return Promise.all(asks)
   }
 
-  app.post('/api/v1/query', async (c) => {
-    const { user } = c.get('identity')
-    const sent = await body(c)
+  app.post('/api/v1/query', async (c) => c.json(await queryAs(c.get('identity').user, await body(c))))
+
+  /** The rows of a query, as the user sees them, here and at each site. */
+  async function queryAs(user: string, sent: Record<string, unknown>): Promise<QueryAnswer> {
     const { roles } = await who(user)
-    if (remotes.length === 0) return c.json(await rows(deps.backends, user, roles, sent))
+    if (remotes.length === 0) return rows(deps.backends, user, roles, sent)
     // Each part gives its first rows; the page is cut from all of them.
     const offset = typeof sent.offset === 'number' && Number.isInteger(sent.offset) && sent.offset > 0 ? sent.offset : 0
     const limit = typeof sent.limit === 'number' && Number.isInteger(sent.limit) && sent.limit >= 0 ? sent.limit : undefined
     const sort = (Array.isArray(sent.sort) ? sent.sort : []).filter((k): k is { column: string; desc?: boolean } => typeof k?.column === 'string')
     const top = { ...sent, offset: 0, limit: limit === undefined ? undefined : offset + limit }
     const parts = await everywhere<QueryAnswer>(user, top, '/api/v1/query', (names) => rows(deps.backends, user, roles, { ...top, backends: names }), () => ({ rows: [], total: 0, errors: {} }))
-    return c.json(combine(parts, sort, offset, limit))
-  })
+    return combine(parts, sort, offset, limit)
+  }
 
   app.post('/api/v1/stats', async (c) => {
     const { user } = c.get('identity')
@@ -916,17 +921,21 @@ export function buildApp(deps: Deps): Hono<Env> {
     const from = Number(c.req.query('from'))
     const to = Number(c.req.query('to'))
     const span = Number.isFinite(from) && Number.isFinite(to) && to > from && c.req.query('from') !== undefined ? { from: Math.max(from, to - 92 * 86400), to } : null
-    const over = span ?? hours
+    return c.json(await graphAs(user, name, host, service, span ?? hours))
+  })
+
+  /** The graphs of a host or a service, for a user who sees it. */
+  async function graphAs(user: string, name: string, host: string, service: string, over: number | { from: number; to: number }): Promise<{ enabled: boolean; series: Series[] }> {
     if (/[\r\n]/.test(host + service) || host === '') throw new Refused('a graph is of a host, or of a host and a service')
     const site = remotes.find((r) => r.owns(name))
     if (site) {
       await site.session(user)
-      const query = new URLSearchParams({ backend: site.theirs(name) ?? name, host, service, ...(span ? { from: String(span.from), to: String(span.to) } : { hours: String(hours) }) })
-      return c.json(await site.call(user, 'GET', `/api/v1/graph?${query.toString()}`))
+      const query = new URLSearchParams({ backend: site.theirs(name) ?? name, host, service, ...(typeof over === 'number' ? { hours: String(over) } : { from: String(over.from), to: String(over.to) }) })
+      return site.call(user, 'GET', `/api/v1/graph?${query.toString()}`)
     }
     const backend = deps.backends.find((b) => b.name === name)
     if (!backend) throw new Refused(`no backend '${name}'`)
-    if (!deps.graphs) return c.json({ enabled: false, series: [] })
+    if (!deps.graphs) return { enabled: false, series: [] }
     const { roles } = await who(user)
     const all = roles.has('all_hosts') || (service !== '' && roles.has('all_services'))
     if (!all) {
@@ -934,7 +943,53 @@ export function buildApp(deps: Deps): Hono<Env> {
       const target: Target = service === '' ? { kind: 'host', host } : { kind: 'service', host, service }
       if (!limited || !(await sees(backend, user, target))) throw new Forbidden("not one of this user's hosts or services")
     }
-    return c.json({ enabled: true, series: deps.graphs.series(name, host, service, over) })
+    return { enabled: true, series: deps.graphs.series(name, host, service, over) }
+  }
+
+  /** What the interface is told of the assistant: nothing where it is not
+   * set up, or the user may neither use it nor set its key. */
+  function assistantFor(identity: Identity, roles: Roles): { assistant?: AssistantState } {
+    const assistant = deps.assistant
+    if (!assistant || identity.peer) return {}
+    const uses = assistant.allows(identity.user)
+    const setsKey = roles.has('config_edit')
+    if (!uses && !setsKey) return {}
+    return { assistant: { ready: uses && assistant.hasKey(), key: assistant.hasKey(), set_key: setsKey } }
+  }
+
+  // The assistant's key: for config_edit, kept on this nuthatch.
+  app.put('/api/v1/assistant/key', async (c) => {
+    const { user, peer } = c.get('identity')
+    if (!deps.assistant) throw new Refused('the assistant is not set up on this server ([assistant] in its config)')
+    if (peer || !(await who(user)).roles.has('config_edit')) throw new Forbidden('the assistant’s key is for the role config_edit')
+    deps.assistant.setKey((await body(c)).key)
+    deps.store.audit(user, '', 'assistant key', deps.assistant.hasKey() ? 'set' : 'removed')
+    return c.json({ key: deps.assistant.hasKey() })
+  })
+
+  // A question to the assistant: the answer comes as it is written, with
+  // a line for each thing it looks at. It reads as the user, through the
+  // same checks as the pages.
+  app.post('/api/v1/assistant', async (c) => {
+    const { user, peer } = c.get('identity')
+    const assistant = deps.assistant
+    if (!assistant) throw new Refused('the assistant is not set up on this server ([assistant] in its config)')
+    if (peer || !assistant.allows(user)) throw new Forbidden('the assistant is not turned on for this user')
+    const sent = await body(c)
+    // Refused here, before the stream starts, when it is not a conversation.
+    conversation(sent.turns, sent.about)
+    const reader: Reader = {
+      query: (query) => queryAs(user, query),
+      graph: (backend, host, service, hours) => graphAs(user, backend, host, service, hours),
+    }
+    const spent = (steps: number, input: number, output: number) => deps.store.audit(user, '', 'assistant', `${steps} steps, ${input} tokens in, ${output} out`)
+    return streamSSE(c, async (stream) => {
+      const abort = new AbortController()
+      stream.onAbort(() => abort.abort())
+      for await (const said of assistant.answer(user, sent.turns, sent.about, reader, abort.signal, spent)) {
+        await stream.writeSSE({ event: said.kind, data: JSON.stringify(said) })
+      }
+    })
   })
 
   // Notifications pushed to this user's browsers.

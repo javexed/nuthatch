@@ -95,6 +95,10 @@ maintainer and no promised time to answer. Only the newest commit of
   while nuthatch is down is still sent.
 - With `[graphs]`: a second file with the numbers checks return, by host
   and service name, for the days configured.
+- With `[assistant]`: in the store, the Anthropic API key, **in plain
+  text** (it has to be sent), and in the audit log how many steps and
+  tokens each answer took. Not the questions or the answers: those stay
+  in the browser until the page is closed.
 - Nothing else of what is monitored: pages ask the engine each time. The
   service worker of the installed app keeps only the interface's own
   files.
@@ -123,6 +127,12 @@ maintainer and no promised time to answer. Only the newest commit of
   address given, to see what answers.
 - Agents fetch their installer and binaries, and ask for updates, from
   nuthatch: that comes in, from the hosts.
+- **The assistant**, with `[assistant]` and a key set: each question, the
+  conversation before it, and what the assistant reads to answer it (host
+  and service names, addresses, states, plugin output, log lines,
+  performance data: as much as the asking user may see) go to Anthropic's
+  API. Anthropic's terms for the API decide what is kept there. Without
+  `[assistant]` nothing is sent. See [docs/assistant.md](docs/assistant.md).
 - The page loads nothing from anywhere but the server itself.
 
 ## Not yet looked at by anyone else

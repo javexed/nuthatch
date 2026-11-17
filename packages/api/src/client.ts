@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings } from './types.ts'
+import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings, AssistantEvent, AssistantTurn } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -290,6 +290,44 @@ export class Client {
    */
   changeConfig(backend: string, revision: string, change: ConfigChange, dryRun = false): Promise<ConfigResult> {
     return this.call('POST', `/api/v1/config/${encodeURIComponent(backend)}`, { revision, change, dry_run: dryRun })
+  }
+
+  /** Sets the assistant's API key (config_edit); '' takes it away. */
+  setAssistantKey(key: string): Promise<{ key: boolean }> {
+    return this.call('PUT', '/api/v1/assistant/key', { key })
+  }
+
+  /**
+   * Asks the assistant: the answer comes to `onEvent` as it is written,
+   * until it is done, fails, or `signal` aborts.
+   */
+  async ask(turns: AssistantTurn[], about: { backend: string; host: string; service?: string } | undefined, onEvent: (event: AssistantEvent) => void, signal: AbortSignal): Promise<void> {
+    const headers = { ...this.headers(true), 'Content-Type': 'application/json' }
+    const answer = await this.fetch(this.base + '/api/v1/assistant', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ turns, ...(about ? { about } : {}) }),
+      credentials: this.token ? 'omit' : 'same-origin',
+      signal,
+    })
+    if (!answer.ok || !answer.body) {
+      let message = `the server answered ${answer.status}`
+      try {
+        message = ((await answer.json()) as { error?: string }).error ?? message
+      } catch {
+        // Not JSON.
+      }
+      throw new ApiError(answer.status, message)
+    }
+    const reader = answer.body.pipeThrough(new TextDecoderStream()).getReader()
+    let buffer = ''
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      const parsed = parseEvents(buffer + (value ?? '').replace(/\r\n/g, '\n'))
+      buffer = parsed.rest
+      for (const { data } of parsed.events) onEvent(JSON.parse(data) as AssistantEvent)
+    }
   }
 
   /**

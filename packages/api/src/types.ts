@@ -41,7 +41,27 @@ export interface Session {
   config_backends: string[]
   /** Backends whose agents this user may add here. */
   agent_backends?: string[]
+  /** The assistant, where it is set up and this user may use it or set its key. */
+  assistant?: AssistantState
 }
+
+export interface AssistantState {
+  /** This user can ask it now. */
+  ready: boolean
+  /** An API key is kept. */
+  key: boolean
+  /** This user may set the key (config_edit). */
+  set_key: boolean
+}
+
+/** A turn of a conversation with the assistant. */
+export interface AssistantTurn {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+/** What the assistant sends while it answers. */
+export type AssistantEvent = { kind: 'text'; text: string } | { kind: 'tool'; text: string } | { kind: 'done'; steps: number } | { kind: 'error'; error: string }
 
 export interface Sort {
   column: string

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AssistantPanel from './components/AssistantPanel.vue'
 import BottomBar from './components/BottomBar.vue'
 import ConnectionDot from './components/ConnectionDot.vue'
 import { pulled } from './lib/gestures'
 import { updateReady, watchForUpdates } from './lib/update'
+import { useAssistant } from './stores/assistant'
 import { useLive } from './stores/live'
 import { useSession } from './stores/session'
 
@@ -52,7 +54,10 @@ function pullEnd() {
   setTimeout(() => (refreshed.value = false), 900)
 }
 
+const assistant = useAssistant()
+
 async function logout() {
+  assistant.clear()
   await session.logout()
   await router.push({ name: 'login' })
 }
@@ -98,8 +103,9 @@ const logo = `${import.meta.env.BASE_URL}favicon.svg`
     <span class="spinner" :style="refreshed ? undefined : { animation: 'none', transform: `rotate(${pullAmount * 300}deg)` }"></span>
     {{ refreshed ? 'Refreshing…' : pullAmount >= 1 ? 'Let go to refresh' : 'Pull to refresh' }}
   </div>
-  <main :class="{ 'with-tabbar': session.session }" @touchstart.passive="pullStart" @touchmove.passive="pullMove" @touchend.passive="pullEnd" @touchcancel.passive="pull = null">
+  <main :class="{ 'with-tabbar': session.session, 'with-assistant': session.session?.assistant?.ready }" @touchstart.passive="pullStart" @touchmove.passive="pullMove" @touchend.passive="pullEnd" @touchcancel.passive="pull = null">
     <RouterView :key="$route.path" />
   </main>
+  <AssistantPanel v-if="session.session?.assistant?.ready" />
   <BottomBar v-if="session.session" :more="MORE" @logout="logout" />
 </template>

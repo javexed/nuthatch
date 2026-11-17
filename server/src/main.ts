@@ -17,6 +17,7 @@ import { parse } from 'smol-toml'
 import { type Peer, VERSION, buildApp, hostsOnly, userName } from './app.ts'
 import { Htpasswd, Limiter, tailnetUsers } from './auth.ts'
 import { Agents, type Pin, pinOf } from './agents.ts'
+import { Assistant, DEFAULT_MODEL, EFFORTS, type Effort } from './assistant.ts'
 import { HostSetup } from './hostsetup.ts'
 import { type Backend, LivestatusBackend } from './backend.ts'
 import { pluginsDir } from './catalogue.ts'
@@ -30,7 +31,7 @@ import { RemoteSite } from './remote.ts'
 import { Store } from './store.ts'
 
 const USAGE = 'usage: nuthatch <config file>\n\nSee README.md for the config file.'
-const KEYS = ['agents', 'listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'notifications', 'graphs', 'roles', 'backend', 'peer', 'app_origins']
+const KEYS = ['agents', 'listen', 'web_root', 'store', 'htpasswd', 'dev_user', 'behind_proxy', 'tailscale', 'notifications', 'graphs', 'assistant', 'roles', 'backend', 'peer', 'app_origins']
 
 function fail(message: string): never {
   console.error(message)
@@ -329,11 +330,25 @@ function main(): void {
     graphs = new Graphs(`${storePath}-graphs`, days, backends)
   }
 
+  // [assistant]: a chat about what the engines say, by Claude; the API key
+  // is set in the interface, by config_edit.
+  let assistant: Assistant | undefined
+  if (config.assistant !== undefined) {
+    const { model = DEFAULT_MODEL, effort = 'medium', users } = table(`${path}: [assistant]`, config.assistant, ['model', 'effort', 'users'])
+    if (typeof model !== 'string' || !/^[a-z0-9][a-z0-9.-]{1,99}$/.test(model)) fail(`${path}: [assistant] model is a model's name, such as "${DEFAULT_MODEL}"`)
+    if (!EFFORTS.includes(effort as Effort)) fail(`${path}: [assistant] effort is one of ${EFFORTS.join(', ')}`)
+    if (!Array.isArray(users) || users.length === 0 || users.some((u) => typeof u !== 'string' || (u !== '*' && !userName(u)))) {
+      fail(`${path}: [assistant] users lists who may use it, or "*" for everyone who logs in`)
+    }
+    assistant = new Assistant(store, { model, effort: effort as Effort, users: users as string[] })
+  }
+
   const app = buildApp({
     backends,
     store,
     pusher,
     graphs,
+    assistant,
     events: new Events(backends),
     roles,
     limiter: new Limiter(),

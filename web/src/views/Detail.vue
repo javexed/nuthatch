@@ -17,10 +17,12 @@ import { type Target, deleteComment, deleteDowntime, recheck, removeAcknowledgem
 import { ago, dateTime, duration } from '../lib/format'
 import { fraction, labelText, parsePerfdata } from '../lib/perfdata'
 import { useLive, useLoader } from '../stores/live'
+import { useAssistant } from '../stores/assistant'
 import { api, useSession } from '../stores/session'
 
 const props = defineProps<{ backend: string; host: string; service?: string }>()
 const session = useSession()
+const assistant = useAssistant()
 const live = useLive()
 const kind = computed(() => (props.service === undefined ? 'host' : 'service'))
 const target = computed<Target>(() => ({ backend: props.backend, host: props.host, service: props.service }))
@@ -164,6 +166,7 @@ async function send(command: Command, done: string): Promise<boolean> {
       </div>
       <p v-if="notice" class="notice" role="status">{{ notice }}</p>
       <div class="actions">
+        <button v-if="problem && session.session?.assistant?.ready" type="button" class="quiet" :disabled="assistant.busy" @click="assistant.explain({ backend, host, ...(service !== undefined ? { service } : {}) })">Explain</button>
         <PinButton :panel="{ type: 'status', of: { backend, host, ...(service !== undefined ? { service } : {}) } }" />
       </div>
     </section>

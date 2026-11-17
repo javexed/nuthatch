@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The few line icons of the bottom bar, drawn here.
-defineProps<{ name: 'overview' | 'problems' | 'hosts' | 'services' | 'more' }>()
+defineProps<{ name: 'overview' | 'problems' | 'hosts' | 'services' | 'more' | 'chat' }>()
 </script>
 
 <template>
@@ -18,6 +18,9 @@ defineProps<{ name: 'overview' | 'problems' | 'hosts' | 'services' | 'more' }>()
     </template>
     <template v-else-if="name === 'services'">
       <path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12" /><path d="M4 6.5h.01M4 12h.01M4 17.5h.01" />
+    </template>
+    <template v-else-if="name === 'chat'">
+      <path d="M4.5 5.5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4.5 3.5v-3.5h-1a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" /><path d="M8 10.5h.01M12 10.5h.01M16 10.5h.01" />
     </template>
     <template v-else>
       <path d="M4 7h16M4 12h16M4 17h16" />

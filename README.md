@@ -235,11 +235,14 @@ here and in the Android app, are made from `docs/logo.svg` by
 - `[notifications]`: on phones and desktops, see
   [docs/notifications.md](docs/notifications.md).
 - `[agents]` and `[backend.agents]`: see [docs/agents.md](docs/agents.md).
+- `[assistant]`: a chat that reads the engines and explains problems,
+  by Claude; see [docs/assistant.md](docs/assistant.md).
 
 ## Dependencies
 
 The server: Hono for HTTP, `bcryptjs` and `unixcrypt` for the password
-forms of htpasswd, `smol-toml` for the config file, and Node's own SQLite.
+forms of htpasswd, `smol-toml` for the config file, Node's own SQLite,
+and Anthropic's SDK (`@anthropic-ai/sdk`) for the assistant.
 Node runs the TypeScript as it is; nothing is compiled to install it.
 
 ## Tests
