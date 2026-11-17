@@ -5,8 +5,8 @@
 A web interface for monitoring engines of the Nagios family. It shows
 the state of hosts and services, and lets people act on them: check now,
 acknowledge, schedule a downtime, comment. It talks Livestatus, so it
-works with [Naemon](https://www.naemon.io/) and with checkd, the engine
-it is written beside. It covers the everyday pages of Thruk (status,
+works with [Naemon](https://www.naemon.io/) and with
+[checkd](https://github.com/javexed/checkd), the engine it is written beside. It covers the everyday pages of Thruk (status,
 problems, history, availability, commands, config), written anew, and is
 made to be used on a phone as much as at a desk.
 

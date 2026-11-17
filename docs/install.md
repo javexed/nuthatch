@@ -23,7 +23,7 @@ differ.
 
     sudo useradd --system --home-dir /var/lib/nuthatch --shell /usr/sbin/nologin nuthatch
     sudo usermod -aG naemon nuthatch
-    sudo git clone <nuthatch's repository> /opt/nuthatch
+    sudo git clone https://github.com/javexed/nuthatch.git /opt/nuthatch
     cd /opt/nuthatch && sudo corepack enable && sudo pnpm install --frozen-lockfile && sudo pnpm build
 
 The group `naemon` lets nuthatch open the socket, read Naemon's config,
