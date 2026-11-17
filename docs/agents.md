@@ -170,7 +170,8 @@ the host, or an address of this machine the host has no way to.
 
 ## Settings
 
-    # The agent binaries: checkd's dist/agent (scripts/build-agents.sh).
+    # The agent binaries: checkd's dist/agent (scripts/build-agents.sh), or
+    # checkd-agents-<version>.tar.gz of a checkd release, unpacked.
     [agents]
     bin = "/opt/checkd/dist/agent"
 
