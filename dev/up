@@ -82,7 +82,7 @@ checkd)
     # left them beside the binary's checkout.
     agents=$(dirname "$(realpath "$checkd")")/../../dist/agent
     [ -d "$agents" ] && ln -sfn "$(realpath "$agents")" "$run/agent-bin"
-    # --http: where services that take pushes are told their results.
+    # --http: where services that take passive results are told them.
     exec "$checkd" run --log-file - --store "sqlite:$run/checkd.sqlite" --http 127.0.0.1:6560 \
         --workers "$run/workers/workers.cfg" "$run/naemon.cfg"
     ;;

@@ -24,10 +24,10 @@ const split = (line: string | undefined): Command => {
 const joined = (c: Command) => (c.name === '' ? undefined : c.args === '' ? c.name : `${c.name}!${c.args}`)
 
 /** What a service is: checked by a command, told its result, or worked out from others. */
-type Kind = 'command' | 'push' | 'aggregate'
+type Kind = 'command' | 'passive' | 'aggregate'
 interface Extra {
   kind: Kind
-  /** Hours within which a push is expected; empty for no alarm. */
+  /** Hours within which a result is expected; empty for no alarm. */
   hours: number | ''
   token: string
   /** Members (one per line). */
@@ -35,9 +35,9 @@ interface Extra {
   min: string
 }
 const extraOf = (s?: ManagedService): Extra => ({
-  kind: s?.push ? 'push' : s?.aggregate ? 'aggregate' : 'command',
-  hours: s?.push?.every ? Math.round((s.push.every / 3600) * 100) / 100 : '',
-  token: s?.push?.token ?? '',
+  kind: s?.passive ? 'passive' : s?.aggregate ? 'aggregate' : 'command',
+  hours: s?.passive?.every ? Math.round((s.passive.every / 3600) * 100) / 100 : '',
+  token: s?.passive?.token ?? '',
   members: (s?.aggregate?.members ?? []).join('\n'),
   min: s?.aggregate?.min ?? '',
 })
@@ -69,10 +69,10 @@ function result(): ManagedHost {
     check_command: joined(command),
     services: host.services.map((service, n) => {
       const extra = extras[n] ?? extraOf()
-      const { push: _push, aggregate: _aggregate, ...plain } = service
-      if (extra.kind === 'push') {
+      const { passive: _passive, aggregate: _aggregate, ...plain } = service
+      if (extra.kind === 'passive') {
         // An empty token asks the server for a new one.
-        return { ...plain, check_command: undefined, push: { token: extra.token, ...(extra.hours === '' ? {} : { every: Math.round(Number(extra.hours) * 3600) }) } }
+        return { ...plain, check_command: undefined, passive: { token: extra.token, ...(extra.hours === '' ? {} : { every: Math.round(Number(extra.hours) * 3600) }) } }
       }
       if (extra.kind === 'aggregate') {
         const members = extra.members.split('\n').map((m) => m.trim()).filter((m) => m !== '')
@@ -148,7 +148,7 @@ function result(): ManagedHost {
           Kind
           <select v-model="form.extras[n]!.kind" :name="`service-${n}-kind`">
             <option value="command">command</option>
-            <option value="push">pushed</option>
+            <option value="passive">passive</option>
             <option value="aggregate">aggregate</option>
           </select>
         </label>
@@ -165,7 +165,7 @@ function result(): ManagedHost {
             <input v-model="form.serviceCommands[n]!.args" :name="`service-${n}-args`" maxlength="400" />
           </label>
         </template>
-        <template v-else-if="form.extras[n]!.kind === 'push'">
+        <template v-else-if="form.extras[n]!.kind === 'passive'">
           <label>
             Alarm after (hours)
             <input v-model="form.extras[n]!.hours" :name="`service-${n}-hours`" type="number" min="0.02" max="8784" step="any" placeholder="never" />

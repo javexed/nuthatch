@@ -46,8 +46,8 @@ paths = { "/run-site" = "dev/run/naemon", "/site" = "dev" }
 [[backend]]
 name = "checkd"
 livestatus = "unix:dev/run/checkd/live"
-# Where jobs reach its HTTP API, to push results (dev/up starts it there).
-push_url = "http://127.0.0.1:6560"
+# Where its HTTP API is reached (dev/up starts it there).
+http_url = "http://127.0.0.1:6560"
 
 [backend.config]
 dir = "dev/run/checkd/managed"

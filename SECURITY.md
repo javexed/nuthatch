@@ -110,7 +110,7 @@ maintainer and no promised time to answer. Only the newest commit of
 - **Other sites' nuthatch**, with `nuthatch = "https://..."` under a
   backend: requests for the logged-in user, with a key for that site
   ([docs/sites.md](docs/sites.md)).
-- **checkd's `/metrics`**, with `[backend.agents]` and `push_url`: read to
+- **checkd's `/metrics`**, with `[backend.agents]` and `http_url`: read to
   show which agents are connected.
 - **E-mail, chat and ntfy**, when set up for a contact: the host, service,
   state and plugin output of each notification, to the mail server and

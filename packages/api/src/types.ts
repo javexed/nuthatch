@@ -129,7 +129,7 @@ export interface ManagedService {
    * one. With `every`, seconds, the service is CRITICAL when nothing
    * came for that long.
    */
-  push?: { token: string; every?: number }
+  passive?: { token: string; every?: number }
   /**
    * A service that stands for others (checkd): hosts (`web1`, `web*`,
    * `@group`) and services (`web1/http`). With `min`, a number or a
@@ -142,16 +142,16 @@ export interface ManagedService {
   run_on?: 'engine' | 'agent'
 }
 
-/** How a service takes pushes, for those who may see the config. */
-export interface PushInfo {
+/** How a service takes passive results, for those who may see the config. */
+export interface PassiveInfo {
   takes: boolean
   /** The path to call at the engine's HTTP API. */
   path?: string
-  /** The whole address, where the server knows it (`push_url` of the backend). */
+  /** The whole address, where the server knows it (`http_url` of the backend). */
   url?: string
-  /** Seconds within which a push is expected. */
+  /** Seconds within which a result is expected. */
   every?: number
-  /** When the last result came, pushed or not; 0 for never. */
+  /** When the last result came, by HTTP or not; 0 for never. */
   last?: number
 }
 
@@ -244,7 +244,7 @@ export interface ConfigState {
   choices: { commands: string[]; contacts: string[]; contactgroups: string[]; hostgroups: string[]; servicegroups: string[]; timeperiods?: string[]; hosts?: string[] }
   /** The check commands nuthatch can add itself when a host uses one (its own, for suggested checks). */
   catalogue?: string[]
-  /** Whether the engine is checkd, which has services that take pushes and services that stand for others. */
+  /** Whether the engine is checkd, which has services that take passive results and services that stand for others. */
   extras?: boolean
 }
 

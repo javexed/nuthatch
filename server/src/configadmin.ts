@@ -20,7 +20,7 @@ import type { ConfigChange, ConfigResult, ConfigState, ManagedContact, ManagedGr
 import type { Backend } from './backend.ts'
 import { type Definition, type PathMap, attr, mainWith, parseObjects, readMain, templates, writeObjects } from './nagioscfg.ts'
 import { randomBytes } from 'node:crypto'
-import { AGGREGATE_COMMAND, NOTIFY_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, FROM_OUTSIDE, ON_AGENT, PUSHED_COMMAND, catalogueFile, catalogueFor } from './catalogue.ts'
+import { AGGREGATE_COMMAND, NOTIFY_COMMAND, CATALOGUE_FILE, CATALOGUE_HOST, CATALOGUE_NAMES, FROM_OUTSIDE, ON_AGENT, PASSIVE_COMMAND, catalogueFile, catalogueFor } from './catalogue.ts'
 import { Refused } from './policy.ts'
 import { now } from './store.ts'
 
@@ -74,15 +74,15 @@ export function aggregateOf(args: string): ManagedService['aggregate'] | undefin
   return min === undefined ? { members } : { members, min }
 }
 
-function pushOf(given: unknown, what: string): ManagedService['push'] {
-  if (typeof given !== 'object' || given === null) throw new Refused(`${what}: what it takes pushes with is needed`)
+function passiveOf(given: unknown, what: string): ManagedService['passive'] {
+  if (typeof given !== 'object' || given === null) throw new Refused(`${what}: what it takes passive results with is needed`)
   const p = given as Record<string, unknown>
   // A token is made here, never taken on trust from a form's default.
   const token = p.token === undefined || p.token === '' ? randomBytes(16).toString('hex') : p.token
   if (typeof token !== 'string' || !TOKEN.test(token)) throw new Refused(`${what}: a token is 16 to 64 letters, digits, '-' and '_'`)
   if (p.every === undefined || p.every === null || p.every === '') return { token }
   const every = Number(p.every)
-  if (!Number.isInteger(every) || every < 60 || every > 366 * 86400) throw new Refused(`${what}: the time within which a push is expected is 60 seconds to a year`)
+  if (!Number.isInteger(every) || every < 60 || every > 366 * 86400) throw new Refused(`${what}: the time within which a result is expected is 60 seconds to a year`)
   return { token, every }
 }
 
@@ -155,12 +155,12 @@ export function checkHost(given: unknown, choices: Choices, known: Templates, ex
     const what = `service ${given.description}`
     if (services.some((s) => s.description === given.description)) throw new Refused(`${what} is there twice`)
     if (typeof given.use !== 'string' || !known.service.includes(given.use)) throw new Refused(`${what}: choose one of the service templates`)
-    const push = given.push === undefined || given.push === null ? undefined : pushOf(given.push, what)
+    const passive = given.passive === undefined || given.passive === null ? undefined : passiveOf(given.passive, what)
     const aggregate = given.aggregate === undefined || given.aggregate === null ? undefined : aggregateGiven(given.aggregate, what)
-    if ((push || aggregate) && !extras) throw new Refused(`${what}: only checkd has services that take pushes or stand for others`)
-    if (push && aggregate) throw new Refused(`${what} takes pushes or stands for others, not both`)
-    const checkCommand = push
-      ? PUSHED_COMMAND
+    if ((passive || aggregate) && !extras) throw new Refused(`${what}: only checkd has services that take passive results or stand for others`)
+    if (passive && aggregate) throw new Refused(`${what} takes passive results or stands for others, not both`)
+    const checkCommand = passive
+      ? PASSIVE_COMMAND
       : aggregate
         ? `${AGGREGATE_COMMAND}!${aggregateArgs(aggregate)}`
         : command(given.check_command, `${what}: the check command`, choices.commands)
@@ -178,7 +178,7 @@ export function checkHost(given: unknown, choices: Choices, known: Templates, ex
       contact_groups: names(given.contact_groups, `${what}: contact groups`, choices.contactgroups),
       notes: text(given.notes, `${what}: notes`),
       downtime_period: period(given.downtime_period, `${what}: the downtime's timeperiod`, choices.timeperiods, extras),
-      ...(push ? { push } : {}),
+      ...(passive ? { passive } : {}),
       ...(aggregate ? { aggregate } : {}),
       ...(runOn ? { run_on: runOn } : {}),
     })
@@ -372,14 +372,13 @@ export function hostFile(host: ManagedHost): string {
     put(attrs, 'notes', service.notes)
     put(attrs, '_CHECKD_DOWNTIME_PERIOD', service.downtime_period)
     if (service.run_on) attrs.push(['_CHECKD_RUN_ON', service.run_on])
-    if (service.push) {
-      // Told its result, never checked.
+    if (service.passive) {
       // Told its result, never checked but when freshness finds nothing
       // came in time (checkd and Naemon alike), which the command answers
       // CRITICAL.
       attrs.push(['active_checks_enabled', '0'])
-      if (service.push.every !== undefined) attrs.push(['check_freshness', '1'], ['freshness_threshold', String(service.push.every)])
-      attrs.push(['_CHECKD_PUSH_TOKEN', service.push.token])
+      if (service.passive.every !== undefined) attrs.push(['check_freshness', '1'], ['freshness_threshold', String(service.passive.every)])
+      attrs.push(['_CHECKD_PASSIVE_TOKEN', service.passive.token])
     }
     // Worked out by the engine, which costs nothing: every minute.
     if (service.aggregate) attrs.push(['check_interval', '1'])
@@ -406,18 +405,18 @@ export function readHostFile(content: string): ManagedHost {
     if (d.type !== 'service') throw new Error(`it defines a ${d.type}`)
     if (attr(d, 'host_name') !== name) throw new Error('it has a service of another host')
     const command = attr(d, 'check_command')
-    const token = attr(d, '_CHECKD_PUSH_TOKEN')
+    const token = attr(d, '_CHECKD_PASSIVE_TOKEN')
     const every = attr(d, 'check_freshness') === '1' ? attr(d, 'freshness_threshold') : undefined
     const aggregate = command?.startsWith(`${AGGREGATE_COMMAND}!`) ? aggregateOf(command.slice(AGGREGATE_COMMAND.length + 1)) : undefined
-    const push = token !== undefined && command === PUSHED_COMMAND ? { token, ...(every !== undefined ? { every: Number(every) } : {}) } : undefined
+    const passive = token !== undefined && command === PASSIVE_COMMAND ? { token, ...(every !== undefined ? { every: Number(every) } : {}) } : undefined
     // The further settings are nuthatch's only on a service of those two kinds, as it writes them.
-    const extra = push ? ['_CHECKD_PUSH_TOKEN', 'check_freshness', 'freshness_threshold', 'active_checks_enabled'] : aggregate ? ['check_interval'] : []
+    const extra = passive ? ['_CHECKD_PASSIVE_TOKEN', 'check_freshness', 'freshness_threshold', 'active_checks_enabled'] : aggregate ? ['check_interval'] : []
     if (strange(d, [...SERVICE_KEYS, ...extra]) !== undefined) {
       throw new Error(`a service has '${strange(d, [...SERVICE_KEYS, ...extra])}', which nuthatch does not edit`)
     }
     if (command?.startsWith(`${AGGREGATE_COMMAND}!`) && !aggregate) throw new Error('a service stands for others in a way nuthatch does not write')
     services.push({
-      ...(push ? { push } : {}),
+      ...(passive ? { passive } : {}),
       ...(aggregate ? { aggregate } : {}),
       description: attr(d, 'service_description') ?? '',
       use: attr(d, 'use') ?? '',

@@ -11,7 +11,7 @@ export const CATALOGUE_FILE = 'nuthatch-commands.cfg'
 export const CATALOGUE_HOST = 'nuthatch-commands'
 
 export const AGGREGATE_COMMAND = 'nuthatch_aggregate'
-export const PUSHED_COMMAND = 'nuthatch_pushed'
+export const PASSIVE_COMMAND = 'nuthatch_passive'
 /** A contact's notification command when nuthatch reaches them (delivery.ts):
  * it does nothing, but the engine logs each notification, which nuthatch reads. */
 export const NOTIFY_COMMAND = 'nuthatch_notify'
@@ -27,9 +27,9 @@ const COMMANDS: [string, string][] = [
   ['nuthatch_imap', '{plugins}/check_imap -H $HOSTADDRESS$ -p $ARG1$'],
   ['nuthatch_imaps', '{plugins}/check_imap -H $HOSTADDRESS$ -p $ARG1$ -S'],
   // checkd only. A service that stands for others; and the check of a
-  // service that takes pushes, run when freshness finds nothing came.
+  // service that takes passive results, run when freshness finds nothing came.
   [AGGREGATE_COMMAND, 'checkd:aggregate $ARG1$'],
-  [PUSHED_COMMAND, 'checkd:dummy 2 "nothing was pushed in time"'],
+  [PASSIVE_COMMAND, 'checkd:dummy 2 "nothing came in time"'],
   // checkd only: the machine itself, made by its agent (agent.md). A
   // state ends only when the value is clearly back under its limit (-C),
   // so one that wavers at a limit does not notify each time it crosses.
@@ -42,7 +42,7 @@ const COMMANDS: [string, string][] = [
 ]
 
 /** nuthatch's commands that only checkd can run. */
-export const CHECKD_ONLY = [AGGREGATE_COMMAND, PUSHED_COMMAND, 'nuthatch_disk', 'nuthatch_memory', 'nuthatch_load', 'nuthatch_cpu', 'nuthatch_service']
+export const CHECKD_ONLY = [AGGREGATE_COMMAND, PASSIVE_COMMAND, 'nuthatch_disk', 'nuthatch_memory', 'nuthatch_load', 'nuthatch_cpu', 'nuthatch_service']
 
 /** nuthatch's commands that look at a host from outside: on a host with an
  * agent, the engine makes them, not the agent. */

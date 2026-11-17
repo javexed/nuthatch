@@ -8,7 +8,7 @@ import CommandDialog, { type Action } from '../components/CommandDialog.vue'
 import EventLog from '../components/EventLog.vue'
 import HostAgent from '../components/HostAgent.vue'
 import PerfGraphs from '../components/PerfGraphs.vue'
-import PushInfo from '../components/PushInfo.vue'
+import PassiveInfo from '../components/PassiveInfo.vue'
 import PinButton from '../components/PinButton.vue'
 import AggregateMembers from '../components/AggregateMembers.vue'
 import StateBadge from '../components/StateBadge.vue'
@@ -198,7 +198,7 @@ async function send(command: Command, done: string): Promise<boolean> {
       <HostAgent :key="`agent ${backend}/${host}`" :backend="backend" :host="host" :address="String(object.address ?? '')" />
     </section>
     <AggregateMembers v-if="service !== undefined" :key="`agg ${backend}/${host}/${service}`" :backend="backend" :host="host" :service="service" />
-    <PushInfo v-if="service !== undefined && (session.has('config_edit') || session.has('configuration_information'))" :key="`${backend}/${host}/${service}`" :backend="backend" :host="host" :service="service" />
+    <PassiveInfo v-if="service !== undefined && (session.has('config_edit') || session.has('configuration_information'))" :key="`${backend}/${host}/${service}`" :backend="backend" :host="host" :service="service" />
     <PerfGraphs :backend="backend" :host="host" :service="service" />
     <section v-if="perf.length > 0" class="card">
       <h2>Performance data</h2>

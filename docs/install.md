@@ -129,11 +129,11 @@ The same steps, with checkd installed as its install notes say
   unit).
 
 - What only checkd has, each optional:
-  - services whose results are pushed over HTTP: start checkd with
+  - services that take passive results over HTTP: start checkd with
     `--http 127.0.0.1:6559`
     (`systemctl edit checkd`: an empty `ExecStart=`, then the unit's
     line with `--http 127.0.0.1:6559` added) and give the backend
-    `push_url = "http://127.0.0.1:6559"`; with `CHECKD_HTTP_TOKEN` set
+    `http_url = "http://127.0.0.1:6559"`; with `CHECKD_HTTP_TOKEN` set
     for checkd, `http_token_file` names the file that holds it
     ([config](config.md));
   - agents on other hosts: `[agents]` and `[backend.agents]`

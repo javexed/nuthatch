@@ -143,7 +143,7 @@ beside its template and its check command: how its state is found.
   form asks only after how many hours of silence the service is to go
   CRITICAL, if at all. nuthatch makes the address's token when the
   service is saved, and keeps it when the service is changed. The
-  address is on the service's own page, under "Takes pushes", for those
+  address is on the service's own page, under "Passive", for those
   with the role `config_edit` or `configuration_information`: whoever
   has it can set that one service to any state. For nuthatch to show
   the whole address, the backend says where checkd's HTTP API is
@@ -152,10 +152,10 @@ beside its template and its check command: how its state is found.
       [[backend]]
       name = "checkd"
       livestatus = "unix:/run/checkd/live"
-      push_url = "http://127.0.0.1:6559"
+      http_url = "http://127.0.0.1:6559"
 
   and checkd must be started with `--http` at that address (checkd's
-  `docs/push.md`).
+  `docs/passive.md`).
 - **From other hosts and services.** A service that stands for others:
   the members one to a line, a host (`web1`, `web*`, `@group` for a host
   group) or `host/service`, and how many must be OK, a number or a
@@ -168,8 +168,8 @@ timeperiod holds**: the form offers the engine's timeperiods (checkd's
 purpose goes in the engine's own files.
 
 Naemon has none of these, and its form does not offer them. In the files these
-are a service with `_CHECKD_PUSH_TOKEN`, `check_freshness` and the command
-`nuthatch_pushed` (which answers CRITICAL when freshness finds nothing
+are a service with `_CHECKD_PASSIVE_TOKEN`, `check_freshness` and the command
+`nuthatch_passive` (which answers CRITICAL when freshness finds nothing
 came in time), and
 one with the command `nuthatch_aggregate`.
 

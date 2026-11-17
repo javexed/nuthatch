@@ -21,7 +21,7 @@ test.beforeAll(async () => {
   }
 })
 
-test('a service that takes pushes and one that stands for others, on checkd', async ({ page, request }) => {
+test('a service that takes passive results and one that stands for others, on checkd', async ({ page, request }) => {
   const name = `extras-${test.info().project.name}`
   await login(page, 'admin')
   await goTo(page, 'Config')
@@ -32,10 +32,10 @@ test('a service that takes pushes and one that stands for others, on checkd', as
   await page.getByLabel('Address').fill('192.0.2.91')
 
   await page.getByRole('button', { name: 'Add a service' }).click()
-  const pushed = page.getByRole('group', { name: 'Service 1' })
-  await pushed.getByLabel('Name').fill('backup')
-  await pushed.getByRole('combobox', { name: 'Kind' }).selectOption('push')
-  await pushed.getByLabel('Alarm after').fill('25')
+  const passive = page.getByRole('group', { name: 'Service 1' })
+  await passive.getByLabel('Name').fill('backup')
+  await passive.getByRole('combobox', { name: 'Kind' }).selectOption('passive')
+  await passive.getByLabel('Alarm after').fill('25')
 
   await page.getByRole('button', { name: 'Add a service' }).click()
   const all = page.getByRole('group', { name: 'Service 2' })
@@ -49,17 +49,17 @@ test('a service that takes pushes and one that stands for others, on checkd', as
   await expect(page.getByRole('status')).toContainText(`${name} is saved, and the engine has it.`, { timeout: 90_000 })
   const services = await livestatus('checkd', `GET services\nColumns: description check_command active_checks_enabled\nFilter: host_name = ${name}`)
   expect(services.sort((a, b) => String(a[0]).localeCompare(String(b[0])))).toEqual([
-    ['backup', 'nuthatch_pushed', 0],
+    ['backup', 'nuthatch_passive', 0],
     ['web servers', 'nuthatch_aggregate!--min 2 web1 web2 db1', 1],
   ])
 
   // The service's page says how it is told, and the address works.
   await page.goto(`/service/checkd/${name}/backup`)
-  const section = page.getByRole('region', { name: 'Push' })
-  await expect(section).toContainText('CRITICAL after 25 hours without a push')
+  const section = page.getByRole('region', { name: 'Passive' })
+  await expect(section).toContainText('CRITICAL after 25 hours without a result')
   await section.getByRole('button', { name: 'Show address' }).click()
   const call = (await section.locator('pre.call').innerText()).trim()
-  expect(call).toMatch(/^curl -fsS http:\/\/127\.0\.0\.1:6560\/api\/v1\/push\/[0-9a-f]{32}$/)
+  expect(call).toMatch(/^curl -fsS http:\/\/127\.0\.0\.1:6560\/api\/v1\/passive\/[0-9a-f]{32}$/)
   await fits(page)
   const answer = await request.get(`${call.replace('curl -fsS ', '')}?output=${encodeURIComponent('42 files copied')}`)
   expect(answer.status()).toBe(200)
@@ -71,8 +71,8 @@ test('a service that takes pushes and one that stands for others, on checkd', as
   const members = page.getByRole('region', { name: 'Members' })
   await expect(members).toContainText('min 2')
   for (const name of ['web1', 'web2', 'db1']) await expect(members.getByRole('link', { name, exact: true })).toBeVisible()
-  // The pushed one is in the list of them.
-  await page.goto('/pushed')
+  // The passive one is in the list of them.
+  await page.goto('/passive')
   await expect(page.locator('table.rows')).toContainText(`${name} / backup`)
   await expect(page.locator('table.rows')).toContainText('42 files copied')
 
@@ -80,7 +80,7 @@ test('a service that takes pushes and one that stands for others, on checkd', as
   await page.goto('/config')
   await chooseBackend(page, 'checkd')
   await page.locator('.managed li', { hasText: name }).getByRole('button', { name: 'Change' }).click()
-  await expect(page.getByRole('group', { name: 'Service 1' }).getByRole('combobox', { name: 'Kind' })).toHaveValue('push')
+  await expect(page.getByRole('group', { name: 'Service 1' }).getByRole('combobox', { name: 'Kind' })).toHaveValue('passive')
   await expect(page.getByRole('group', { name: 'Service 2' }).getByLabel('Members')).toHaveValue('web1\nweb2\ndb1')
   await page.getByRole('button', { name: 'Cancel' }).click()
   page.once('dialog', (dialog) => void dialog.accept())

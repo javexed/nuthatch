@@ -22,7 +22,7 @@ describe('a mistyped config file', () => {
   it('is refused, not read as if the setting were not there', () => {
     expect(refused(`${backend}[[peer]]\nname = "central"\nkey_file = "${join(dir, 'peer.key')}"\nreadonly = true\n`)).toMatch(/\[\[peer\]\] has no setting 'readonly'.*read_only/)
     expect(refused(`${backend}[[peer]]\nname = "central"\nkey_file = "${join(dir, 'peer.key')}"\nread_only = "true"\n`)).toMatch(/read_only is true or false, without quotes/)
-    expect(refused('[[backend]]\nname = "site"\nlivestatus = "unix:/nowhere/live"\npush_ur = "http://127.0.0.1:6559"\n')).toMatch(/has no setting 'push_ur'/)
+    expect(refused('[[backend]]\nname = "site"\nlivestatus = "unix:/nowhere/live"\nhttp_ur = "http://127.0.0.1:6559"\n')).toMatch(/has no setting 'http_ur'/)
     expect(refused(`${backend}[backend.config]\ndir = "/x"\nmain = "/x/naemon.cfg"\nverify = ["naemon", "-v", "{main}"]\nrelaod = ["true"]\n`)).toMatch(/config has no setting 'relaod'/)
     expect(refused(`${backend}[backend.agents]\ndir = "/x"\nca = "/x/ca.crt"\nengine = ":4730"\nservername = "x"\n`)).toMatch(/agents has no setting 'servername'/)
     expect(refused('[[backend]]\nname = "far"\nnuthatch = "https://far.example.test"\nkey_file = "/x"\nlivestatus = "unix:/x"\n')).toMatch(/backend far has no setting 'livestatus'/)

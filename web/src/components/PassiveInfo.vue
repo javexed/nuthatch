@@ -1,20 +1,20 @@
 <script setup lang="ts">
-// How a service that takes pushes is told its result: the address a job
+// How a service that takes passive results is told its result: the address a job
 // calls. Shown to those who may see the config; the address is all a
 // caller needs, so it is shown only when asked for.
-import type { PushInfo } from '@nuthatch/api'
+import type { PassiveInfo } from '@nuthatch/api'
 import { onMounted, ref } from 'vue'
 import { dateTime } from '../lib/format'
 import { api } from '../stores/session'
 
 const props = defineProps<{ backend: string; host: string; service: string }>()
-const info = ref<PushInfo | null>(null)
+const info = ref<PassiveInfo | null>(null)
 const shown = ref(false)
 const copied = ref(false)
 
 onMounted(async () => {
   try {
-    info.value = await api.pushInfo(props.backend, props.host, props.service)
+    info.value = await api.passiveInfo(props.backend, props.host, props.service)
   } catch {
     // Not for this user, or not to be had: no section.
   }
@@ -39,9 +39,9 @@ async function copy(text: string) {
 </script>
 
 <template>
-  <section v-if="info?.takes" class="card push-info" aria-label="Push">
-    <h2>Push</h2>
-    <p v-if="info.every" class="by">CRITICAL after {{ span(info.every) }} without a push</p>
+  <section v-if="info?.takes" class="card passive-info" aria-label="Passive">
+    <h2>Passive</h2>
+    <p v-if="info.every" class="by">CRITICAL after {{ span(info.every) }} without a result</p>
     <p class="by">Last: {{ info.last ? dateTime(info.last) : 'never' }}</p>
     <button v-if="!shown" type="button" class="quiet" @click="shown = true">Show address</button>
     <template v-else>

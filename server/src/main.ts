@@ -115,7 +115,7 @@ function main(): void {
 
   const backends: Backend[] = []
   const admins = new Map<string, ConfigAdmin>()
-  const pushUrls = new Map<string, string>()
+  const httpUrls = new Map<string, string>()
   const httpTokens = new Map<string, string>()
   const agents = new Map<string, Agents>()
   const remotes: RemoteSite[] = []
@@ -131,7 +131,7 @@ function main(): void {
     return key
   }
   for (const each of tables('backend', config.backend)) {
-    const entry = table(`${path}: a [[backend]]`, each, ['name', 'livestatus', 'push_url', 'http_token_file', 'config', 'agents', 'nuthatch', 'key_file'])
+    const entry = table(`${path}: a [[backend]]`, each, ['name', 'livestatus', 'http_url', 'http_token_file', 'config', 'agents', 'nuthatch', 'key_file'])
     const { name, livestatus } = entry
     if (typeof name !== 'string' || name === '' || name.includes('/') || backends.some((b) => b.name === name) || remotes.some((r) => r.name === name)) {
       fail(`${path}: each backend needs a name of its own, without '/'`)
@@ -155,10 +155,10 @@ function main(): void {
     try {
       const backend = new LivestatusBackend(name, livestatus)
       backends.push(backend)
-      // Where jobs elsewhere reach the engine's HTTP API, to push results.
-      if (entry.push_url !== undefined) {
-        if (typeof entry.push_url !== 'string' || !/^https?:\/\/[^\s]+$/.test(entry.push_url)) fail(`${path}: backend ${name}: push_url is a URL`)
-        pushUrls.set(name, entry.push_url as string)
+      // Where checkd's HTTP API is reached: by jobs elsewhere, and for /metrics.
+      if (entry.http_url !== undefined) {
+        if (typeof entry.http_url !== 'string' || !/^https?:\/\/[^\s]+$/.test(entry.http_url)) fail(`${path}: backend ${name}: http_url is a URL`)
+        httpUrls.set(name, entry.http_url as string)
       }
       // checkd's CHECKD_HTTP_TOKEN, when it has one: the file holds the token,
       // or a line CHECKD_HTTP_TOKEN=... (checkd's own environment file).
@@ -199,11 +199,11 @@ function main(): void {
         }
         if (server_name !== undefined && (typeof server_name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(server_name))) fail(`${path}: backend ${name}: agents.server_name is a host name`)
         if (!existsSync(dir) || !existsSync(ca)) console.error(`warning: backend ${name}: agents.dir or agents.ca is not there yet`)
-        if (!pushUrls.get(name)) fail(`${path}: backend ${name}: agents need push_url, checkd's HTTP: its /metrics tells when a new agent has connected`)
+        if (!httpUrls.get(name)) fail(`${path}: backend ${name}: agents need http_url, checkd's HTTP: its /metrics tells when a new agent has connected`)
         const admin = admins.get(name)
         agents.set(
           name,
-          new Agents(backend, { dir, engine, ca, serverName: server_name as string | undefined, metrics: pushUrls.get(name), metricsToken: httpTokens.get(name) }, () =>
+          new Agents(backend, { dir, engine, ca, serverName: server_name as string | undefined, metrics: httpUrls.get(name), metricsToken: httpTokens.get(name) }, () =>
             admin ? admin.reload() : backend.command(`[${Math.floor(Date.now() / 1000)}] RESTART_PROGRAM`),
           ),
         )
@@ -342,7 +342,7 @@ function main(): void {
     webRoot: webRoot === undefined ? undefined : resolve(webRoot),
     config: admins,
     setup,
-    pushUrls,
+    httpUrls,
     agents,
     agentBin,
     agentBase,

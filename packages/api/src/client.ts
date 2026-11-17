@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PushInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings } from './types.ts'
+import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -136,13 +136,13 @@ export class Client {
     return this.call('GET', `/api/v1/aggregate/${encodeURIComponent(backend)}?${query.toString()}`)
   }
 
-  pushed(): Promise<{ services: { backend: string; host: string; service: string; state: number; last: number; output: string }[] }> {
-    return this.call('GET', '/api/v1/pushed')
+  passive(): Promise<{ services: { backend: string; host: string; service: string; state: number; last: number; output: string }[] }> {
+    return this.call('GET', '/api/v1/passive')
   }
 
-  pushInfo(backend: string, host: string, service: string): Promise<PushInfo> {
+  passiveInfo(backend: string, host: string, service: string): Promise<PassiveInfo> {
     const query = new URLSearchParams({ host, service })
-    return this.call('GET', `/api/v1/push-info/${encodeURIComponent(backend)}?${query.toString()}`)
+    return this.call('GET', `/api/v1/passive-info/${encodeURIComponent(backend)}?${query.toString()}`)
   }
 
   /** `addresses`: where hosts may reach nuthatch, when it has its own listener for them. */

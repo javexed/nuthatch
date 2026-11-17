@@ -476,13 +476,13 @@ describe('a host to write', () => {
     expect(() => readGroupFile(groupText(hosts).replace('alias', 'notes x\n    alias'))).toThrow(/does not edit/)
   })
 
-  it('has services that take pushes and services that stand for others', () => {
+  it('has services that take passive results and services that stand for others', () => {
     const service = (more: Record<string, unknown>) => ({ description: 'x', use: 'generic-service', servicegroups: [], contacts: [], contact_groups: [], ...more })
     const withServices = (...services: unknown[]) => ({ ...host, services })
     const checked = checkHost(
       withServices(
-        service({ description: 'backup', check_command: 'check_ping', push: { token: '', every: 90000 } }),
-        service({ description: 'kept', push: { token: 'abcdefghijklmnop' } }),
+        service({ description: 'backup', check_command: 'check_ping', passive: { token: '', every: 90000 } }),
+        service({ description: 'kept', passive: { token: 'abcdefghijklmnop' } }),
         service({ description: 'site', aggregate: { members: ['web*/http', '@web', 'db1/disk space'], min: '2' } }),
       ),
       choices,
@@ -490,27 +490,27 @@ describe('a host to write', () => {
     )
     const [backup, kept, site] = checked.services
     // A token is made here; what the service is decides its command.
-    expect(backup?.push?.token).toMatch(/^[0-9a-f]{32}$/)
-    expect(backup?.push?.every).toBe(90000)
-    expect(backup?.check_command).toBe('nuthatch_pushed')
-    expect(kept?.push).toEqual({ token: 'abcdefghijklmnop' })
+    expect(backup?.passive?.token).toMatch(/^[0-9a-f]{32}$/)
+    expect(backup?.passive?.every).toBe(90000)
+    expect(backup?.check_command).toBe('nuthatch_passive')
+    expect(kept?.passive).toEqual({ token: 'abcdefghijklmnop' })
     expect(site?.check_command).toBe("nuthatch_aggregate!--min 2 web*/http @web 'db1/disk space'")
     const text = hostFile(checked)
     expect(text).toMatch(/check_freshness\s+1/)
     expect(text).toMatch(/freshness_threshold\s+90000/)
-    expect(text).toContain('_CHECKD_PUSH_TOKEN')
+    expect(text).toContain('_CHECKD_PASSIVE_TOKEN')
     expect(text).toMatch(/active_checks_enabled\s+0/)
     expect(readHostFile(text)).toEqual(JSON.parse(JSON.stringify(checked)))
     expect(aggregateOf(aggregateArgs({ members: ['a', 'b/d e'], min: '50%' }))).toEqual({ members: ['a', 'b/d e'], min: '50%' })
 
     const bad = (more: Record<string, unknown>, extras = true) => () => checkHost(withServices(service(more)), choices, known, extras)
-    expect(bad({ push: { token: 'short' } })).toThrow(/token/)
-    expect(bad({ push: { token: '', every: 5 } })).toThrow(/60 seconds/)
+    expect(bad({ passive: { token: 'short' } })).toThrow(/token/)
+    expect(bad({ passive: { token: '', every: 5 } })).toThrow(/60 seconds/)
     expect(bad({ aggregate: { members: [] } })).toThrow(/members/)
     expect(bad({ aggregate: { members: ['web1!x'] } })).toThrow(/not a member/)
     expect(bad({ aggregate: { members: ["a'; rm"] } })).toThrow(/not a member/)
     expect(bad({ aggregate: { members: ['a'], min: 'most' } })).toThrow(/number/)
-    expect(bad({ push: { token: '' }, aggregate: { members: ['a'] } })).toThrow(/not both/)
+    expect(bad({ passive: { token: '' }, aggregate: { members: ['a'] } })).toThrow(/not both/)
     // A downtime that comes round: a timeperiod the engine has, on checkd only.
     const timed = { ...choices, timeperiods: ['nights'] }
     const round = checkHost({ ...host, downtime_period: 'nights', services: [service({ downtime_period: 'nights' })] }, timed, known)
@@ -519,9 +519,9 @@ describe('a host to write', () => {
     expect(() => checkHost({ ...host, downtime_period: 'never-heard-of' }, timed, known)).toThrow(/no timeperiod/)
     expect(() => checkHost({ ...host, downtime_period: 'nights' }, timed, known, false)).toThrow(/only checkd/)
     // Only checkd has them.
-    expect(bad({ push: { token: '' } }, false)).toThrow(/only checkd/)
+    expect(bad({ passive: { token: '' } }, false)).toThrow(/only checkd/)
     // A file with such settings on a service of another kind is not nuthatch's to edit.
-    expect(() => readHostFile(hostFile(checkHost(host, choices, known)).replace('check_command ', '_CHECKD_PUSH_TOKEN abcdefghijklmnop\n    check_command '))).toThrow(/does not edit/)
+    expect(() => readHostFile(hostFile(checkHost(host, choices, known)).replace('check_command ', '_CHECKD_PASSIVE_TOKEN abcdefghijklmnop\n    check_command '))).toThrow(/does not edit/)
   })
 
   it('cannot carry a definition of its own, or what the engine has not', () => {
@@ -859,7 +859,7 @@ describe('looking at a host before adding it', () => {
     // checkd's own commands are not written for Naemon, nor offered there.
     const forNaemon = parseObjects(catalogueFile('/usr/lib/monitoring-plugins', false)).map((d) => d.attrs[0]?.[1])
     expect(forNaemon).not.toContain('nuthatch_aggregate')
-    expect(forNaemon).not.toContain('nuthatch_pushed')
+    expect(forNaemon).not.toContain('nuthatch_passive')
     expect(forNaemon).toContain('nuthatch_ssh')
     expect(pluginsDir(undefined)).toBe('$USER1$')
     for (const bad of ['relative/path', '/x;y', '$USER1$/x', '/usr/lib/plugins/']) expect(() => pluginsDir(bad)).toThrow()
@@ -1243,24 +1243,24 @@ describe('a downtime for many', () => {
   })
 })
 
-describe('how a service takes pushes', () => {
+describe('how a service takes passive results', () => {
   it('is shown to those who see the config, with the address where it is known', async () => {
     const backend = fake('site', (request) => {
       if (request.startsWith('GET contactgroups')) return []
       if (request.startsWith('GET services\nColumns: custom_variable_names')) {
-        return request.includes('description = backup') ? [[['OWNER', 'CHECKD_PUSH_TOKEN'], ['ann', 'abcdefghijklmnop'], 1700000000]] : [[[], [], 0]]
+        return request.includes('description = backup') ? [[['OWNER', 'CHECKD_PASSIVE_TOKEN'], ['ann', 'abcdefghijklmnop'], 1700000000]] : [[[], [], 0]]
       }
       return []
     })
-    const app = (roles: Record<string, string[]>, pushUrls?: Map<string, string>) =>
-      buildApp({ backends: [backend], store: new Store(':memory:'), events: new Events([]), roles: new RolesConfig(roles), limiter: new Limiter(), cookieSecure: false, devUser: 'ops', pushUrls })
-    const path = '/api/v1/push-info/site?host=nas&service=backup'
+    const app = (roles: Record<string, string[]>, httpUrls?: Map<string, string>) =>
+      buildApp({ backends: [backend], store: new Store(':memory:'), events: new Events([]), roles: new RolesConfig(roles), limiter: new Limiter(), cookieSecure: false, devUser: 'ops', httpUrls })
+    const path = '/api/v1/passive-info/site?host=nas&service=backup'
     expect((await app({}).request(path)).status).toBe(403)
     const known = await app({ authorized_for_configuration_information: ['ops'] }, new Map([['site', 'https://checkd.example.test/']])).request(path)
-    expect(await known.json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', url: 'https://checkd.example.test/api/v1/push/abcdefghijklmnop', last: 1700000000 })
+    expect(await known.json()).toEqual({ takes: true, path: '/api/v1/passive/abcdefghijklmnop', url: 'https://checkd.example.test/api/v1/passive/abcdefghijklmnop', last: 1700000000 })
     const plain = app({ authorized_for_config_edit: ['ops'] })
-    expect(await (await plain.request(path)).json()).toEqual({ takes: true, path: '/api/v1/push/abcdefghijklmnop', last: 1700000000 })
-    expect(await (await plain.request('/api/v1/push-info/site?host=nas&service=disk')).json()).toEqual({ takes: false })
+    expect(await (await plain.request(path)).json()).toEqual({ takes: true, path: '/api/v1/passive/abcdefghijklmnop', last: 1700000000 })
+    expect(await (await plain.request('/api/v1/passive-info/site?host=nas&service=disk')).json()).toEqual({ takes: false })
   })
 })
 

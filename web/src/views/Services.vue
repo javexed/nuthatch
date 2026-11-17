@@ -13,7 +13,7 @@ const canAdd = computed(() => session.has('config_edit') && (session.session?.co
   <div class="page-head">
     <h1>Services</h1>
     <div class="head-actions">
-      <RouterLink v-if="session.has('config_edit') || session.has('configuration_information')" class="button quiet" :to="{ name: 'pushed' }">Pushed</RouterLink>
+      <RouterLink v-if="session.has('config_edit') || session.has('configuration_information')" class="button quiet" :to="{ name: 'passive' }">Passive</RouterLink>
       <RouterLink v-if="canAdd" class="button" :to="{ name: 'config', query: { new: 'service' } }">New service</RouterLink>
       <button v-if="!session.has('read_only')" type="button" class="quiet" @click="many = true">Downtime for many…</button>
     </div>

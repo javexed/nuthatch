@@ -437,7 +437,7 @@ def config(clients, backend):
     # The engine's own, and nuthatch's catalogue: checkd's own checks for checkd only.
     catalogue = ["nuthatch_cert", "nuthatch_http", "nuthatch_https", "nuthatch_imap", "nuthatch_imaps", "nuthatch_notify", "nuthatch_smtp", "nuthatch_ssh", "nuthatch_tcp"]
     if backend == "checkd":
-        catalogue += ["nuthatch_aggregate", "nuthatch_cpu", "nuthatch_disk", "nuthatch_load", "nuthatch_memory", "nuthatch_pushed", "nuthatch_service"]
+        catalogue += ["nuthatch_aggregate", "nuthatch_cpu", "nuthatch_disk", "nuthatch_load", "nuthatch_memory", "nuthatch_passive", "nuthatch_service"]
     check(f"{backend}: the engine's commands are there to choose from", state["choices"]["commands"], sorted(["demo", "notify"] + catalogue))
     host = {"name": "added1", "alias": "Added by the matrix", "address": "192.0.2.80", "use": "demo-host", "hostgroups": ["web"], "contact_groups": ["admins"],
             "contacts": [], "services": [{"description": "extra", "use": "demo-service", "check_command": "demo!extra!30!0", "servicegroups": [], "contacts": ["ops"], "contact_groups": []}]}

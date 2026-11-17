@@ -77,8 +77,8 @@ export interface Deps {
   webRoot?: string
   /** By backend: the config that can be changed here. */
   config?: Map<string, ConfigAdmin>
-  /** By backend: where its engine takes pushes (checkd's HTTP API), as jobs elsewhere reach it. */
-  pushUrls?: Map<string, string>
+  /** By backend: checkd's HTTP API, as jobs elsewhere reach it. */
+  httpUrls?: Map<string, string>
   /** By backend: checkd's agents, which nuthatch adds and installs. */
   agents?: Map<string, Agents>
   /** What agents said their hosts are, and the checks proposed from it. */
@@ -597,10 +597,6 @@ export function buildApp(deps: Deps): Hono<Env> {
   })
 
   /**
-   * How a service takes pushes, for those who may see the engine's
-   * config: the token is all a caller needs.
-   */
-  /**
    * The members of a service that stands for others (`checkd:aggregate`),
    * each with its state, as far as the user sees them.
    */
@@ -641,15 +637,15 @@ export function buildApp(deps: Deps): Hono<Env> {
     return c.json({ aggregate: true, ...(min ? { min } : {}), members })
   })
 
-  /** The services that take pushes, for those who may see the config. */
-  app.get('/api/v1/pushed', async (c) => {
+  /** The services that take passive results, for those who may see the config. */
+  app.get('/api/v1/passive', async (c) => {
     const { user } = c.get('identity')
     const { roles } = await who(user)
     if (!roles.has('config_edit') && !roles.has('configuration_information')) throw new Forbidden('needs the role config_edit or configuration_information')
     const out: { backend: string; host: string; service: string; state: number; last: number; output: string }[] = []
     for (const backend of deps.backends) {
       try {
-        const found = await backend.query('GET services\nColumns: host_name description state last_check plugin_output\nFilter: custom_variable_names >= CHECKD_PUSH_TOKEN')
+        const found = await backend.query('GET services\nColumns: host_name description state last_check plugin_output\nFilter: custom_variable_names >= CHECKD_PASSIVE_TOKEN')
         for (const r of found) out.push({ backend: backend.name, host: String(r[0]), service: String(r[1]), state: Number(r[2]), last: Number(r[3]) || 0, output: String(r[4] ?? '') })
       } catch {
         // A backend that does not answer has none to show.
@@ -658,10 +654,14 @@ export function buildApp(deps: Deps): Hono<Env> {
     return c.json({ services: out.sort((a, b) => a.host.localeCompare(b.host) || a.service.localeCompare(b.service)) })
   })
 
-  app.get('/api/v1/push-info/:backend', async (c) => {
+  /**
+   * How a service takes passive results, for those who may see the
+   * engine's config: the token is all a caller needs.
+   */
+  app.get('/api/v1/passive-info/:backend', async (c) => {
     const { user } = c.get('identity')
     const { roles } = await who(user)
-    if (!roles.has('config_edit') && !roles.has('configuration_information')) throw new Forbidden('how a service takes pushes is shown to those who see the config')
+    if (!roles.has('config_edit') && !roles.has('configuration_information')) throw new Forbidden('how a service takes passive results is shown to those who see the config')
     const backend = deps.backends.find((b) => b.name === c.req.param('backend'))
     const [host, service] = [c.req.query('host') ?? '', c.req.query('service') ?? '']
     if (!backend || /[\n\r]/.test(host + service) || host === '' || service === '') return c.json({ takes: false })
@@ -670,25 +670,25 @@ export function buildApp(deps: Deps): Hono<Env> {
     )
     const [names, values, last] = (found[0] ?? []) as [unknown, unknown, unknown]
     const variable = (name: string) => (Array.isArray(names) && Array.isArray(values) ? values[names.indexOf(name)] : undefined)
-    const token = names instanceof Array && names.includes('CHECKD_PUSH_TOKEN') ? String(variable('CHECKD_PUSH_TOKEN')) : undefined
+    const token = names instanceof Array && names.includes('CHECKD_PASSIVE_TOKEN') ? String(variable('CHECKD_PASSIVE_TOKEN')) : undefined
     if (token === undefined) return c.json({ takes: false })
-    // Within how long a push is expected is the service's freshness
+    // Within how long a result is expected is the service's freshness
     // threshold, which Livestatus does not give: known for a service
     // nuthatch keeps.
     let every = 0
     const admin = deps.config?.get(backend.name)
     if (admin) {
       try {
-        every = (await admin.state()).hosts.find((h) => h.name === host)?.services.find((s) => s.description === service)?.push?.every ?? 0
+        every = (await admin.state()).hosts.find((h) => h.name === host)?.services.find((s) => s.description === service)?.passive?.every ?? 0
       } catch {
         // Then it is not said.
       }
     }
-    const base = deps.pushUrls?.get(backend.name)
+    const base = deps.httpUrls?.get(backend.name)
     return c.json({
       takes: true,
-      path: `/api/v1/push/${token}`,
-      ...(base ? { url: `${base.replace(/\/+$/, '')}/api/v1/push/${token}` } : {}),
+      path: `/api/v1/passive/${token}`,
+      ...(base ? { url: `${base.replace(/\/+$/, '')}/api/v1/passive/${token}` } : {}),
       ...(Number.isFinite(every) && every > 0 ? { every } : {}),
       last: Number(last) || 0,
     })
