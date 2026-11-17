@@ -28,5 +28,6 @@ describe('a mistyped config file', () => {
     expect(refused('[[backend]]\nname = "far"\nnuthatch = "https://far.example.test"\nkey_file = "/x"\nlivestatus = "unix:/x"\n')).toMatch(/backend far has no setting 'livestatus'/)
     expect(refused(`behind_proxy = "yes"\n${backend}`)).toMatch(/behind_proxy is true or false/)
     expect(refused(`${backend}[graphs]\nday = 3\n`)).toMatch(/\[graphs\] has no setting 'day'/)
+    expect(refused(`${backend}[agents]\nbin = "/x"\nupdate = "auto"\n`)).toMatch(/update = "auto" waits for signed agent binaries/)
   })
 })

@@ -1,5 +1,7 @@
 # One interface over several sites
 
+**Experimental.** The settings and the protocol between sites may change before 1.0.
+
 A nuthatch can show, beside or instead of engines of its own, the engines
 of other sites: each through the nuthatch that runs at that site.
 

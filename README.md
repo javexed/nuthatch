@@ -24,7 +24,7 @@ made to be used on a phone as much as at a desk.
   reviewed by one person: see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Version 0.1.0**, not packaged. The config file's keys
   may change before 1.0; the store is migrated from one version to the next.
-- The phone app is built for Android and tried in an emulator and on one
+- The phone app is experimental. It is built for Android and tried in an emulator and on one
   phone; there is no iOS build. Installed from the browser, as a PWA, it
   works on both.
 
@@ -48,10 +48,10 @@ made to be used on a phone as much as at a desk.
   ([docs/permissions.md](docs/permissions.md)); dashboards of one's own
   or shared ([docs/dashboards.md](docs/dashboards.md)).
 - **Several sites** in one interface, each through the nuthatch at its
-  site ([docs/sites.md](docs/sites.md)).
+  site; experimental ([docs/sites.md](docs/sites.md)).
 - **On a phone:** installable from the browser, with notifications
   pushed to it ([docs/notifications.md](docs/notifications.md)).
-- **Agents** (checkd): a host is added with checkd's agent, installed
+- **Agents** (checkd), experimental: a host is added with checkd's agent, installed
   over SSH or by a one-line command, on Linux or Windows; the agent says
   what the machine runs, its disks and memory are watched at once, and its
   services are proposed ([docs/agents.md](docs/agents.md)).

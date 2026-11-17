@@ -123,10 +123,9 @@ On Linux the agent replaces itself. Every five minutes it asks nuthatch,
 with its token, whether it is to be replaced. nuthatch says yes when the
 binary it serves differs from the one the host has, and either **Update**
 was pressed for that host (kept until done, across a restart of nuthatch,
-as `<host>.update` beside the host's token) or
-
-    [agents]
-    update = "auto"     # "off" (the default): only when asked for
+as `<host>.update` beside the host's token). Updates without asking
+(`[agents] update = "auto"`) wait for signed binaries ([TODO.md](../TODO.md));
+nuthatch refuses that setting until then.
 
 Then the agent fetches the binary from nuthatch, by the same pin as the
 installer, checks it against the checksum nuthatch gave, runs it once
@@ -138,8 +137,8 @@ pressed. The audit log has who asked and when each host fetched it.
   which belongs to the agent's user `checkd-agent`. The other side of
   that: whoever takes over that user can change the agent, and so keep
   their hold across restarts; still only as that user.
-- With `update = "auto"`, whoever can change the binaries in `[agents]
-  bin` on this machine can change every agent within five minutes. The
+- Whoever can change the binaries in `[agents] bin` on this machine can
+  change each agent the next time **Update** is pressed for it. The
   binaries are checked against `SHA256SUMS` beside them, which is no
   defence against that. Signed binaries are not done yet.
 - A new agent that runs `--version` but then fails is not put back: the
