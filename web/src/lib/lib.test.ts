@@ -79,6 +79,18 @@ describe('performance data', () => {
     expect(fraction(perf[1]!)).toBe(0.91)
     expect(fraction(perf[2]!)).toBeNull()
     expect(parsePerfdata('')).toEqual([])
+    expect(parsePerfdata("'it''s'=1 'open=2 x=3").map((p) => [p.label, p.value])).toEqual([
+      ["it's", 1],
+      ['x', 3],
+    ])
+  })
+
+  it('reads any input quickly', () => {
+    for (const text of ['!'.repeat(100_000), "'" + "'&".repeat(50_000), "' ".repeat(50_000), "a '".repeat(30_000), 'a'.repeat(50_000) + '=']) {
+      const start = performance.now()
+      parsePerfdata(text)
+      expect(performance.now() - start, text.slice(0, 4)).toBeLessThan(100)
+    }
   })
 })
 
