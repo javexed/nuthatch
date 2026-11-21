@@ -141,6 +141,9 @@ maintainer and no promised time to answer. Only the newest commit of
   what is kept there; a model on this machine sends nothing out. A key
   goes only over HTTPS, or to this machine or the tailnet. Without
   `[assistant]` nothing is sent. See [docs/assistant.md](docs/assistant.md).
+- **MCP clients**, with a token made for them: what their tools read
+  (as much as the token's user may see) goes to the client, and from
+  there to the model it uses. See [docs/mcp.md](docs/mcp.md).
 - The page loads nothing from anywhere but the server itself.
 
 ## Not yet looked at by anyone else

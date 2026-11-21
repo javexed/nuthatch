@@ -7,6 +7,7 @@ import { ApiError } from '@nuthatch/api'
 import { computed, onMounted, ref } from 'vue'
 import { ago } from '../lib/format'
 import { api, useSession } from '../stores/session'
+import TokensCard from '../components/TokensCard.vue'
 
 const session = useSession()
 const state = ref<PushState | null>(null)
@@ -121,4 +122,5 @@ async function test() {
       </template>
     </template>
   </section>
+  <TokensCard />
 </template>

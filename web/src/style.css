@@ -343,6 +343,10 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .devices { list-style: none; margin: 0; padding: 0; display: grid; }
 .devices li { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
 .devices li:last-child { border-bottom: 0; }
+.make-token { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.6rem; }
+.make-token input[name='token-name'] { flex: 1; min-width: 10rem; }
+.made { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.6rem; }
+.made code { flex: 1; overflow-wrap: anywhere; user-select: all; }
 
 /* A check that was asked for and is out, and a row that just changed. */
 .spinner { display: inline-block; width: 0.85em; height: 0.85em; margin-right: 0.4em; vertical-align: -0.1em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }

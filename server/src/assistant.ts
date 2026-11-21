@@ -89,7 +89,7 @@ How to work:
 - Answer briefly and plainly. Lead with the finding, then the evidence (names, states, times, numbers). No preamble. Do not invent hosts, services or values you have not read.
 - Your answer is shown as plain text: short paragraphs, or lines starting with "- ". No Markdown headings, tables, bold or code fences.`
 
-const TOOLS: ToolSpec[] = [
+export const TOOLS: ToolSpec[] = [
   {
     name: 'livestatus_query',
     description:

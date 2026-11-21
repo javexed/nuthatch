@@ -193,8 +193,8 @@ export class Client {
     return this.call('GET', '/api/v1/tokens')
   }
 
-  newToken(name: string): Promise<Token & { token: string }> {
-    return this.call('POST', '/api/v1/tokens', { name })
+  newToken(name: string, readOnly = false): Promise<Token & { token: string }> {
+    return this.call('POST', '/api/v1/tokens', { name, ...(readOnly ? { read_only: true } : {}) })
   }
 
   deleteToken(id: number): Promise<void> {

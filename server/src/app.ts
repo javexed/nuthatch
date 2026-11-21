@@ -14,6 +14,7 @@ import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
 import { type Assistant, type Reader, conversation, failure } from './assistant.ts'
+import { mcp } from './mcp.ts'
 import { ModelError } from './models.ts'
 import { type Agents, InstallCodes, type Pin, agentName, binaries, binariesVersion, engineOf, installCommand, linuxBinary, linuxScript, sshCommand, windowsScript } from './agents.ts'
 import { nearestFirst, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
@@ -124,7 +125,14 @@ interface Identity {
   csrf?: string
   /** Asked for by another nuthatch, for one of its users. */
   peer?: Peer
+  /** The API token's name, when that is how they came. */
+  token?: string
+  /** A token that may only read: the routes of READ_ONLY_ROUTES. */
+  readOnly?: boolean
 }
+
+/** What a read-only token may ask for: the engines' state, never a change, a secret or the config. */
+const READ_ONLY_ROUTES = new Set(['GET /api/v1/session', 'POST /api/v1/query', 'POST /api/v1/stats', 'GET /api/v1/graph', 'POST /api/v1/mcp', 'GET /api/v1/mcp', 'DELETE /api/v1/mcp'])
 
 /** What nuthatch knows of a user, from the config and the backends. */
 interface Who {
@@ -326,8 +334,8 @@ export function buildApp(deps: Deps): Hono<Env> {
       const passedOn = ['/api/v1/session', '/api/v1/query', '/api/v1/stats', '/api/v1/command', '/api/v1/events', '/api/v1/graph'].includes(path) || path.startsWith('/api/v1/config/')
       if (identity && !passedOn) return c.json({ error: 'not for another nuthatch' }, 403)
     } else if (bearer !== undefined) {
-      const user = deps.store.tokenUser(bearer.trim())
-      if (user !== null) identity = { user }
+      const token = deps.store.token(bearer.trim())
+      if (token !== null) identity = { user: token.user, token: token.name, ...(token.readOnly ? { readOnly: true } : {}) }
     } else if (cookie !== undefined) {
       const session = deps.store.session(cookie)
       if (session) identity = { user: session.user, cookie, csrf: session.csrf }
@@ -348,6 +356,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       identity = { user: tailnet, cookie: made.cookie, csrf: made.session.csrf }
     }
     if (!identity) return c.json({ error: 'log in first' }, 401)
+    if (identity.readOnly && !READ_ONLY_ROUTES.has(`${c.req.method} ${c.req.path}`)) return c.json({ error: 'a read-only token reads the engines only' }, 403)
     const changes = c.req.method !== 'GET' && c.req.method !== 'HEAD'
     // What changes something is sent as JSON, which a page of another
     // site cannot send here without asking first (and is then refused):
@@ -429,10 +438,12 @@ export function buildApp(deps: Deps): Hono<Env> {
     // A token is made by someone who logged in, not with another token.
     if (identity.cookie === undefined && deps.devUser === undefined) return c.json({ error: 'log in with a password to make a token' }, 403)
     // eslint-disable-next-line no-control-regex
-    const name = String((await body(c)).name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 64)
-    const made = deps.store.newToken(identity.user, name)
-    deps.store.audit(identity.user, '', 'token made', name)
-    return c.json({ id: made.id, name, token: made.token })
+    const sent = await body(c)
+    const name = String(sent.name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 64)
+    const readOnly = sent.read_only === true
+    const made = deps.store.newToken(identity.user, name, readOnly)
+    deps.store.audit(identity.user, '', 'token made', readOnly ? `${name} (read-only)` : name)
+    return c.json({ id: made.id, name, token: made.token, read_only: readOnly })
   })
 
   app.delete('/api/v1/tokens/:id', (c) => {
@@ -1028,6 +1039,29 @@ export function buildApp(deps: Deps): Hono<Env> {
       }
     })
   })
+
+  // MCP, for an AI client the user runs: the assistant's two tools, read
+  // as the token's user. Only with an API token (a read-only one is
+  // enough), and not from a web page: a browser sends an Origin header.
+  app.post('/api/v1/mcp', async (c) => {
+    const identity = c.get('identity')
+    if (identity.token === undefined || identity.peer) return c.json({ error: 'MCP is used with an API token' }, 403)
+    if (c.req.header('origin') !== undefined) return c.json({ error: 'not from a web page' }, 403)
+    let message: unknown
+    try {
+      message = JSON.parse(await c.req.text())
+    } catch {
+      return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'the body is not JSON' } })
+    }
+    const reader: Reader = {
+      query: (query) => queryAs(identity.user, query),
+      graph: (backend, host, service, hours) => graphAs(identity.user, backend, host, service, hours),
+    }
+    const answer = await mcp(message, reader, VERSION, (what) => deps.store.audit(identity.user, '', 'mcp', `${identity.token || 'token'}: ${what}`))
+    if (answer.body === undefined) return c.body(null, 202)
+    return c.json(answer.body, answer.status as 200)
+  })
+  app.on(['GET', 'DELETE'], '/api/v1/mcp', (c) => c.json({ error: 'MCP here is POST only, without sessions' }, 405))
 
   // Notifications pushed to this user's browsers.
   app.get('/api/v1/notifications', (c) => {

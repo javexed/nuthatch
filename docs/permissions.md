@@ -65,7 +65,9 @@ nothing.
 - **Changes.** A browser session's requests that change something must
   carry the session's CSRF value in a header. API tokens need none; a
   token is made by a user who logged in with a password and stands for
-  that user.
+  that user. A read-only token reaches only the session, queries,
+  stats, graphs and MCP: it sends no command, even where its user may
+  ([docs/mcp.md](mcp.md)).
 - **Live updates** carry no data, only "something changed on backend X";
   the browser then asks again through the queries.
 - **Logins.** Five failures in five minutes for a user name or from an

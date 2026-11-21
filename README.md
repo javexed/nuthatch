@@ -49,6 +49,8 @@ made to be used on a phone as much as at a desk.
   or shared ([docs/dashboards.md](docs/dashboards.md)).
 - **Several sites** in one interface, each through the nuthatch at its
   site; experimental ([docs/sites.md](docs/sites.md)).
+- **To an AI client:** read-only tools over MCP for Claude Code and the
+  like, with a read-only token ([docs/mcp.md](docs/mcp.md)).
 - **On a phone:** installable from the browser, with notifications
   pushed to it ([docs/notifications.md](docs/notifications.md)).
 - **Agents** (checkd), experimental: a host is added with checkd's agent, installed

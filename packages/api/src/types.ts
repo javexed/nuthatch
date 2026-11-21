@@ -141,6 +141,8 @@ export interface Token {
   name: string
   created: number
   last_used: number | null
+  /** May only read the engines (query, stats, graphs, MCP). */
+  read_only: boolean
 }
 
 export type ServerEvent =

@@ -92,7 +92,7 @@ const logo = `${import.meta.env.BASE_URL}favicon.svg`
       <RouterLink v-if="session.session.config_backends.length > 0" :to="{ name: 'config' }">Config</RouterLink>
     </nav>
     <ConnectionDot />
-    <RouterLink :to="{ name: 'device' }" class="who" title="This device: notifications">{{ session.session.user }}</RouterLink>
+    <RouterLink :to="{ name: 'device' }" class="who" title="This device: notifications, tokens">{{ session.session.user }}</RouterLink>
     <button v-if="!session.session.by_tailnet" type="button" class="plain logout" @click="logout">Log out</button>
   </header>
   <div v-if="updateReady" class="update" role="status">

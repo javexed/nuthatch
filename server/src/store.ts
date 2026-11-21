@@ -36,6 +36,8 @@ export interface TokenInfo {
   name: string
   created: number
   last_used: number | null
+  /** May only read the engines (POST /query, /stats, MCP), never change anything. */
+  read_only: boolean
 }
 
 export interface DashboardRow {
@@ -81,7 +83,8 @@ const SCHEMA = `
         created INTEGER NOT NULL, last_seen INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS tokens (
         id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, user TEXT NOT NULL,
-        name TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER);
+        name TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER,
+        read_only INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS prefs (
         user TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
         PRIMARY KEY (user, key));
@@ -114,7 +117,10 @@ const SCHEMA = `
  * a new table needs no step of its own.
  */
 export type Step = string | ((db: DatabaseSync) => void)
-export const MIGRATIONS: readonly Step[] = []
+export const MIGRATIONS: readonly Step[] = [
+  // 1 → 2: tokens that may only read (for MCP clients and the like).
+  'ALTER TABLE tokens ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0',
+]
 
 /** The version of the file: 1 + the number of steps. */
 export const SCHEMA_VERSION = 1 + MIGRATIONS.length
@@ -183,24 +189,29 @@ export class Store {
   }
 
   /** Makes an API token for a user. The secret is given once, here. */
-  newToken(user: string, name: string): { id: number; token: string } {
+  newToken(user: string, name: string, readOnly = false): { id: number; token: string } {
     const token = `nh_${secret()}`
-    const made = this.db.prepare('INSERT INTO tokens (hash, user, name, created) VALUES (?, ?, ?, ?)').run(hash(token), user, name, now())
+    const made = this.db.prepare('INSERT INTO tokens (hash, user, name, created, read_only) VALUES (?, ?, ?, ?, ?)').run(hash(token), user, name, now(), readOnly ? 1 : 0)
     return { id: Number(made.lastInsertRowid), token }
+  }
+
+  /** Whose a token is, its name, and whether it may only read. */
+  token(token: string): { user: string; name: string; readOnly: boolean } | null {
+    const h = hash(token)
+    const row = this.db.prepare('SELECT user, name, read_only FROM tokens WHERE hash = ?').get(h) as { user: string; name: string; read_only: number } | undefined
+    if (!row) return null
+    this.db.prepare('UPDATE tokens SET last_used = ? WHERE hash = ?').run(now(), h)
+    return { user: row.user, name: row.name, readOnly: row.read_only === 1 }
   }
 
   /** The user a token belongs to. */
   tokenUser(token: string): string | null {
-    const h = hash(token)
-    const row = this.db.prepare('SELECT user FROM tokens WHERE hash = ?').get(h) as { user: string } | undefined
-    if (!row) return null
-    this.db.prepare('UPDATE tokens SET last_used = ? WHERE hash = ?').run(now(), h)
-    return row.user
+    return this.token(token)?.user ?? null
   }
 
   tokens(user: string): TokenInfo[] {
-    const rows = this.db.prepare('SELECT id, name, created, last_used FROM tokens WHERE user = ? ORDER BY id').all(user)
-    return rows.map((row) => ({ ...row }) as unknown as TokenInfo)
+    const rows = this.db.prepare('SELECT id, name, created, last_used, read_only FROM tokens WHERE user = ? ORDER BY id').all(user) as Record<string, unknown>[]
+    return rows.map(({ read_only, ...row }) => ({ ...row, read_only: read_only === 1 }) as unknown as TokenInfo)
   }
 
   deleteToken(user: string, id: number): boolean {
