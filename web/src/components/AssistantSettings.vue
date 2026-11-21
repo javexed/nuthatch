@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The assistant's settings, for config_edit: which service it asks, where,
-// which model, and the key. The key is kept on the server, never shown
+// The assistant's settings, for config_edit: on or off, for whom, which
+// service it asks, where, which model, and the key. The key is kept on the server, never shown
 // again.
 import type { AssistantService, AssistantSettings } from '@nuthatch/api'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -16,6 +16,8 @@ const ADDRESS: Record<AssistantService, string> = {
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
 const saved = ref<AssistantSettings | null>(null)
+const on = ref(false)
+const users = ref('')
 const service = ref<AssistantService>('anthropic')
 const url = ref('')
 const model = ref('')
@@ -34,6 +36,8 @@ const keyKept = computed(() => {
 
 function show(s: AssistantSettings) {
   saved.value = s
+  on.value = s.on
+  users.value = s.users.join(', ')
   service.value = s.service
   url.value = s.url === ADDRESS[s.service] ? '' : s.url
   model.value = s.model
@@ -55,8 +59,11 @@ async function save(removeKey = false) {
   error.value = ''
   try {
     const typed = key.value.trim()
+    const who = users.value.split(',').map((u) => u.trim()).filter(Boolean)
     show(
       await api.setAssistantSettings({
+        on: on.value,
+        users: who,
         service: service.value,
         url: url.value.trim(),
         model: model.value.trim(),
@@ -89,11 +96,23 @@ watch(service, (now, before) => {
   model.value = now === saved.value.service ? saved.value.model : ''
   void list()
 })
+
+// Turned on with nobody named: the one turning it on.
+watch(on, (now) => {
+  if (now && users.value.trim() === '') users.value = session.session?.user ?? ''
+  if (now && models.value.length === 0) void list()
+})
 </script>
 
 <template>
   <form class="card assistant-key" aria-label="Assistant" @submit.prevent="save()">
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <label class="check"><input v-model="on" type="checkbox" name="assistant-on" /> On</label>
+    <template v-if="on">
+    <label>
+      Who may use it
+      <input v-model="users" name="assistant-users" autocomplete="off" required placeholder="names, or * for everyone" />
+    </label>
     <label>
       Service
       <select v-model="service" name="assistant-service" :disabled="busy">
@@ -125,9 +144,10 @@ watch(service, (now, before) => {
       API key
       <input v-model="key" name="assistant-key" type="password" autocomplete="off" :required="service === 'anthropic' && !keyKept" :placeholder="keyKept ? 'kept' : ''" @change="list" />
     </label>
+    </template>
     <div class="buttons">
-      <button v-if="keyKept" type="button" class="plain" :disabled="busy" @click="save(true)">Remove key</button>
-      <button type="submit" :disabled="busy || model.trim() === ''">Save</button>
+      <button v-if="on && keyKept" type="button" class="plain" :disabled="busy" @click="save(true)">Remove key</button>
+      <button type="submit" :disabled="busy || (on && model.trim() === '') || on === saved?.on && !on">Save</button>
     </div>
   </form>
 </template>

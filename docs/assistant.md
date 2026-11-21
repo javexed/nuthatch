@@ -12,16 +12,10 @@ no config; where an action would help, it says which.
 
 ## Setting it up
 
-    [assistant]
-    users = ["ann", "bob"]
-
-- `users`: who may use it; `"*"` is everyone who logs in. A paid service
-  costs money per question, so name people.
-- `model`, `effort` (optional): the Claude model and effort used until the
-  Config page sets others; `claude-opus-5-5` and `medium` when left out.
-
-Then someone with the role `config_edit` picks the service on the Config
-page, under Assistant:
+Someone with the role `config_edit` turns it on on the Config page,
+under Assistant: tick **On**, name who may use it (login names, or `*`
+for everyone who logs in; a paid service costs money per question, so
+name people), and pick the service:
 
 | Service | Address (when left empty) | Key |
 |---|---|---|
@@ -47,7 +41,15 @@ The model field suggests the models the service lists.
   Markdown, or state a value they did not read.
 
 The key is kept in the store and never shown again; Remove key takes it
-away. A key is sent only over HTTPS, or to this machine or the tailnet,
+away. Turning it off keeps the settings for when it is turned on again.
+
+It can also be turned on in the config file, which is where it starts
+until the Config page saves something:
+
+    [assistant]
+    users = ["ann", "bob"]
+    model = "claude-opus-5-5"   # optional
+    effort = "medium"           # optional A key is sent only over HTTPS, or to this machine or the tailnet,
 and is dropped when the service or address changes. Until a model (and,
 for Anthropic, a key) is set, nobody sees the assistant.
 

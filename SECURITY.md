@@ -100,10 +100,11 @@ maintainer and no promised time to answer. Only the newest commit of
   while nuthatch is down is still sent.
 - With `[graphs]`: a second file with the numbers checks return, by host
   and service name, for the days configured.
-- With `[assistant]`: in the store, the model service's address and API
-  key, the key **in plain text** (it has to be sent), and in the audit log how many steps and
-  tokens each answer took. Not the questions or the answers: those stay
-  in the browser until the page is closed.
+- With the assistant set up: in the store, the model service's address
+  and API key, the key **in plain text** (it has to be sent), and in the
+  audit log how many steps and tokens each answer took. Not the
+  questions or the answers: those stay in the browser until the page is
+  closed.
 - Nothing else of what is monitored: pages ask the engine each time. The
   service worker of the installed app keeps only the interface's own
   files.
@@ -132,15 +133,16 @@ maintainer and no promised time to answer. Only the newest commit of
   address given, to see what answers.
 - Agents fetch their installer and binaries, and ask for updates, from
   nuthatch: that comes in, from the hosts.
-- **The assistant**, with `[assistant]` and a key set: each question, the
-  conversation before it, and what the assistant reads to answer it (host
-  and service names, addresses, states, plugin output, log lines,
-  performance data: as much as the asking user may see) go to the model
-  service set on the Config page by config_edit: Anthropic's API, an
-  Ollama, or an OpenAI-compatible service. That service's terms decide
-  what is kept there; a model on this machine sends nothing out. A key
-  goes only over HTTPS, or to this machine or the tailnet. Without
-  `[assistant]` nothing is sent. See [docs/assistant.md](docs/assistant.md).
+- **The assistant**, when it is turned on (Config page or
+  `[assistant]`): each question, the conversation before it, and what
+  the assistant reads to answer it (host and service names, addresses,
+  states, plugin output, log lines, performance data: as much as the
+  asking user may see) go to the model service set on the Config page by
+  config_edit: Anthropic's API, an Ollama, or an OpenAI-compatible
+  service. That service's terms decide what is kept there; a model on
+  this machine sends nothing out. A key goes only over HTTPS, or to this
+  machine or the tailnet. While it is off, nothing is sent. See
+  [docs/assistant.md](docs/assistant.md).
 - **MCP clients**, with a token made for them: what their tools read
   (as much as the token's user may see) goes to the client, and from
   there to the model it uses. See [docs/mcp.md](docs/mcp.md).

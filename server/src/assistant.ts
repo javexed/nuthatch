@@ -44,12 +44,26 @@ import type { Store } from './store.ts'
 export { EFFORTS, type Effort } from './models.ts'
 export const DEFAULT_MODEL = 'claude-opus-5-5'
 
-/** `[assistant]` in the config. `model` and `effort` are used until the Config page sets others. */
+/**
+ * What the config file gives: `[assistant]` turns it on for its users.
+ * What the Config page saves takes the place of all of it.
+ */
 export interface AssistantConfig {
+  /** On, for `users`: `[assistant]` is in the config file. */
+  on: boolean
   model: string
   effort: Effort
   /** Who may use it; `*` is everyone who logs in. */
   users: string[]
+}
+
+/** A login name, as nuthatch takes them (app.ts's userName). */
+// eslint-disable-next-line no-control-regex
+const USER = (name: unknown): name is string => typeof name === 'string' && name.length > 0 && name.length <= 128 && !/[\u0000-\u001f\u007f;,]/.test(name) && name.trim() === name
+
+function checkUsers(given: unknown): string[] {
+  if (!Array.isArray(given) || given.length > 200 || !given.every((u) => u === '*' || USER(u))) throw new Refused('who may use it is a list of login names, or * for everyone who logs in')
+  return [...new Set(given as string[])]
 }
 
 /** What one answer may read, as the user who asks. */
@@ -143,8 +157,30 @@ export class Assistant {
     this.models = { anthropic: anthropicModel(), ollama: ollamaModel(), openai: openaiModel(), ...models }
   }
 
+  /** Whether it is on, and for whom: what the Config page saved, or else the config file. */
+  access(): { on: boolean; users: string[] } {
+    const k = this.kept()
+    let users = this.config.users
+    try {
+      if (k.users !== undefined) users = checkUsers(k.users)
+    } catch {
+      // Left as the config file has it.
+    }
+    return { on: typeof k.on === 'boolean' ? k.on : this.config.on, users }
+  }
+
   allows(user: string): boolean {
-    return this.config.users.includes('*') || this.config.users.includes(user)
+    const { on, users } = this.access()
+    return on && (users.includes('*') || users.includes(user))
+  }
+
+  private kept(): Record<string, unknown> {
+    try {
+      const v = JSON.parse(this.store.pref('', 'assistant') ?? '{}') as unknown
+      return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+    } catch {
+      return {}
+    }
   }
 
   /** What is kept, over the config's defaults. What does not check out is left at its default. */
@@ -179,7 +215,7 @@ export class Assistant {
   /** The settings as the Config page is told them: whether a key is kept, not the key. */
   shown(): AssistantSettings {
     const { key, ...rest } = this.settings()
-    return { ...rest, key: key !== '' }
+    return { ...this.access(), ...rest, key: key !== '' }
   }
 
   hasKey(): boolean {
@@ -198,6 +234,16 @@ export class Assistant {
    */
   setSettings(given: Record<string, unknown>): void {
     const was = this.settings()
+    const access = this.access()
+    if (given.on !== undefined && typeof given.on !== 'boolean') throw new Refused('on is true or false')
+    const on = given.on === undefined ? access.on : given.on
+    const users = given.users === undefined ? access.users : checkUsers(given.users)
+    if (on && users.length === 0) throw new Refused('name who may use it, or * for everyone who logs in')
+    // Turned off: the rest stays as it was, for when it is turned on again.
+    if (!on) {
+      this.keep(was, { on, users })
+      return
+    }
     if (!SERVICES.includes(given.service as Service)) throw new Refused(`the service is one of ${SERVICES.join(', ')}`)
     const service = given.service as Service
     const url = checkUrl(given.url, service)
@@ -210,7 +256,7 @@ export class Assistant {
     }
     const key = given.key === undefined ? (service === was.service && url === was.url ? was.key : '') : checkKey(given.key)
     if (key !== '' && !keyMayGo(url)) throw new Refused(KEY_GOES)
-    this.keep({ service, url, model, effort, context, key })
+    this.keep({ service, url, model, effort, context, key }, { on, users })
   }
 
   /** A new key, or none: '' takes it away. The rest stays. */
@@ -228,8 +274,8 @@ export class Assistant {
     this.store.setPref('', 'assistant', JSON.stringify({ ...kept, key }))
   }
 
-  private keep(s: Settings): void {
-    this.store.setPref('', 'assistant', JSON.stringify(s))
+  private keep(s: Settings, access = this.access()): void {
+    this.store.setPref('', 'assistant', JSON.stringify({ ...s, ...access }))
   }
 
   /** The models a service offers; with the kept key when the service and address are the kept ones. */

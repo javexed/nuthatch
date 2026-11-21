@@ -111,7 +111,7 @@ describe('the assistant', () => {
       { content: [{ type: 'text', text: 'Looking. ' }, { type: 'tool_use', id: 'u1', name: 'livestatus_query', input: { table: 'services', columns: ['description', 'state'] } }], stop: 'tool_use' },
       { content: [{ type: 'text', text: 'http is critical.' }], stop: 'end_turn' },
     )
-    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['ann'] }, { anthropic: anthropicModel(send) })
+    const assistant = new Assistant(store, { on: true, model: 'claude-opus-5-5', effort: 'medium', users: ['ann'] }, { anthropic: anthropicModel(send) })
     expect(assistant.allows('ann')).toBe(true)
     expect(assistant.allows('bob')).toBe(false)
     const noKey = await all(assistant.answer('ann', [{ role: 'user', text: 'what is wrong?' }], undefined, reader(), new AbortController().signal, () => undefined))
@@ -141,7 +141,7 @@ describe('the assistant', () => {
 
     // A model without the server-side fallback is not asked for it.
     const haiku = scripted({ content: [{ type: 'text', text: 'ok' }], stop: 'end_turn' })
-    const small = new Assistant(store, { model: 'claude-haiku-5-5', effort: 'low', users: ['*'] }, { anthropic: anthropicModel(haiku) })
+    const small = new Assistant(store, { on: true, model: 'claude-haiku-5-5', effort: 'low', users: ['*'] }, { anthropic: anthropicModel(haiku) })
     small.setKey('test-key-not-real-0123456789')
     await all(small.answer('ann', [{ role: 'user', text: 'hi' }], undefined, reader(), new AbortController().signal, () => undefined))
     expect(haiku.sent[0]?.params.fallbacks).toBeUndefined()
@@ -154,7 +154,7 @@ describe('the assistant', () => {
       { content: [], stop: 'refusal' },
       { content: [{ type: 'tool_use', id: 'u1', name: 'livestatus_query', input: { table: 'hosts' } }], stop: 'max_tokens' },
     )
-    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['*'] }, { anthropic: anthropicModel(send) })
+    const assistant = new Assistant(store, { on: true, model: 'claude-opus-5-5', effort: 'medium', users: ['*'] }, { anthropic: anthropicModel(send) })
     assistant.setKey('test-key-not-real-0123456789')
     const r = reader()
     expect(await all(assistant.answer('ann', [{ role: 'user', text: 'a' }], undefined, r, new AbortController().signal, () => undefined))).toEqual([{ kind: 'error', error: 'the model declined to answer this' }])
@@ -178,7 +178,7 @@ describe('the assistant over HTTP', () => {
       enforcesAuth: async () => true,
     }
     const store = new Store(':memory:')
-    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['ann', 'ops'] }, { anthropic: anthropicModel(send) })
+    const assistant = new Assistant(store, { on: true, model: 'claude-opus-5-5', effort: 'medium', users: ['ann', 'ops'] }, { anthropic: anthropicModel(send) })
     const app = buildApp({
       backends: [backend],
       store,
@@ -223,7 +223,7 @@ describe('the assistant over HTTP', () => {
     expect(JSON.parse(shown)).toMatchObject({ service: 'openai', url: 'https://api.example.com/v1', model: 'gpt-x', key: true })
     const state = async (user: string) => ((await (await call('GET', '/api/v1/session', user)).json()) as { assistant?: unknown }).assistant
     expect(await state('ops')).toEqual({ ready: true, key: true, set_key: false })
-    expect(store.auditTail(5).find((row) => row.action === 'assistant settings')?.detail).toBe('openai https://api.example.com/v1 gpt-x, key set')
+    expect(store.auditTail(5).find((row) => row.action === 'assistant settings')?.detail).toBe('on for ann ops: openai https://api.example.com/v1 gpt-x, key set')
 
     expect((await call('PUT', '/api/v1/assistant/settings', 'ann', { service: 'ollama', url: 'http://192.0.2.9:11434', model: 'qwen3:8b', key: 'secret-0000000' })).status).toBe(400)
   })

@@ -157,11 +157,11 @@ describe('listing models', () => {
 })
 
 describe('the assistant’s settings', () => {
-  const config = { model: 'claude-opus-5-5', effort: 'medium' as const, users: ['*'] }
+  const config = { on: true, model: 'claude-opus-5-5', effort: 'medium' as const, users: ['*'] }
 
   it('keeps a key only for the service and address it was given for', () => {
     const a = new Assistant(new Store(':memory:'), config)
-    expect(a.shown()).toEqual({ service: 'anthropic', url: 'https://api.anthropic.com', model: 'claude-opus-5-5', effort: 'medium', context: 16_384, key: false })
+    expect(a.shown()).toEqual({ on: true, users: ['*'], service: 'anthropic', url: 'https://api.anthropic.com', model: 'claude-opus-5-5', effort: 'medium', context: 16_384, key: false })
     expect(a.ready()).toBe(false)
     a.setSettings({ service: 'anthropic', url: '', model: 'claude-sonnet-5-5', key: 'ant-test-key-000000000' })
     expect(a.ready()).toBe(true)
@@ -180,6 +180,29 @@ describe('the assistant’s settings', () => {
     expect(() => a.setSettings({ service: 'ollama', model: 'qwen3:8b', context: 100 })).toThrow()
     expect(() => a.setSettings({ service: 'gemini', model: 'x' })).toThrow()
     expect(() => a.setSettings({ service: 'ollama', model: 'has space' })).toThrow()
+  })
+
+  it('is turned on and off on the Config page, for whom it names', () => {
+    const store = new Store(':memory:')
+    // No [assistant] in the config file: there, but off.
+    const a = new Assistant(store, { on: false, model: 'claude-opus-5-5', effort: 'medium', users: [] })
+    expect(a.allows('ann')).toBe(false)
+    expect(() => a.setSettings({ on: true, service: 'ollama', model: 'qwen3:8b' })).toThrow(/name who may use it/)
+    a.setSettings({ on: true, users: ['ann'], service: 'ollama', model: 'qwen3:8b' })
+    expect(a.allows('ann')).toBe(true)
+    expect(a.allows('bob')).toBe(false)
+    // Off keeps the rest for next time, and needs no model.
+    a.setSettings({ on: false, service: 'ollama', model: '' })
+    expect(a.allows('ann')).toBe(false)
+    expect(a.shown()).toMatchObject({ on: false, users: ['ann'], service: 'ollama', model: 'qwen3:8b' })
+    a.setSettings({ on: true, users: ['*'], service: 'ollama', model: 'qwen3:8b' })
+    expect(a.allows('bob')).toBe(true)
+    expect(() => a.setSettings({ on: true, users: ['a,b'], service: 'ollama', model: 'qwen3:8b' })).toThrow()
+    // What the page saved wins over the config file, after a restart too.
+    const again = new Assistant(store, { on: true, model: 'claude-opus-5-5', effort: 'medium', users: ['listed'] })
+    expect(again.allows('listed')).toBe(true)
+    again.setSettings({ on: false, service: 'ollama', model: 'qwen3:8b' })
+    expect(new Assistant(store, { on: true, model: 'claude-opus-5-5', effort: 'medium', users: ['listed'] }).allows('listed')).toBe(false)
   })
 
   it('asks the service set, with its settings', async () => {

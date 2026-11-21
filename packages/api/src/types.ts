@@ -59,6 +59,10 @@ export type AssistantService = 'anthropic' | 'ollama' | 'openai'
 
 /** The assistant's settings, as the Config page is told them (config_edit). */
 export interface AssistantSettings {
+  /** Turned on. */
+  on: boolean
+  /** Who may use it; `*` is everyone who logs in. */
+  users: string[]
   service: AssistantService
   /** The service's address. */
   url: string
@@ -72,7 +76,7 @@ export interface AssistantSettings {
 }
 
 /** New settings: `key` left out keeps the kept one while service and address stay; '' takes it away. */
-export type AssistantSettingsChange = Omit<AssistantSettings, 'key'> & { key?: string }
+export type AssistantSettingsChange = Omit<AssistantSettings, 'key' | 'on' | 'users'> & { on?: boolean; users?: string[]; key?: string }
 
 /** A turn of a conversation with the assistant. */
 export interface AssistantTurn {

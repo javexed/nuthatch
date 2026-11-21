@@ -1024,7 +1024,8 @@ export function buildApp(deps: Deps): Hono<Env> {
     assistant.setSettings(await body(c))
     const now = assistant.settings()
     const key = now.key === '' ? (had.key === '' ? 'none' : 'removed') : now.key === had.key ? 'kept' : 'set'
-    deps.store.audit(user, '', 'assistant settings', `${now.service} ${now.url} ${now.model}, key ${key}`)
+    const access = assistant.access()
+    deps.store.audit(user, '', 'assistant settings', access.on ? `on for ${access.users.join(' ')}: ${now.service} ${now.url} ${now.model}, key ${key}` : `off, key ${key}`)
     return c.json(assistant.shown())
   })
 

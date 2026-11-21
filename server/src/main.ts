@@ -333,7 +333,8 @@ function main(): void {
   // [assistant]: a chat about what the engines say. The service, model and
   // key are set in the interface, by config_edit; model and effort here
   // are what is used until then.
-  let assistant: Assistant | undefined
+  // Without [assistant] it is there, off, for the Config page to turn on.
+  let assistant = new Assistant(store, { on: false, model: DEFAULT_MODEL, effort: 'medium', users: [] })
   if (config.assistant !== undefined) {
     const { model = DEFAULT_MODEL, effort = 'medium', users } = table(`${path}: [assistant]`, config.assistant, ['model', 'effort', 'users'])
     if (typeof model !== 'string' || !/^[a-z0-9][a-z0-9.-]{1,99}$/.test(model)) fail(`${path}: [assistant] model is a model's name, such as "${DEFAULT_MODEL}"`)
@@ -341,7 +342,7 @@ function main(): void {
     if (!Array.isArray(users) || users.length === 0 || users.some((u) => typeof u !== 'string' || (u !== '*' && !userName(u)))) {
       fail(`${path}: [assistant] users lists who may use it, or "*" for everyone who logs in`)
     }
-    assistant = new Assistant(store, { model, effort: effort as Effort, users: users as string[] })
+    assistant = new Assistant(store, { on: true, model, effort: effort as Effort, users: users as string[] })
   }
 
   const app = buildApp({

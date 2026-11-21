@@ -25,7 +25,16 @@ test('is offered once a key is set, and answers beside the page', async ({ page 
   await goTo(page, 'Config')
   const card = page.getByRole('form', { name: 'Assistant' })
   await expect(card).toBeVisible()
-  // Settings may be left from another run: Anthropic, no key.
+  // Settings may be left from another run: on, Anthropic, no key.
+  if (!(await card.getByLabel('On').isChecked())) {
+    await card.getByLabel('On').check()
+    await card.getByLabel('Who may use it').fill('admin, ops')
+    await card.getByLabel('Service').selectOption('anthropic')
+    await card.getByLabel('Model').fill('claude-opus-5-5')
+    await card.getByLabel('API key').fill('e2e-key-not-real-0000000000')
+    await card.getByRole('button', { name: 'Save' }).click()
+    await expect(open).toBeVisible()
+  }
   if ((await card.getByLabel('Service').inputValue()) !== 'anthropic') {
     await card.getByLabel('Service').selectOption('anthropic')
     await card.getByLabel('Model').fill('claude-opus-5-5')
@@ -93,6 +102,13 @@ test('asks for what each service needs', async ({ page }) => {
   await login(page, 'admin')
   await goTo(page, 'Config')
   const card = page.getByRole('form', { name: 'Assistant' })
+  // Off shows nothing more; on shows the rest.
+  await expect(card.getByLabel('On')).toBeChecked()
+  await card.getByLabel('On').uncheck()
+  await expect(card.getByLabel('Service')).toBeHidden()
+  await expect(card.getByLabel('Who may use it')).toBeHidden()
+  await card.getByLabel('On').check()
+  await expect(card.getByLabel('Who may use it')).toHaveValue(/admin/)
   await card.getByLabel('Service').selectOption('ollama')
   await expect(card.getByLabel('Address')).toHaveAttribute('placeholder', 'http://127.0.0.1:11434')
   await expect(card.getByLabel('Context')).toBeVisible()
