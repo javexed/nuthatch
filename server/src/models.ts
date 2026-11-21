@@ -293,6 +293,9 @@ const functions = (tools: ToolSpec[]) => tools.map((t) => ({ type: 'function', f
 
 // ---------------------------------------------------------------- Ollama
 
+// Thinking is turned off: on the small models Ollama runs, it takes most of
+// an answer's time. Models that do not think take the flag too.
+
 export function ollamaModel(fetcher: Fetch = fetch): Model {
   return async function* ({ settings, system, tools, messages }, signal) {
     const sent = messages.flatMap((m): Record<string, unknown>[] => {
@@ -306,7 +309,7 @@ export function ollamaModel(fetcher: Fetch = fetch): Model {
       fetcher,
       `${settings.url}/api/chat`,
       settings.key,
-      { model: settings.model, stream: true, options: { num_ctx: settings.context }, messages: [{ role: 'system', content: system }, ...sent], tools: functions(tools) },
+      { model: settings.model, stream: true, think: false, options: { num_ctx: settings.context }, messages: [{ role: 'system', content: system }, ...sent], tools: functions(tools) },
       signal,
     )
     let text = ''

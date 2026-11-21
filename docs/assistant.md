@@ -39,6 +39,8 @@ The model field suggests the models the service lists.
   `num_ctx`; 16384 when not changed. Ollama's own default, 4096, is too
   small for the assistant's tool answers. Through Ollama's `/v1` address
   (as OpenAI-compatible) this cannot be set, so use Ollama's own.
+- Ollama is asked with thinking off: on small models it takes most of
+  an answer's time.
 - The model has to call tools: on Ollama, one whose page lists "tools"
   (Qwen 3, Llama 3.1 and later, Mistral and others). Small local models
   follow the instructions less closely than Claude: they may write

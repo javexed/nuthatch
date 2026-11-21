@@ -70,7 +70,7 @@ describe('Ollama', () => {
       { kind: 'step', step: { stop: 'tools', text: 'Looking. ', calls: [{ id: 'call_a', name: 'livestatus_query', input: { table: 'hosts', columns: ['name'] } }], input: 120, output: 30 } },
     ])
     expect(sent[0]?.url).toBe('http://127.0.0.1:11434/api/chat')
-    expect(sent[0]?.json).toMatchObject({ model: 'qwen3:8b', stream: true, options: { num_ctx: 16_384 }, messages: [{ role: 'system', content: 'sys' }, { role: 'user', content: 'Now: x\n\nwhat is down?' }] })
+    expect(sent[0]?.json).toMatchObject({ model: 'qwen3:8b', stream: true, think: false, options: { num_ctx: 16_384 }, messages: [{ role: 'system', content: 'sys' }, { role: 'user', content: 'Now: x\n\nwhat is down?' }] })
     expect((sent[0]?.init.headers as Record<string, string>).Authorization).toBeUndefined()
     expect(sent[0]?.init.redirect).toBe('error')
   })
