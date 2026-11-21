@@ -35,6 +35,11 @@ maintainer and no promised time to answer. Only the newest commit of
   title and where it redirects to. It is for `config_edit` only, and
   each look is in the audit log. It reaches what the server can reach,
   including addresses the browser cannot.
+- **The same role chooses where the assistant asks.** Its settings name
+  an address the server sends questions, and what the assistant reads,
+  to; listing a service's models fetches one page from that address. A
+  kept key goes only to the address it was given for, over HTTPS or to
+  this machine or the tailnet, never after a redirect.
 - **The same role installs agents.** It writes agent tokens into
   checkd's agents directory and makes install commands. A command's
   code fetches, once and within 15 minutes, a script with the host's
@@ -95,8 +100,8 @@ maintainer and no promised time to answer. Only the newest commit of
   while nuthatch is down is still sent.
 - With `[graphs]`: a second file with the numbers checks return, by host
   and service name, for the days configured.
-- With `[assistant]`: in the store, the Anthropic API key, **in plain
-  text** (it has to be sent), and in the audit log how many steps and
+- With `[assistant]`: in the store, the model service's address and API
+  key, the key **in plain text** (it has to be sent), and in the audit log how many steps and
   tokens each answer took. Not the questions or the answers: those stay
   in the browser until the page is closed.
 - Nothing else of what is monitored: pages ask the engine each time. The
@@ -130,8 +135,11 @@ maintainer and no promised time to answer. Only the newest commit of
 - **The assistant**, with `[assistant]` and a key set: each question, the
   conversation before it, and what the assistant reads to answer it (host
   and service names, addresses, states, plugin output, log lines,
-  performance data: as much as the asking user may see) go to Anthropic's
-  API. Anthropic's terms for the API decide what is kept there. Without
+  performance data: as much as the asking user may see) go to the model
+  service set on the Config page by config_edit: Anthropic's API, an
+  Ollama, or an OpenAI-compatible service. That service's terms decide
+  what is kept there; a model on this machine sends nothing out. A key
+  goes only over HTTPS, or to this machine or the tailnet. Without
   `[assistant]` nothing is sent. See [docs/assistant.md](docs/assistant.md).
 - The page loads nothing from anywhere but the server itself.
 

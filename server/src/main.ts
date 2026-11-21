@@ -330,8 +330,9 @@ function main(): void {
     graphs = new Graphs(`${storePath}-graphs`, days, backends)
   }
 
-  // [assistant]: a chat about what the engines say, by Claude; the API key
-  // is set in the interface, by config_edit.
+  // [assistant]: a chat about what the engines say. The service, model and
+  // key are set in the interface, by config_edit; model and effort here
+  // are what is used until then.
   let assistant: Assistant | undefined
   if (config.assistant !== undefined) {
     const { model = DEFAULT_MODEL, effort = 'medium', users } = table(`${path}: [assistant]`, config.assistant, ['model', 'effort', 'users'])

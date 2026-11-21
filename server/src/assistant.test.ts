@@ -1,7 +1,8 @@
 import type { QueryAnswer } from '@nuthatch/api'
 import { describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
-import { Assistant, type Reader, type Send, type Streamed, conversation, describe as describeTool, fit, run } from './assistant.ts'
+import { Assistant, type Reader, conversation, describe as describeTool, fit, run } from './assistant.ts'
+import { type Send, type Streamed, anthropicModel } from './models.ts'
 import { Limiter } from './auth.ts'
 import type { Backend } from './backend.ts'
 import { Events } from './events.ts'
@@ -63,10 +64,10 @@ describe('the assistant', () => {
     const at = new Date('2026-11-17T10:00:00Z')
     const messages = conversation([{ role: 'user', text: 'why?' }], { backend: 'site', host: 'web1', service: 'http' }, at)
     expect(messages).toHaveLength(1)
-    expect(messages[0]?.content).toEqual([
-      { type: 'text', text: 'The page open is the service "http" on host "web1" (backend site). Now: 2026-11-17T10:00:00.000Z (1794909600).' },
-      { type: 'text', text: 'why?' },
-    ])
+    expect(messages[0]).toEqual({
+      role: 'user',
+      text: ['The page open is the service "http" on host "web1" (backend site). Now: 2026-11-17T10:00:00.000Z (1794909600).', 'why?'],
+    })
     expect(() => conversation([], undefined)).toThrow()
     expect(() => conversation([{ role: 'assistant', text: 'hi' }], undefined)).toThrow()
     expect(() => conversation([{ role: 'user', text: 'a' }, { role: 'user', text: 'b' }], undefined)).toThrow()
@@ -78,20 +79,20 @@ describe('the assistant', () => {
   it('runs its tools through the reader, and gives refusals back as errors', async () => {
     const r = reader({ rows: [{ name: 'web1', state: 1, backend: 'site' }] })
     const ok = await run('t1', 'livestatus_query', { table: 'hosts', columns: ['name', 'state'], filters: ['Filter: state > 0'] }, r)
-    expect(ok.is_error).toBeUndefined()
+    expect(ok.error).toBe(false)
     expect(JSON.parse(ok.content as string)).toEqual({ rows: [{ name: 'web1', state: 1, backend: 'site' }] })
     expect(r.asked[0]).toEqual({ table: 'hosts', columns: ['name', 'state'], headers: ['Filter: state > 0'], sort: [], limit: 50 })
 
-    expect((await run('t2', 'livestatus_query', { table: 'hosts', columns: ['name'], limit: 1000 }, r)).is_error).toBe(true)
-    expect((await run('t3', 'livestatus_query', { table: 'hosts', columns: [] }, r)).is_error).toBe(true)
-    expect((await run('t4', 'no_such_tool', {}, r)).is_error).toBe(true)
+    expect((await run('t2', 'livestatus_query', { table: 'hosts', columns: ['name'], limit: 1000 }, r)).error).toBe(true)
+    expect((await run('t3', 'livestatus_query', { table: 'hosts', columns: [] }, r)).error).toBe(true)
+    expect((await run('t4', 'no_such_tool', {}, r)).error).toBe(true)
     const denied: Reader = { ...r, query: async () => Promise.reject(new Forbidden('the table status needs the role system_information')) }
     const refused = await run('t5', 'livestatus_query', { table: 'status', columns: ['program_version'] }, denied)
-    expect(refused).toMatchObject({ is_error: true, content: 'the table status needs the role system_information' })
+    expect(refused).toMatchObject({ error: true, content: 'the table status needs the role system_information' })
 
     const graph = await run('t6', 'perf_history', { backend: 'site', host: 'web1', hours: 6 }, r)
     expect(JSON.parse(graph.content as string)).toEqual([{ label: 'load1', unit: '', points_kept: 2, min: 0.5, max: 1.5, latest: 1.5, points: [[1, 0.5], [2, 1.5]] }])
-    expect((await run('t7', 'perf_history', { backend: 'site', host: 'web1', hours: 1000 }, r)).is_error).toBe(true)
+    expect((await run('t7', 'perf_history', { backend: 'site', host: 'web1', hours: 1000 }, r)).error).toBe(true)
   })
 
   it('cuts long answers to size', () => {
@@ -110,7 +111,7 @@ describe('the assistant', () => {
       { content: [{ type: 'text', text: 'Looking. ' }, { type: 'tool_use', id: 'u1', name: 'livestatus_query', input: { table: 'services', columns: ['description', 'state'] } }], stop: 'tool_use' },
       { content: [{ type: 'text', text: 'http is critical.' }], stop: 'end_turn' },
     )
-    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['ann'] }, send)
+    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['ann'] }, { anthropic: anthropicModel(send) })
     expect(assistant.allows('ann')).toBe(true)
     expect(assistant.allows('bob')).toBe(false)
     const noKey = await all(assistant.answer('ann', [{ role: 'user', text: 'what is wrong?' }], undefined, reader(), new AbortController().signal, () => undefined))
@@ -140,7 +141,7 @@ describe('the assistant', () => {
 
     // A model without the server-side fallback is not asked for it.
     const haiku = scripted({ content: [{ type: 'text', text: 'ok' }], stop: 'end_turn' })
-    const small = new Assistant(store, { model: 'claude-haiku-5-5', effort: 'low', users: ['*'] }, haiku)
+    const small = new Assistant(store, { model: 'claude-haiku-5-5', effort: 'low', users: ['*'] }, { anthropic: anthropicModel(haiku) })
     small.setKey('test-key-not-real-0123456789')
     await all(small.answer('ann', [{ role: 'user', text: 'hi' }], undefined, reader(), new AbortController().signal, () => undefined))
     expect(haiku.sent[0]?.params.fallbacks).toBeUndefined()
@@ -153,7 +154,7 @@ describe('the assistant', () => {
       { content: [], stop: 'refusal' },
       { content: [{ type: 'tool_use', id: 'u1', name: 'livestatus_query', input: { table: 'hosts' } }], stop: 'max_tokens' },
     )
-    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['*'] }, send)
+    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['*'] }, { anthropic: anthropicModel(send) })
     assistant.setKey('test-key-not-real-0123456789')
     const r = reader()
     expect(await all(assistant.answer('ann', [{ role: 'user', text: 'a' }], undefined, r, new AbortController().signal, () => undefined))).toEqual([{ kind: 'error', error: 'the model declined to answer this' }])
@@ -177,7 +178,7 @@ describe('the assistant over HTTP', () => {
       enforcesAuth: async () => true,
     }
     const store = new Store(':memory:')
-    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['ann', 'ops'] }, send)
+    const assistant = new Assistant(store, { model: 'claude-opus-5-5', effort: 'medium', users: ['ann', 'ops'] }, { anthropic: anthropicModel(send) })
     const app = buildApp({
       backends: [backend],
       store,
@@ -206,6 +207,25 @@ describe('the assistant over HTTP', () => {
     // The key is never sent back.
     expect(JSON.stringify(await (await call('GET', '/api/v1/session', 'ann')).json())).not.toContain('test-key-not-real')
     expect(store.auditTail(5).some((row) => row.action === 'assistant key')).toBe(true)
+  })
+
+  it('has its service, address and model set by config_edit only, the key never shown', async () => {
+    const { call, store } = site(scripted())
+    expect((await call('GET', '/api/v1/assistant/settings', 'ops')).status).toBe(403)
+    expect((await call('PUT', '/api/v1/assistant/settings', 'ops', { service: 'ollama', model: 'qwen3:8b' })).status).toBe(403)
+    expect((await call('POST', '/api/v1/assistant/models', 'ops', { service: 'ollama' })).status).toBe(403)
+    expect(await (await call('GET', '/api/v1/assistant/settings', 'ann')).json()).toMatchObject({ service: 'anthropic', model: 'claude-opus-5-5', key: false })
+
+    const put = await call('PUT', '/api/v1/assistant/settings', 'ann', { service: 'openai', url: 'https://api.example.com/v1', model: 'gpt-x', key: 'test-key-not-real-000' })
+    expect(put.status).toBe(200)
+    const shown = await put.text()
+    expect(shown).not.toContain('test-key-not-real-000')
+    expect(JSON.parse(shown)).toMatchObject({ service: 'openai', url: 'https://api.example.com/v1', model: 'gpt-x', key: true })
+    const state = async (user: string) => ((await (await call('GET', '/api/v1/session', user)).json()) as { assistant?: unknown }).assistant
+    expect(await state('ops')).toEqual({ ready: true, key: true, set_key: false })
+    expect(store.auditTail(5).find((row) => row.action === 'assistant settings')?.detail).toBe('openai https://api.example.com/v1 gpt-x, key set')
+
+    expect((await call('PUT', '/api/v1/assistant/settings', 'ann', { service: 'ollama', url: 'http://192.0.2.9:11434', model: 'qwen3:8b', key: 'secret-0000000' })).status).toBe(400)
   })
 
   it('answers as a stream, reading as the user who asks', async () => {

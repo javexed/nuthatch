@@ -25,13 +25,20 @@ test('is offered once a key is set, and answers beside the page', async ({ page 
   await goTo(page, 'Config')
   const card = page.getByRole('form', { name: 'Assistant' })
   await expect(card).toBeVisible()
-  if (await card.getByRole('button', { name: 'Remove' }).isVisible()) await card.getByRole('button', { name: 'Remove' }).click()
-  await expect(card.getByRole('button', { name: 'Remove' })).toBeHidden()
+  // Settings may be left from another run: Anthropic, no key.
+  if ((await card.getByLabel('Service').inputValue()) !== 'anthropic') {
+    await card.getByLabel('Service').selectOption('anthropic')
+    await card.getByLabel('Model').fill('claude-opus-5-5')
+    await card.getByLabel('API key').fill('e2e-key-not-real-0000000000')
+    await card.getByRole('button', { name: 'Save' }).click()
+  }
+  if (await card.getByRole('button', { name: 'Remove key' }).isVisible()) await card.getByRole('button', { name: 'Remove key' }).click()
+  await expect(card.getByRole('button', { name: 'Remove key' })).toBeHidden()
   await expect(open).toBeHidden()
 
-  await card.getByLabel('Anthropic API key').fill('e2e-key-not-real-0000000000')
+  await card.getByLabel('API key').fill('e2e-key-not-real-0000000000')
   await card.getByRole('button', { name: 'Save' }).click()
-  await expect(card.getByLabel('Anthropic API key')).toHaveAttribute('placeholder', 'kept')
+  await expect(card.getByLabel('API key')).toHaveAttribute('placeholder', 'kept')
   await expect(open).toBeVisible()
 
   const asked = await answers(page, [
@@ -62,10 +69,10 @@ test('explains a problem from its page', async ({ page }) => {
   await goTo(page, 'Config')
   const card = page.getByRole('form', { name: 'Assistant' })
   await expect(card).toBeVisible()
-  if (!(await card.getByRole('button', { name: 'Remove' }).isVisible())) {
-    await card.getByLabel('Anthropic API key').fill('e2e-key-not-real-0000000000')
+  if (!(await card.getByRole('button', { name: 'Remove key' }).isVisible())) {
+    await card.getByLabel('API key').fill('e2e-key-not-real-0000000000')
     await card.getByRole('button', { name: 'Save' }).click()
-    await expect(card.getByRole('button', { name: 'Remove' })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Remove key' })).toBeVisible()
   }
   await send('checkd', `PROCESS_SERVICE_CHECK_RESULT;gw1;ping;2;CRITICAL - e2e assistant`)
   const asked = await answers(page, [
@@ -79,6 +86,23 @@ test('explains a problem from its page', async ({ page }) => {
   const panel = page.getByRole('complementary', { name: 'Assistant' })
   await expect(panel.getByText('ping on gw1 was set critical by hand.')).toBeVisible()
   expect(asked[0]?.about).toEqual({ backend: 'checkd', host: 'gw1', service: 'ping' })
+  await fits(page)
+})
+
+test('asks for what each service needs', async ({ page }) => {
+  await login(page, 'admin')
+  await goTo(page, 'Config')
+  const card = page.getByRole('form', { name: 'Assistant' })
+  await card.getByLabel('Service').selectOption('ollama')
+  await expect(card.getByLabel('Address')).toHaveAttribute('placeholder', 'http://127.0.0.1:11434')
+  await expect(card.getByLabel('Context')).toBeVisible()
+  await expect(card.getByLabel('Effort')).toBeHidden()
+  // A local model needs no key.
+  await expect(card.getByLabel('API key')).not.toHaveAttribute('required', '')
+  await card.getByLabel('Service').selectOption('openai')
+  await expect(card.getByLabel('Context')).toBeHidden()
+  await card.getByLabel('Service').selectOption('anthropic')
+  await expect(card.getByLabel('Effort')).toBeVisible()
   await fits(page)
 })
 

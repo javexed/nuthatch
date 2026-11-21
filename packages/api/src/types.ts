@@ -54,6 +54,26 @@ export interface AssistantState {
   set_key: boolean
 }
 
+/** Which model service the assistant asks. */
+export type AssistantService = 'anthropic' | 'ollama' | 'openai'
+
+/** The assistant's settings, as the Config page is told them (config_edit). */
+export interface AssistantSettings {
+  service: AssistantService
+  /** The service's address. */
+  url: string
+  model: string
+  /** Anthropic only. */
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  /** Ollama only: how many tokens the model may hold. */
+  context: number
+  /** A key is kept. */
+  key: boolean
+}
+
+/** New settings: `key` left out keeps the kept one while service and address stay; '' takes it away. */
+export type AssistantSettingsChange = Omit<AssistantSettings, 'key'> & { key?: string }
+
 /** A turn of a conversation with the assistant. */
 export interface AssistantTurn {
   role: 'user' | 'assistant'

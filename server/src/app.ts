@@ -13,7 +13,8 @@ import { bodyLimit } from 'hono/body-limit'
 import { getCookie } from 'hono/cookie'
 import { streamSSE } from 'hono/streaming'
 import type { Htpasswd, Limiter } from './auth.ts'
-import { type Assistant, type Reader, conversation } from './assistant.ts'
+import { type Assistant, type Reader, conversation, failure } from './assistant.ts'
+import { ModelError } from './models.ts'
 import { type Agents, InstallCodes, type Pin, agentName, binaries, binariesVersion, engineOf, installCommand, linuxBinary, linuxScript, sshCommand, windowsScript } from './agents.ts'
 import { nearestFirst, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
 import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
@@ -954,7 +955,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     const uses = assistant.allows(identity.user)
     const setsKey = roles.has('config_edit')
     if (!uses && !setsKey) return {}
-    return { assistant: { ready: uses && assistant.hasKey(), key: assistant.hasKey(), set_key: setsKey } }
+    return { assistant: { ready: uses && assistant.ready(), key: assistant.hasKey(), set_key: setsKey } }
   }
 
   // The assistant's key: for config_edit, kept on this nuthatch.
@@ -965,6 +966,42 @@ export function buildApp(deps: Deps): Hono<Env> {
     deps.assistant.setKey((await body(c)).key)
     deps.store.audit(user, '', 'assistant key', deps.assistant.hasKey() ? 'set' : 'removed')
     return c.json({ key: deps.assistant.hasKey() })
+  })
+
+  /** The assistant, for config_edit. */
+  async function assistantAdmin(c: Context<Env>): Promise<{ user: string; assistant: Assistant }> {
+    const { user, peer } = c.get('identity')
+    if (!deps.assistant) throw new Refused('the assistant is not set up on this server ([assistant] in its config)')
+    if (peer || !(await who(user)).roles.has('config_edit')) throw new Forbidden('the assistant’s settings are for the role config_edit')
+    return { user, assistant: deps.assistant }
+  }
+
+  // Which service, address and model the assistant asks: for config_edit.
+  // The key is never sent back.
+  app.get('/api/v1/assistant/settings', async (c) => {
+    const { assistant } = await assistantAdmin(c)
+    return c.json(assistant.shown())
+  })
+
+  app.put('/api/v1/assistant/settings', async (c) => {
+    const { user, assistant } = await assistantAdmin(c)
+    const had = assistant.settings()
+    assistant.setSettings(await body(c))
+    const now = assistant.settings()
+    const key = now.key === '' ? (had.key === '' ? 'none' : 'removed') : now.key === had.key ? 'kept' : 'set'
+    deps.store.audit(user, '', 'assistant settings', `${now.service} ${now.url} ${now.model}, key ${key}`)
+    return c.json(assistant.shown())
+  })
+
+  // The models a service offers, for the settings form.
+  app.post('/api/v1/assistant/models', async (c) => {
+    const { assistant } = await assistantAdmin(c)
+    try {
+      return c.json({ models: await assistant.offered(await body(c), c.req.raw.signal) })
+    } catch (err) {
+      if (err instanceof ModelError) throw new Refused(failure(err))
+      throw err
+    }
   })
 
   // A question to the assistant: the answer comes as it is written, with

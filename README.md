@@ -236,7 +236,8 @@ here and in the Android app, are made from `docs/logo.svg` by
   [docs/notifications.md](docs/notifications.md).
 - `[agents]` and `[backend.agents]`: see [docs/agents.md](docs/agents.md).
 - `[assistant]`: a chat that reads the engines and explains problems,
-  by Claude; see [docs/assistant.md](docs/assistant.md).
+  by Claude, a local model on Ollama, or an OpenAI-compatible service;
+  see [docs/assistant.md](docs/assistant.md).
 
 ## Dependencies
 

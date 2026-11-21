@@ -8,7 +8,7 @@ import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AddHost from '../components/AddHost.vue'
-import AssistantKey from '../components/AssistantKey.vue'
+import AssistantSettings from '../components/AssistantSettings.vue'
 import ContactForm from '../components/ContactForm.vue'
 import DeliveryForm from '../components/DeliveryForm.vue'
 import GroupForm from '../components/GroupForm.vue'
@@ -398,7 +398,7 @@ async function remove(host: ManagedHost) {
         </ul>
         <template v-if="session.session?.assistant?.set_key">
           <h2 class="groups-head">Assistant</h2>
-          <AssistantKey />
+          <AssistantSettings />
         </template>
         <ul v-if="state.unreadable.length > 0" class="unreadable">
           <li v-for="file in state.unreadable" :key="file.file">

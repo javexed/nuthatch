@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings, AssistantEvent, AssistantTurn } from './types.ts'
+import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings, AssistantEvent, AssistantTurn, AssistantService, AssistantSettings, AssistantSettingsChange } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -295,6 +295,21 @@ export class Client {
   /** Sets the assistant's API key (config_edit); '' takes it away. */
   setAssistantKey(key: string): Promise<{ key: boolean }> {
     return this.call('PUT', '/api/v1/assistant/key', { key })
+  }
+
+  /** The assistant's settings (config_edit). */
+  assistantSettings(): Promise<AssistantSettings> {
+    return this.call('GET', '/api/v1/assistant/settings')
+  }
+
+  /** Changes the assistant's settings (config_edit). */
+  setAssistantSettings(change: AssistantSettingsChange): Promise<AssistantSettings> {
+    return this.call('PUT', '/api/v1/assistant/settings', change)
+  }
+
+  /** The models a service offers, for picking one (config_edit). */
+  assistantModels(service: AssistantService, url: string, key?: string): Promise<{ models: string[] }> {
+    return this.call('POST', '/api/v1/assistant/models', { service, url, ...(key ? { key } : {}) })
   }
 
   /**
