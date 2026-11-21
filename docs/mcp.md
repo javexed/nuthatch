@@ -41,7 +41,10 @@ needs them.
 - **A read-only token** is enough, and is what to give a client. It
   reaches the engines' state (the session, queries, stats, graphs and
   MCP) and nothing else: no commands, even where its user could send
-  them, no config, no settings, no secrets.
+  them, no config, no settings. Nor does it read what can carry a secret,
+  even where its user has the role for it: command lines, custom
+  variables (a passive-result token is one), contacts' addresses, and the
+  contacts, commands and time periods tables.
 - **Each call is in the audit log**, with the token's name and what it
   looked at. Delete the token on This device to cut the client off.
 - **Where it can be reached** is where nuthatch can: keep it on the

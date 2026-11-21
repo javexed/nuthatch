@@ -29,7 +29,7 @@ import type { Events } from './events.ts'
 import type { Graphs, Series } from './graphs.ts'
 import type { Pusher } from './push.ts'
 import { anyWay, checkDelivery, checkReach, newTopic, sendChat, sendMail, sendNtfy, shown } from './delivery.ts'
-import { ROLES, Refused, type Roles, type RolesConfig, TABLES, access, checkHeaders } from './policy.ts'
+import { ROLES, Refused, type Roles, type RolesConfig, TABLES, access, checkHeaders, secretColumn } from './policy.ts'
 import { checkSubscription } from './webpush.ts'
 import { Forbidden, combine, combineStats, limits, rows, stats } from './query.ts'
 import { RemoteError, type RemoteSite } from './remote.ts'
@@ -129,6 +129,28 @@ interface Identity {
   token?: string
   /** A token that may only read: the routes of READ_ONLY_ROUTES. */
   readOnly?: boolean
+}
+
+/** Tables of the config itself: contacts and how they are reached, commands, time periods. */
+const CONFIG_TABLES = new Set(['contacts', 'contactgroups', 'commands', 'timeperiods'])
+const STATS_OF = new Set(['sum', 'min', 'max', 'avg', 'std', 'suminv', 'avginv'])
+
+/**
+ * A read-only token never reads what can carry a secret (command lines,
+ * custom variables such as passive tokens, contacts' addresses), nor the
+ * config's own tables, whatever its user's roles: what it reads may go on
+ * to an AI client's model. Checked before any site is asked.
+ */
+function withoutSecrets(sent: Record<string, unknown>): void {
+  if (typeof sent.table === 'string' && CONFIG_TABLES.has(sent.table)) throw new Refused(`the table ${sent.table} is not for a read-only token`)
+  const named: unknown[] = Array.isArray(sent.columns) ? [...sent.columns] : []
+  for (const key of Array.isArray(sent.sort) ? sent.sort : []) named.push((key as { column?: unknown } | null)?.column)
+  for (const line of Array.isArray(sent.headers) ? sent.headers : []) {
+    if (typeof line !== 'string') continue
+    const words = line.replace(/^[A-Za-z]+:/, '').trim().split(/\s+/)
+    named.push(STATS_OF.has(words[0] ?? '') ? words[1] : words[0])
+  }
+  for (const name of named) if (typeof name === 'string' && secretColumn(name)) throw new Refused(`the column ${name} is not for a read-only token`)
 }
 
 /** What a read-only token may ask for: the engines' state, never a change, a secret or the config. */
@@ -501,10 +523,11 @@ export function buildApp(deps: Deps): Hono<Env> {
     return Promise.all(asks)
   }
 
-  app.post('/api/v1/query', async (c) => c.json(await queryAs(c.get('identity').user, await body(c))))
+  app.post('/api/v1/query', async (c) => c.json(await queryAs(c.get('identity').user, await body(c), c.get('identity').readOnly)))
 
   /** The rows of a query, as the user sees them, here and at each site. */
-  async function queryAs(user: string, sent: Record<string, unknown>): Promise<QueryAnswer> {
+  async function queryAs(user: string, sent: Record<string, unknown>, readOnly = false): Promise<QueryAnswer> {
+    if (readOnly) withoutSecrets(sent)
     const { roles } = await who(user)
     if (remotes.length === 0) return rows(deps.backends, user, roles, sent)
     // Each part gives its first rows; the page is cut from all of them.
@@ -517,8 +540,9 @@ export function buildApp(deps: Deps): Hono<Env> {
   }
 
   app.post('/api/v1/stats', async (c) => {
-    const { user } = c.get('identity')
+    const { user, readOnly } = c.get('identity')
     const sent = await body(c)
+    if (readOnly) withoutSecrets(sent)
     const { roles } = await who(user)
     if (remotes.length === 0) return c.json(await stats(deps.backends, user, roles, sent))
     const parts = await everywhere<StatsAnswer>(user, sent, '/api/v1/stats', (names) => stats(deps.backends, user, roles, { ...sent, backends: names }), () => ({ groups: [], by_backend: {}, errors: {} }))
@@ -1054,7 +1078,7 @@ export function buildApp(deps: Deps): Hono<Env> {
       return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'the body is not JSON' } })
     }
     const reader: Reader = {
-      query: (query) => queryAs(identity.user, query),
+      query: (query) => queryAs(identity.user, query, identity.readOnly),
       graph: (backend, host, service, hours) => graphAs(identity.user, backend, host, service, hours),
     }
     const answer = await mcp(message, reader, VERSION, (what) => deps.store.audit(identity.user, '', 'mcp', `${identity.token || 'token'}: ${what}`))

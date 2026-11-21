@@ -28,7 +28,7 @@ function site() {
     backends: [backend],
     store,
     events: new Events([]),
-    roles: new RolesConfig({ authorized_contactgroup_for_all_hosts: ['admins'], authorized_for_all_host_commands: ['ops'] }),
+    roles: new RolesConfig({ authorized_contactgroup_for_all_hosts: ['admins'], authorized_for_all_host_commands: ['ops'], authorized_for_configuration_information: ['ann'] }),
     limiter: new Limiter(),
     cookieSecure: false,
   })
@@ -90,6 +90,39 @@ describe('MCP', () => {
 })
 
 describe('read-only tokens', () => {
+  it('read nothing that can carry a secret, whatever their user’s roles', async () => {
+    const { app, store, rpc } = site()
+    const reader = store.newToken('ann', 'claude-code', true).token
+    const full = store.newToken('ann', 'script').token
+    const query = (t: string, sent: unknown) =>
+      app.request('/api/v1/query', { method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' }, body: JSON.stringify(sent) })
+
+    // ann has configuration_information: a token that may do everything reads them.
+    const secrets = { table: 'services', columns: ['host_name', 'custom_variable_values'] }
+    expect((await query(full, secrets)).status).toBe(200)
+    expect((await query(full, { table: 'contacts', columns: ['name'] })).status).toBe(200)
+
+    for (const sent of [
+      secrets,
+      { table: 'services', columns: ['host_name', 'check_command'] },
+      { table: 'hosts', columns: ['name'], headers: ['Filter: custom_variable_names >= CHECKD_PASSIVE_TOKEN'] },
+      { table: 'log', columns: ['time'], headers: ['Filter: current_contact_email ~ x'] },
+      { table: 'contacts', columns: ['name'] },
+      { table: 'commands', columns: ['name'] },
+    ]) {
+      const answer = await query(reader, sent)
+      expect(answer.status, JSON.stringify(sent)).toBe(400)
+      expect(((await answer.json()) as { error: string }).error).toMatch(/not for a read-only token/)
+    }
+    // A value that only looks like such a column is fine.
+    expect((await query(reader, { table: 'services', columns: ['host_name'], headers: ['Filter: plugin_output ~ email'] })).status).toBe(200)
+
+    // Over MCP too: the tool says so.
+    const called = (await (await rpc(reader, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'livestatus_query', arguments: secrets } })).json()) as { result: { isError: boolean; content: { text: string }[] } }
+    expect(called.result.isError).toBe(true)
+    expect(called.result.content[0]?.text).toMatch(/custom_variable_values is not for a read-only token/)
+  })
+
   it('read the engines, and nothing else', async () => {
     const { app, store, commands } = site()
     const { token } = store.newToken('ops', 'reader', true)
