@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, SshLogin, HostInventory, DeliverySettings, AssistantEvent, AssistantTurn, AssistantService, AssistantSettings, AssistantSettingsChange } from './types.ts'
+import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, AgentSigning, SshLogin, HostInventory, DeliverySettings, AssistantEvent, AssistantTurn, AssistantService, AssistantSettings, AssistantSettingsChange } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -183,6 +183,25 @@ export class Client {
   /** Asks for a host's agent to be updated, at its next asking for updates. */
   updateAgent(backend: string, host: string): Promise<Record<string, never>> {
     return this.call('POST', `/api/v1/agents/${encodeURIComponent(backend)}/${encodeURIComponent(host)}/update`, {})
+  }
+
+  /** The key that signs the agent binaries, and whether they are signed. */
+  agentSigning(): Promise<AgentSigning> {
+    return this.call('GET', '/api/v1/agent-signing')
+  }
+
+  /** A new signing key: made by nuthatch, or a certificate and its key. */
+  setAgentSigningKey(key: { make: true } | { cert: string; key: string }): Promise<AgentSigning> {
+    return this.call('PUT', '/api/v1/agent-signing/key', key)
+  }
+
+  removeAgentSigningKey(): Promise<AgentSigning> {
+    return this.call('DELETE', '/api/v1/agent-signing/key')
+  }
+
+  /** Signs the agent binaries served now. */
+  signAgents(): Promise<AgentSigning> {
+    return this.call('POST', '/api/v1/agent-signing/sign')
   }
 
   removeAgent(backend: string, host: string): Promise<Record<string, never>> {

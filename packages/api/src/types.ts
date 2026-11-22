@@ -498,6 +498,11 @@ export interface AgentRow {
   updater?: boolean
   /** An update is asked for and not done yet. */
   updating?: boolean
+  /** While nuthatch has a signing key: whether the agent takes only
+   * binaries signed by it. */
+  signs?: boolean
+  /** It went back from the binary served, which did not connect. */
+  refused?: boolean
   /** While waiting: when its command was made, when the host fetched the
    * installer (ms), and where the host fetches it from and finds the
    * engine (`address:port`); unknown after nuthatch restarted. */
@@ -566,4 +571,23 @@ export interface AgentInstall {
   /** When the code in the command stops working, ms since 1970. */
   until: number
   command: string
+}
+
+/** The key that signs the agent binaries (config_edit). */
+export interface AgentSigning {
+  signer?: {
+    subject: string
+    algorithm: string
+    /** Hex SHA-256 of the public key, as agents know it. */
+    id: string
+    /** Until when the certificate says (ms); agents do not check it. */
+    until: number
+    self_signed: boolean
+  }
+  /** When the binaries were last signed (ms), and their version. */
+  signed?: { at: number; version?: string }
+  /** Every binary served is signed. */
+  current: boolean
+  /** Binaries served that are not signed. */
+  unsigned: string[]
 }

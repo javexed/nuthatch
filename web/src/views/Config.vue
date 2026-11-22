@@ -8,6 +8,7 @@ import { ApiError } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AddHost from '../components/AddHost.vue'
+import AgentSigningCard from '../components/AgentSigningCard.vue'
 import AssistantSettings from '../components/AssistantSettings.vue'
 import ContactForm from '../components/ContactForm.vue'
 import DeliveryForm from '../components/DeliveryForm.vue'
@@ -361,6 +362,10 @@ async function remove(host: ManagedHost) {
               </div>
             </li>
           </ul>
+        </template>
+        <template v-if="hasAgents">
+          <h2 class="groups-head">Agent signing</h2>
+          <AgentSigningCard />
         </template>
         <h2 class="groups-head">Groups</h2>
         <p>

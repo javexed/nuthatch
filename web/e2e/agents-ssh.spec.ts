@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { fits, livestatus, login, send } from './helpers'
+import { chooseBackend, fits, livestatus, login, send } from './helpers'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const agentsDir = join(here, '../../dev/run/checkd/workers/agents')
@@ -202,4 +202,83 @@ test('an agent replaces itself when asked, as its own user', async ({ page }) =>
   page.once('dialog', (dialog) => void dialog.accept())
   await agent.getByRole('button', { name: 'Remove' }).click()
   await expect(agent.getByRole('button', { name: 'Install agent' })).toBeVisible()
+})
+
+test('an agent installed with a signing key takes only binaries it signed later, and goes back from one that does not connect', async ({ page }) => {
+  test.skip(!target(), 'needs dev/ssh-target')
+  test.skip(test.info().project.name !== 'desktop', 'one install is enough')
+  test.setTimeout(600_000)
+  await login(page, 'admin')
+  const { csrf } = (await (await page.request.get('/api/v1/session')).json()) as { csrf: string }
+  const headers = { 'X-Nuthatch-CSRF': csrf }
+  const signedAt = async () => {
+    const answer = await page.request.post('/api/v1/agent-signing/sign', { headers })
+    expect(answer.status()).toBe(200)
+    return Math.floor(((await answer.json()) as { signed: { at: number } }).signed.at / 1000)
+  }
+  expect((await page.request.put('/api/v1/agent-signing/key', { headers, data: { make: true } })).status()).toBe(200)
+  try {
+    const first = await signedAt()
+    await page.goto('/config')
+    await chooseBackend(page, 'checkd')
+    await expect(page.getByRole('region', { name: 'Agent signing' })).toContainText(/nuthatch agent signing · Ed25519 .* self-signed/)
+    await expect(page.getByRole('region', { name: 'Agent signing' })).toContainText('Signed')
+
+    await page.goto('/host/checkd/lab2')
+    const agent = page.getByRole('region', { name: 'Agent of lab2' })
+    await agent.getByRole('button', { name: 'Install agent' }).click()
+    const form = agent.getByRole('form', { name: 'Over SSH' })
+    await form.getByLabel('SSH address').fill('127.0.0.1')
+    await form.getByLabel('Port').fill('2222')
+    await form.getByLabel('User').fill('admin')
+    await form.getByRole('button', { name: 'Look up host key' }).click()
+    await form.locator('input[name=ssh-password]').fill('admin-pass')
+    await form.getByRole('button', { name: 'Install' }).click()
+    await expect(page.getByRole('region', { name: 'Install over SSH' }).getByRole('status')).toHaveText('Installed', { timeout: 90_000 })
+    await expect.poll(() => existsSync(join(agentsDir, 'lab2.token')), { timeout: 20_000 }).toBe(true)
+    const bin = '/var/lib/checkd-agent/bin/checkd-agent'
+    expect(inTarget('cat', '/etc/systemd/system/checkd-agent.service')).toContain('--update-signer /etc/checkd-agent/signer.crt')
+    expect(inTarget('cat', `${bin}.signed`).trim()).toBe(String(first))
+    const journal = () => inTarget('journalctl', '-u', 'checkd-agent', '--no-pager', '-n', '30')
+
+    // Another binary than it is served, and the one served signed no later
+    // than its own: refused.
+    const served = readFileSync(join(here, '../../dev/run/checkd/agent-bin/SHA256SUMS'), 'utf8').match(/^([0-9a-f]{64}) +checkd-agent-linux-x86_64$/m)?.[1]
+    const have = () => inTarget('sha256sum', bin).split(' ')[0]
+    inTarget('sh', '-c', `cp ${bin} /tmp/older && printf x >> /tmp/older && install -o checkd-agent -m 755 /tmp/older ${bin} && systemctl restart checkd-agent`)
+    const older = have()
+    expect((await page.request.post('/api/v1/agents/checkd/lab2/update', { headers, data: {} })).status()).toBe(200)
+    await expect.poll(journal, { timeout: 150_000, intervals: [5000] }).toContain('signed before the one this agent has')
+    expect(have()).toBe(older)
+
+    // Signed again, later: taken, and kept once it connects.
+    const second = await signedAt()
+    inTarget('systemctl', 'restart', 'checkd-agent')
+    await expect.poll(have, { timeout: 150_000, intervals: [5000] }).toBe(served)
+    await expect.poll(journal, { timeout: 60_000 }).toContain('this binary connected, and stays')
+    expect(inTarget('cat', `${bin}.signed`).trim()).toBe(String(second))
+    expect(inTarget('sh', '-c', `ls ${bin}.old ${bin}.trial 2>/dev/null || true`).trim()).toBe('')
+
+    // A binary on trial that cannot reach the engine, started three times:
+    // the one before it is put back, and the one on trial refused.
+    inTarget('sh', '-c', `install -o checkd-agent -m 755 /tmp/older ${bin}.old && echo "$(date +%s) 0 ${served}" > ${bin}.trial && chown checkd-agent ${bin}.trial`)
+    inTarget('sh', '-c', "cp /etc/systemd/system/checkd-agent.service /tmp/unit && sed -i 's/--engine [^ ]*/--engine 127.0.0.1:9/' /etc/systemd/system/checkd-agent.service && systemctl daemon-reload")
+    for (let n = 0; n < 4; n++) {
+      inTarget('systemctl', 'restart', 'checkd-agent')
+      await page.waitForTimeout(2000)
+    }
+    await expect.poll(have, { timeout: 30_000 }).toBe(older)
+    expect(journal()).toContain('went back to the one before')
+    expect(inTarget('cat', `${bin}.refused`)).toContain(served)
+    inTarget('sh', '-c', 'cp /tmp/unit /etc/systemd/system/checkd-agent.service && systemctl daemon-reload && systemctl restart checkd-agent')
+    // It says so when it asks, and is not given that binary again.
+    await expect(agent).toContainText('went back from', { timeout: 150_000 })
+    expect(have()).toBe(older)
+
+    page.once('dialog', (dialog) => void dialog.accept())
+    await agent.getByRole('button', { name: 'Remove' }).click()
+    await expect(agent.getByRole('button', { name: 'Install agent' })).toBeVisible()
+  } finally {
+    await page.request.delete('/api/v1/agent-signing/key', { headers })
+  }
 })

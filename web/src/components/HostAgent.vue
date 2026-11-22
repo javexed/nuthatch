@@ -157,7 +157,9 @@ async function remove() {
             · {{ inventory.inventory.os.name || inventory.inventory.os.family }} · {{ inventory.inventory.cpus }} CPU · {{ gib(inventory.inventory.memory) }}
           </span>
           <span v-if="agent.version" class="by">&nbsp;· {{ agent.version }}</span>
-          <template v-if="outdated">
+          <span v-if="agent.signs === false" class="by">· unsigned</span>
+          <span v-if="agent.refused" class="warning-text">· went back from {{ agent.current }}</span>
+          <template v-if="outdated && !agent.refused">
             <button v-if="agent.updater" type="button" class="quiet" :disabled="busy || agent.updating" @click="update">{{ agent.updating ? 'Updating…' : `Update to ${agent.current}` }}</button>
             <span v-else class="warning-text">Older than {{ agent.current }}</span>
           </template>

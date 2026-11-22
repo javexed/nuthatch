@@ -119,34 +119,74 @@ The host's page shows the version of its agent, and when that is older
 than the agents nuthatch serves (the `VERSION` file that checkd's
 `scripts/build-agents.sh` writes beside them), **Update to …**.
 
-On Linux the agent replaces itself. Every five minutes it asks nuthatch,
-with its token, whether it is to be replaced. nuthatch says yes when the
-binary it serves differs from the one the host has, and either **Update**
-was pressed for that host (kept until done, across a restart of nuthatch,
-as `<host>.update` beside the host's token). Updates without asking
-(`[agents] update = "auto"`) wait for signed binaries ([TODO.md](../TODO.md));
-nuthatch refuses that setting until then.
+The agent replaces itself, on Linux and on Windows. Every five minutes it
+asks nuthatch, with its token, whether it is to be replaced. nuthatch
+says yes when the binary it serves differs from the one the host has, and
+**Update** was pressed for that host (kept until done, across a restart
+of nuthatch, as `<host>.update` beside the host's token), or updates are
+automatic and the agent takes signed binaries only (below).
 
 Then the agent fetches the binary from nuthatch, by the same pin as the
-installer, checks it against the checksum nuthatch gave, runs it once
-(`--version`), puts it in place of its own and ends, and systemd starts
-the new one. So an update takes up to five minutes after **Update** is
-pressed. The audit log has who asked and when each host fetched it.
+installer, checks it against the checksum nuthatch gave (and the
+signature), runs it once (`--version`), puts it in place of its own and
+ends, and its service manager starts the new one. So an update takes up
+to five minutes after **Update** is pressed. The audit log has who asked
+and when each host fetched it.
 
-- No root after the install: the binary is in `/var/lib/checkd-agent/bin`,
-  which belongs to the agent's user `checkd-agent`. The other side of
-  that: whoever takes over that user can change the agent, and so keep
-  their hold across restarts; still only as that user.
-- Whoever can change the binaries in `[agents] bin` on this machine can
-  change each agent the next time **Update** is pressed for it. The
-  binaries are checked against `SHA256SUMS` beside them, which is no
-  defence against that. Signed binaries are not done yet.
-- A new agent that runs `--version` but then fails is not put back: the
-  host shows its agent not connected, and installing again mends it.
-- An agent installed before updates came does not ask: use **Install
-  again** on its host's page once, over SSH or by the command. The agent
-  it has goes on until the new one connects.
-- Windows: agents do not update themselves yet; install again.
+- No root after the install: on Linux the binary is in
+  `/var/lib/checkd-agent/bin`, which belongs to the agent's user
+  `checkd-agent`; on Windows in `%ProgramData%\checkd-agent\bin`, which
+  LOCAL SERVICE, which runs it, may change, and the scheduled task starts
+  it again within a minute of its ending. The other side of that:
+  whoever takes over that user can change the agent, and so keep their
+  hold across restarts; still only as that user.
+- An agent installed before updates came does not ask (on Windows, before
+  this release): use **Install again** on its host's page once, over SSH
+  or by the command. The agent it has goes on until the new one connects.
+
+### Signed binaries
+
+Without signing, whoever can change the binaries in `[agents] bin` on
+this machine can change each agent the next time **Update** is pressed
+for it: `SHA256SUMS` beside them is no defence against that. With a
+signing key, they cannot.
+
+**Config → Agent signing** makes a key (**Make a key**: Ed25519, in a
+certificate signed by itself) or takes an uploaded certificate and its
+private key in PEM (**Upload**: Ed25519, ECDSA P-256 or P-384, or RSA of
+2048 bits or more; a key with a passphrase is refused). The key is kept
+in nuthatch's store. Then **Sign** signs the binaries served now, each by
+its SHA-256 as read when Sign is pressed, which must match `SHA256SUMS`.
+After the binaries change (a new build), they are not signed until Sign
+is pressed again.
+
+While there is a key:
+
+- An agent installed or installed again gets the certificate and takes
+  only binaries signed by its key (checkd's `--update-signer`), and none
+  signed at the same time as or before the one it has: an old binary with
+  a good signature does not come back. Agents check the key alone, not
+  who issued the certificate or until when, so a certificate renewed with
+  the same key goes on working.
+- Installers and updates give only signed binaries. An install while the
+  binaries are not signed fails with "nuthatch has no signed …".
+- `[agents] update = "auto"` updates agents that take signed binaries
+  only, without asking. An agent installed before the key (marked
+  *unsigned* on its host's page) is updated only when **Update** is
+  pressed, as before.
+- Replacing or removing the key: agents installed with the old one refuse
+  what the new one signs, until each is installed again.
+
+Signing in nuthatch moves the trust from whoever can write `[agents]
+bin` to whoever has the role config_edit, and to this machine: whoever
+can read nuthatch's store has the key.
+
+### Going back
+
+A new binary that does not connect to the engine within ten minutes, or
+is started three times without connecting, puts the one before it back
+and ends, to be started again. Its host's page then says *went back from
+…*, and that binary is not fetched again for a day.
 
 ## When an agent does not connect
 

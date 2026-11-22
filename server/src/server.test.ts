@@ -1,4 +1,4 @@
-import { createDecipheriv, createECDH, createHash, hkdfSync, randomBytes, verify as cryptoVerify } from 'node:crypto'
+import { X509Certificate, createDecipheriv, createECDH, createHash, generateKeyPairSync, hkdfSync, randomBytes, verify as cryptoVerify } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -28,6 +28,7 @@ import { Pusher, digestOf, messageOf, parseNotice } from './push.ts'
 import { compare, limits, merge, rows, stats } from './query.ts'
 import { bySubnet, inside, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
 import { RemoteSite } from './remote.ts'
+import { selfSigned, signBinary, statement } from './signing.ts'
 import { Store } from './store.ts'
 import { checkSubscription, encrypt, newServerKeys, publicKeyOf, vapid } from './webpush.ts'
 
@@ -1399,10 +1400,9 @@ describe('agents', () => {
     expect(store.auditTail(10).map((a) => a.action)).toEqual(expect.arrayContaining(['agent update asked', 'agent update fetched']))
     const noAgent = await app.request('/api/v1/agents/site/win1/update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: '{}' })
     expect(noAgent.status).toBe(400)
-    // Automatic: each older agent, without asking.
+    // Automatic only for agents that take signed binaries alone: this one does not.
     const auto = setUp(true)
-    expect(await (await auto.ask(old)).text()).toBe(`update checkd-agent-linux-x86_64 ${sum}\n`)
-    expect(await (await auto.ask(sum)).text()).toBe('none\n')
+    expect(await (await auto.ask(old)).text()).toBe('none\n')
     // nuthatch's own listener lets the asking through, and nothing else new.
     const reached: string[] = []
     const only = hostsOnly((request) => {
@@ -1411,6 +1411,107 @@ describe('agents', () => {
     })
     for (const path of ['/agent/update/site/web1', '/agent/update/site/web1/x', '/agent/update/site']) await only(new Request(`https://h${path}?arch=x86_64`))
     expect(reached).toEqual(['/agent/update/site/web1'])
+  })
+
+  it('signs the binaries with a key made here, and agents installed with it take only those, later than theirs', async () => {
+    const sum = createHash('sha256').update('ELF').digest('hex')
+    const old = createHash('sha256').update('older').digest('hex')
+    const s = site({ authorized_for_config_edit: ['ops'] }, undefined, undefined, undefined, true)
+    const json = { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }
+    const call = async (method: string, path: string, body?: unknown) => {
+      const answer = await s.app.request(`/api/v1/agent-signing${path}`, { method, headers: json, ...(body ? { body: JSON.stringify(body) } : {}) })
+      return { status: answer.status, body: (await answer.json()) as Record<string, unknown> }
+    }
+    expect((await call('GET', '')).body).toEqual({ current: false, unsigned: [] })
+    const made = await call('PUT', '/key', { make: true })
+    expect(made.status).toBe(200)
+    const signer = made.body.signer as { id: string; algorithm: string; self_signed: boolean; subject: string }
+    expect(signer).toMatchObject({ algorithm: 'Ed25519', self_signed: true, subject: 'nuthatch agent signing' })
+    expect(signer.id).toMatch(/^[0-9a-f]{64}$/)
+    expect(made.body).toMatchObject({ current: false, unsigned: ['checkd-agent-linux-x86_64'] })
+
+    writeFileSync(join(s.dir, 'agents', 'web1.token'), 'the-token\n')
+    const ask = (query: string) => s.app.request(`/agent/update/site/web1?arch=x86_64&${query}`, { headers: { authorization: 'Bearer the-token' } })
+    // Not signed yet: nothing, not even to an agent asked to update.
+    writeFileSync(join(s.dir, 'agents', 'web1.update'), '')
+    expect(await (await ask(`have=${old}`)).text()).toBe('none\n')
+
+    const signed = await call('POST', '/sign')
+    expect(signed.body).toMatchObject({ current: true, unsigned: [] })
+    const store = s.store
+    const at = (JSON.parse(store.pref('', 'agent-signatures') ?? '{}') as { at: number }).at
+    // An agent with nuthatch's key, updated without asking (update = "auto").
+    rmSync(join(s.dir, 'agents', 'web1.update'))
+    const answer = (await (await ask(`have=${old}&signer=${signer.id}`)).text()).trim().split(' ')
+    expect(answer.slice(0, 4)).toEqual(['update', 'checkd-agent-linux-x86_64', sum, String(at)])
+    const cert = new X509Certificate(JSON.parse(store.pref('', 'agent-signing') ?? '{}').cert)
+    expect(cryptoVerify(null, Buffer.from(statement('checkd-agent-linux-x86_64', sum, at)), cert.publicKey, Buffer.from(answer[4] ?? '', 'hex'))).toBe(true)
+    // The row says it takes signed binaries.
+    const row = async () => ((await (await s.app.request('/api/v1/agents/site')).json()) as { agents: Record<string, unknown>[] }).agents[0]
+    expect(await row()).toMatchObject({ host: 'web1', updater: true, signs: true })
+    // An agent of another key: nothing it would refuse.
+    expect(await (await ask(`have=${old}&signer=${'ab'.repeat(32)}`)).text()).toBe('none\n')
+    expect(await row()).toMatchObject({ signs: false })
+    // An agent without a key is not updated without asking; asked, it is.
+    expect(await (await ask(`have=${old}`)).text()).toBe('none\n')
+    writeFileSync(join(s.dir, 'agents', 'web1.update'), '')
+    expect(await (await ask(`have=${old}`)).text()).toBe(`update checkd-agent-linux-x86_64 ${sum}\n`)
+    // One that went back from it: not offered again, and no longer updating.
+    expect(await (await ask(`have=${old}&signer=${signer.id}&refused=${sum}`)).text()).toBe('none\n')
+    expect(await row()).toMatchObject({ refused: true })
+    expect((await row())?.updating).toBeUndefined()
+
+    // Its installer: the signed SHA-256, the certificate, and the time of the signature.
+    const { command } = (await (await s.post({ host: 'web1', os: 'linux' })).json()) as { command: string }
+    const script = await (await s.app.request(new URL(urlOf(command)).pathname)).text()
+    expect(script).toContain('--update-signer /etc/checkd-agent/signer.crt')
+    expect(script).toContain(cert.toString().trim().split('\n')[1])
+    expect(script).toContain(`signed='${at}'`)
+    writeFileSync(join(s.dir, 'install.sh'), script)
+    expect(execFileSync('sh', ['-n', join(s.dir, 'install.sh')]).toString()).toBe('')
+
+    // The binary changed after: not signed, and not signed while SHA256SUMS says otherwise.
+    writeFileSync(join(s.dir, 'bin', 'checkd-agent-linux-x86_64'), 'ELF2')
+    expect((await call('POST', '/sign')).status).toBe(400)
+    const other = createHash('sha256').update('ELF2').digest('hex')
+    writeFileSync(join(s.dir, 'bin', 'SHA256SUMS'), `${other}  checkd-agent-linux-x86_64\n`)
+    expect((await call('GET', '')).body).toMatchObject({ current: false, unsigned: ['checkd-agent-linux-x86_64'] })
+    expect(await (await ask(`have=${old}&signer=${signer.id}`)).text()).toBe('none\n')
+    const fresh = s.app.request(new URL(urlOf(((await (await s.post({ host: 'web1', os: 'linux' })).json()) as { command: string }).command)).pathname)
+    expect(await (await fresh).text()).toContain('nuthatch has no signed $file')
+    // Signed again: later than before.
+    await call('POST', '/sign')
+    expect((JSON.parse(store.pref('', 'agent-signatures') ?? '{}') as { at: number }).at).toBeGreaterThan(at)
+
+    // A key replaced or removed: what it signed is gone, its time kept.
+    const removed = await call('DELETE', '/key')
+    expect(removed.body).toEqual({ current: false, unsigned: [] })
+    writeFileSync(join(s.dir, 'agents', 'web1.update'), '')
+    expect(await (await ask(`have=${old}`)).text()).toBe(`update checkd-agent-linux-x86_64 ${other}\n`)
+    expect(store.auditTail(10).map((a) => a.action)).toEqual(expect.arrayContaining(['agent signing key', 'agent binaries signed']))
+  })
+
+  it('takes an uploaded certificate with its key, and refuses one that is not', async () => {
+    const s = site({ authorized_for_config_edit: ['ops'], authorized_for_all_hosts: ['viewer'] })
+    const put = (body: unknown) => s.app.request('/api/v1/agent-signing/key', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }, body: JSON.stringify(body) })
+    const a = selfSigned('ours')
+    const b = selfSigned('theirs')
+    const good = await put({ cert: `${a.cert}${b.cert}`, key: a.key })
+    expect(good.status).toBe(200)
+    expect(((await good.json()) as { signer: { subject: string } }).signer.subject).toBe('ours')
+    expect(await (await put({ cert: a.cert, key: b.key })).text()).toContain('not the certificate')
+    expect(await (await put({ cert: 'nothing', key: a.key })).text()).toContain('PEM')
+    const { privateKey: small } = generateKeyPairSync('rsa', { modulusLength: 1024 })
+    expect(await (await put({ cert: a.cert, key: small.export({ type: 'pkcs8', format: 'pem' }) })).text()).toContain('2048')
+    const locked = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem', cipher: 'aes-256-cbc', passphrase: 'x' })
+    expect(await (await put({ cert: a.cert, key: locked })).text()).toContain('passphrase')
+    // Signatures by an ECDSA or RSA key are as agents check them.
+    for (const [type, options] of [['ec', { namedCurve: 'P-256' }], ['ec', { namedCurve: 'P-384' }], ['rsa', { modulusLength: 2048 }]] as const) {
+      const pair = generateKeyPairSync(type as 'ec', options as { namedCurve: string })
+      const hash = type === 'rsa' ? 'sha256' : (options as { namedCurve: string }).namedCurve === 'P-384' ? 'sha384' : 'sha256'
+      const signature = signBinary(pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), 'f', 'aa', 7)
+      expect(cryptoVerify(hash, Buffer.from(statement('f', 'aa', 7)), pair.publicKey, Buffer.from(signature, 'hex'))).toBe(true)
+    }
   })
 
   it('installs on Linux an agent that replaces itself: its binary its own, no root after the install', async () => {
@@ -1441,6 +1542,33 @@ describe('agents', () => {
     expect(text).not.toContain('NSClient')
     // Only checkd's own checks and what is put into its plugins directory.
     expect(text).toContain('--restrict-path `"$dir\\plugins`"')
+    // It replaces itself, from a directory LOCAL SERVICE may write, and the
+    // task starts it anew when it ends.
+    expect(text).toContain('--update-from https://nuthatch.example.test/agent/update/site/win1')
+    expect(text).toContain("icacls $bin /grant '*S-1-5-19:(OI)(CI)M'")
+    expect(text).toContain("$exe = Join-Path $bin 'checkd-agent.exe'")
+    expect(text).toContain('-MultipleInstances IgnoreNew')
+    expect(text).not.toContain('--update-signer')
+  })
+
+  it('updates a Windows agent with the Windows binary, and signs it too', async () => {
+    const s = site({ authorized_for_config_edit: ['ops'] })
+    writeFileSync(join(s.dir, 'bin', 'checkd-agent-windows-x86_64.exe'), 'ELF')
+    const sum = createHash('sha256').update('ELF').digest('hex')
+    writeFileSync(join(s.dir, 'agents', 'win1.token'), 'the-token\n')
+    writeFileSync(join(s.dir, 'agents', 'win1.update'), '')
+    const ask = (query: string) => s.app.request(`/agent/update/site/win1?${query}`, { headers: { authorization: 'Bearer the-token' } })
+    expect(await (await ask(`arch=x86_64&os=windows&have=${'0'.repeat(64)}`)).text()).toBe(`update checkd-agent-windows-x86_64.exe ${sum}\n`)
+    expect(await (await ask(`arch=aarch64&os=windows&have=${'0'.repeat(64)}`)).text()).toBe('none\n')
+    expect(await (await ask(`arch=x86_64&os=macos&have=${'0'.repeat(64)}`)).text()).toBe('none\n')
+    const json = { 'Content-Type': 'application/json', 'X-Requested-With': 'nuthatch' }
+    await s.app.request('/api/v1/agent-signing/key', { method: 'PUT', headers: json, body: '{"make":true}' })
+    await s.app.request('/api/v1/agent-signing/sign', { method: 'POST', headers: json })
+    const { command } = (await (await s.post({ host: 'win1', os: 'windows' })).json()) as { command: string }
+    const text = await (await s.app.request(new URL(urlOf(command)).pathname)).text()
+    expect(text).toContain('--update-signer `"$data\\signer.crt`"')
+    expect(text).toMatch(/Set-Content -Encoding ascii -Path \(Join-Path \$bin 'checkd-agent.signed'\) -Value '\d+'/)
+    expect(text).toContain('-----BEGIN CERTIFICATE-----')
   })
 
   it('serves only the listed binaries, and is for config_edit only', async () => {

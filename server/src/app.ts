@@ -16,7 +16,8 @@ import type { Htpasswd, Limiter } from './auth.ts'
 import { type Assistant, type Reader, conversation, failure } from './assistant.ts'
 import { mcp } from './mcp.ts'
 import { ModelError } from './models.ts'
-import { type Agents, InstallCodes, type Pin, agentName, binaries, binariesVersion, engineOf, installCommand, linuxBinary, linuxScript, sshCommand, windowsScript } from './agents.ts'
+import { type Agents, InstallCodes, type Pin, type Served, agentName, binaries, binariesVersion, binaryFor, engineOf, installCommand, linuxScript, sshCommand, windowsScript } from './agents.ts'
+import { AgentSigning, selfSigned, uploaded } from './signing.ts'
 import { nearestFirst, networksOf, probeCommand, readProbe, ufwGaps } from './reach.ts'
 import { hostKeys, runOver, sshAddress, sshUser } from './ssh.ts'
 import type { Backend } from './backend.ts'
@@ -91,7 +92,8 @@ export interface Deps {
   agentBin?: string
   /** This nuthatch's address as monitored hosts reach it; else the request's. */
   agentBase?: string
-  /** `[agents] update = "auto"`: agents are updated without asking. */
+  /** `[agents] update = "auto"`: agents that take only signed binaries are
+   * updated without asking. */
   agentUpdate?: boolean
   /** nuthatch's own TLS listener for hosts: its port, the addresses hosts
    * reach this machine at, and its certificate's pins. */
@@ -1182,6 +1184,17 @@ export function buildApp(deps: Deps): Hono<Env> {
     at: number
   }
   const jobs = new Map<string, Job>()
+  // The key that signs the agent binaries, and their signatures.
+  const signing = new AgentSigning(deps.store)
+  /** The binaries a host is given: while nuthatch has a signing key, only
+   * signed ones, with their signatures. */
+  function servedSums(): { sums: Map<string, string>; signed?: Map<string, { sum: string; time: number; signature: string }> } {
+    if (!deps.agentBin) return { sums: new Map() }
+    if (!signing.key()) return { sums: binaries(deps.agentBin) }
+    const signed = signing.signedSums(deps.agentBin)
+    return { sums: new Map([...signed].map(([file, s]) => [file, s.sum])), signed }
+  }
+
   async function agentsOf(c: Context<Env>): Promise<{ agents: Agents; user: string }> {
     const { user, peer } = c.get('identity')
     if (peer) throw new Forbidden('agents are added at their own site')
@@ -1228,9 +1241,45 @@ export function buildApp(deps: Deps): Hono<Env> {
     return [listen.port, ...(engine ? [Number(engine)] : [])]
   }
 
+  // The key that signs the agent binaries: made here or uploaded, and the
+  // binaries signed with it, by config_edit.
+  async function signingOf(c: Context<Env>): Promise<{ user: string; bin: string }> {
+    const { user, peer } = c.get('identity')
+    if (peer) throw new Forbidden('agents are signed at their own site')
+    if (!(await who(user)).roles.has('config_edit')) throw new Forbidden('agent signing needs the role config_edit')
+    if (!deps.agentBin) throw new Refused('no [agents] here')
+    return { user, bin: deps.agentBin }
+  }
+  app.get('/api/v1/agent-signing', async (c) => {
+    const { bin } = await signingOf(c)
+    return c.json(signing.state(bin))
+  })
+  app.put('/api/v1/agent-signing/key', async (c) => {
+    const { user, bin } = await signingOf(c)
+    const { cert, key, make } = (await body(c)) as { cert?: unknown; key?: unknown; make?: unknown }
+    const held = make === true ? selfSigned('nuthatch agent signing') : typeof cert === 'string' && typeof key === 'string' && cert.length < 65536 && key.length < 65536 ? uploaded(cert, key) : null
+    if (!held) throw new Refused('make, or a certificate and its key')
+    signing.setKey(held)
+    const state = signing.state(bin)
+    deps.store.audit(user, '', 'agent signing key', `${make === true ? 'made' : 'uploaded'} ${state.signer?.id.slice(0, 16) ?? ''}`)
+    return c.json(state)
+  })
+  app.delete('/api/v1/agent-signing/key', async (c) => {
+    const { user, bin } = await signingOf(c)
+    signing.setKey(null)
+    deps.store.audit(user, '', 'agent signing key', 'removed')
+    return c.json(signing.state(bin))
+  })
+  app.post('/api/v1/agent-signing/sign', async (c) => {
+    const { user, bin } = await signingOf(c)
+    const signed = await signing.sign(bin)
+    deps.store.audit(user, '', 'agent binaries signed', `${signed.version ?? ''} ${Object.keys(signed.files).length} files`.trim())
+    return c.json(signing.state(bin))
+  })
+
   app.get('/api/v1/agents/:backend', async (c) => {
     const { agents } = await agentsOf(c)
-    const rows = await Promise.all((await agents.list()).map((row) => rowOf(agents, row)))
+    const rows = await Promise.all((await agents.list(signing.id())).map((row) => rowOf(agents, row)))
     const listen = deps.agentListen
     if (!listen) return c.json({ agents: rows })
     // For a host: the address on its network first.
@@ -1251,7 +1300,7 @@ export function buildApp(deps: Deps): Hono<Env> {
     // Taken up at once, not at the next look round.
     const file = agents.inventoryFile(host)
     if (file && deps.setup && agents.hosts().includes(host)) await deps.setup.take(agents.backend.name, host, file.text, file.received)
-    const row = (await agents.list()).find((r) => r.host === host)
+    const row = (await agents.list(signing.id())).find((r) => r.host === host)
     return c.json({ inventory: deps.setup ? await deps.setup.view(agents.backend.name, host) : null, agent: row ? await rowOf(agents, row) : null })
   })
 
@@ -1444,28 +1493,41 @@ export function buildApp(deps: Deps): Hono<Env> {
     const install = codes.take(c.req.param('code'))
     const agents = install && deps.agents?.get(install.backend)
     if (!install || !agents || !deps.agentBin) return c.text('This install code is used or has expired. Make a new one in nuthatch.\n', 404)
-    const facts = { install, settings: agents.settings, ca: agents.ca(), sums: binaries(deps.agentBin) }
+    const { sums, signed } = servedSums()
+    const held = signing.key()
+    const signer = held && signed ? { cert: held.cert, times: new Map([...signed].map(([file, s]) => [file, s.time])) } : undefined
+    const facts = { install, settings: agents.settings, ca: agents.ca(), sums, ...(signer ? { signer } : {}) }
     deps.store.audit('', install.backend, 'agent install fetched', `${install.host} from ${address(c)}`)
     agents.noteFetched(install.host)
     return c.text(install.os === 'linux' ? linuxScript(facts) : windowsScript(facts), 200, { 'Cache-Control': 'no-store' })
   })
 
-  // A host's agent asks whether it is to be replaced: with the
-  // host's token, the machine and the checksum of the binary it has. The
-  // answer is `update <file> <sha256>` or `none`.
+  // A host's agent asks whether it is to be replaced: with the host's
+  // token, its machine, the checksum of the binary it has, and the key it
+  // takes signatures of. The answer is `none`, `update <file> <sha256>`,
+  // or to an agent that checks signatures `update <file> <sha256> <time>
+  // <signature>` (checkd's docs/agent.md).
   app.get('/agent/update/:backend/:host', (c) => {
     const host = c.req.param('host')
     const agents = deps.agents?.get(c.req.param('backend'))
     const token = /^Bearer (\S+)$/.exec(c.req.header('authorization') ?? '')?.[1] ?? ''
     if (!agents || !agents.tokenOf(host, token)) return c.text('not found\n', 404)
-    const have = c.req.query('have') ?? ''
-    const file = linuxBinary(c.req.query('arch') ?? '')
-    const sum = file && deps.agentBin ? binaries(deps.agentBin).get(file) : undefined
-    const served = file && sum ? { file, sum } : undefined
-    const update = agents.update(host, served, have, deps.agentUpdate === true)
+    const sha = (name: string) => {
+      const value = c.req.query(name)
+      return value && /^[0-9a-f]{64}$/.test(value) ? value : undefined
+    }
+    const file = binaryFor(c.req.query('os') ?? 'linux', c.req.query('arch') ?? '')
+    const { sums, signed } = servedSums()
+    const sum = file ? sums.get(file) : undefined
+    const signature = file ? signed?.get(file) : undefined
+    const served: Served | undefined = file && sum ? { file, sum, ...(signature ? { signed: { time: signature.time, signature: signature.signature } } : {}) } : undefined
+    const signer = sha('signer')
+    const asking = { have: c.req.query('have') ?? '', ...(signer ? { signer } : {}), ...(sha('refused') ? { refused: sha('refused') } : {}) }
+    const update = agents.update(host, served, asking, deps.agentUpdate === true, signing.id())
     if (!update) return c.text('none\n', 200, { 'Cache-Control': 'no-store' })
     deps.store.audit('', agents.backend.name, 'agent update fetched', `${host} from ${address(c)}`)
-    return c.text(`update ${update.file} ${update.sum}\n`, 200, { 'Cache-Control': 'no-store' })
+    const tail = signer && update.signed ? ` ${update.signed.time} ${update.signed.signature}` : ''
+    return c.text(`update ${update.file} ${update.sum}${tail}\n`, 200, { 'Cache-Control': 'no-store' })
   })
 
   app.get('/agent/bin/:file', async (c) => {

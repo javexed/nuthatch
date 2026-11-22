@@ -218,16 +218,16 @@ function main(): void {
   // [agents]: where the agent binaries are, and this nuthatch's address as hosts reach it.
   let agentBin: string | undefined
   let agentBase: string | undefined
-  const agentUpdate = false
+  let agentUpdate = false
   // Hosts-only listener: TLS with cert and key, or plain HTTP on loopback
   // for a proxy or tunnel in front (then url is what hosts reach).
   let agentListen: { hostname: string; port: number; addresses: string[]; pin?: Pin; cert?: string; key?: string } | undefined
   if (config.agents !== undefined) {
     const { bin, url, listen: hostsListen, cert, key, addresses, update } = table(`${path}: [agents]`, config.agents, ['bin', 'url', 'listen', 'cert', 'key', 'addresses', 'update'])
-    // "auto" waits for signed agent binaries (TODO.md): until then whoever
-    // could change the binaries here could change every agent.
-    if (update === 'auto') fail(`${path}: [agents] update = "auto" waits for signed agent binaries; leave it out, and press Update on a host`)
-    if (update !== undefined && update !== 'off') fail(`${path}: [agents] update is "off"`)
+    // "auto" reaches only agents that take signed binaries alone: whoever
+    // can change the binaries here cannot change those.
+    if (update !== undefined && update !== 'off' && update !== 'auto') fail(`${path}: [agents] update is "auto" or "off"`)
+    agentUpdate = update === 'auto'
     if (typeof bin !== 'string') fail(`${path}: [agents] bin is the directory of checkd's dist/agent`)
     if (!existsSync(join(bin, 'SHA256SUMS'))) console.error(`warning: [agents] bin: no ${join(bin, 'SHA256SUMS')} yet (checkd's scripts/build-agents.sh)`)
     agentBin = bin

@@ -51,6 +51,10 @@ maintainer and no promised time to answer. Only the newest commit of
   key given for that run and kept nowhere (not stored, logged or written
   to a file), and only to the host key the user was shown. See
   [docs/agents.md](docs/agents.md).
+- **The same role signs agent binaries**, with a key made in nuthatch or
+  uploaded. Agents installed while there is a key take only binaries it
+  signed, so changing the files in `[agents] bin` no longer changes
+  them; signing with Sign, or a new key, does.
 
 ## Logging in
 
@@ -92,6 +96,9 @@ maintainer and no promised time to answer. Only the newest commit of
   (system, disks, services, listening ports) and which checks were added
   from it; beside checkd's agent tokens, `<host>.update` and
   `<host>.asked` for updates.
+- With agent signing: in the store, the signing key's certificate and
+  its private key, **in plain text**, and the signatures of the
+  binaries.
 - With e-mail, chat or ntfy for notifications: in the store, the mail
   server's login and password, **in plain text** (it has to be sent;
   for Gmail use an app password, which can be revoked alone), the chat

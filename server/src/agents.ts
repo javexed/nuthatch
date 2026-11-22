@@ -49,6 +49,28 @@ export interface AgentRow {
   updater?: boolean
   /** An update is asked for, and not done yet. */
   updating?: boolean
+  /** While nuthatch has a signing key: whether the agent takes only
+   * binaries signed by it (installed since). */
+  signs?: boolean
+  /** It went back from the binary served, which did not connect. */
+  refused?: boolean
+}
+
+/** What an agent says when it asks for updates. */
+export interface Asking {
+  /** SHA-256 of the binary it has. */
+  have: string
+  /** The key it takes signatures of, as nuthatch's signing.ts names it. */
+  signer?: string
+  /** The binary it went back from. */
+  refused?: string
+}
+
+/** A binary to put in place, and its signature when nuthatch signs them. */
+export interface Served {
+  file: string
+  sum: string
+  signed?: { time: number; signature: string }
 }
 
 /** How often an agent asks for updates (checkd's update.rs), and how long
@@ -210,24 +232,39 @@ export class Agents {
     writeFileSync(this.mark(host, '.update'), '', { mode: 0o640 })
   }
 
+  /** What the agent said when it last asked. */
+  private said(host: string): { signer?: string; refused?: boolean } {
+    try {
+      const found = JSON.parse(readFileSync(this.mark(host, '.asked'), 'utf8')) as Record<string, unknown>
+      return { ...(typeof found.signer === 'string' ? { signer: found.signer } : {}), ...(found.refused === true ? { refused: true } : {}) }
+    } catch {
+      return {}
+    }
+  }
+
   /** A host's agent asks, with its token checked already: the binary to
-   * put in place, if it is to be replaced. It is when the agents served
-   * differ from what it has, and updates are automatic or one was asked
-   * for. */
-  update(host: string, served: { file: string; sum: string } | undefined, have: string, auto: boolean, now = Date.now()): { file: string; sum: string } | undefined {
+   * put in place, if it is to be replaced. It is when the binary served
+   * differs from what it has and it has not gone back from it, and one
+   * was asked for or updates are automatic. Automatic only for an agent
+   * that takes signed binaries alone, by nuthatch's key (`signer`). */
+  update(host: string, served: Served | undefined, asking: Asking, auto: boolean, signer?: string, now = Date.now()): Served | undefined {
+    const refused = !!served && asking.refused === served.sum
+    const signs = asking.signer !== undefined
     try {
       const file = this.mark(host, '.asked')
-      if (existsSync(file)) utimesSync(file, now / 1000, now / 1000)
-      else writeFileSync(file, '', { mode: 0o640 })
+      writeFileSync(file, JSON.stringify({ ...(signs ? { signer: asking.signer } : {}), ...(refused ? { refused: true } : {}) }), { mode: 0o640 })
+      utimesSync(file, now / 1000, now / 1000)
     } catch {
       // Not kept: shown as not asking until the next time.
     }
     if (!served) return undefined
-    if (served.sum === have) {
+    if (served.sum === asking.have || refused) {
       rmSync(this.mark(host, '.update'), { force: true })
       return undefined
     }
-    return auto || this.wanted(host) ? served : undefined
+    // An agent of another key refuses what this one signs.
+    if (signs && (asking.signer !== signer || !served.signed)) return undefined
+    return (auto && signs) || this.wanted(host) ? served : undefined
   }
 
   /** Tells of inventories new since the last look, of agents in use only:
@@ -265,7 +302,8 @@ export class Agents {
     return this.files('.token')
   }
 
-  async list(): Promise<AgentRow[]> {
+  /** `signer`: the id of nuthatch's signing key, when it has one. */
+  async list(signer?: string): Promise<AgentRow[]> {
     const pools = await this.pools()
     const known = this.hosts()
     const waiting = this.files('.new').filter((h) => !known.includes(h))
@@ -274,11 +312,15 @@ export class Agents {
       ...known.map((host) => {
         const version = this.version(host)
         const asked = this.askedAt(host)
+        const asking = asked !== undefined && now - asked < ASKS_GONE
+        const said = asking ? this.said(host) : {}
         return {
           host,
           ...(version ? { version } : {}),
-          ...(asked !== undefined && now - asked < ASKS_GONE ? { updater: true } : {}),
+          ...(asking ? { updater: true } : {}),
           ...(this.wanted(host) ? { updating: true } : {}),
+          ...(asking && signer ? { signs: said.signer === signer } : {}),
+          ...(said.refused ? { refused: true } : {}),
         }
       }),
       ...waiting.map((host) => ({ host, waiting: true, ...this.progress(host) })),
@@ -433,8 +475,11 @@ export function binariesVersion(dir: string): string | undefined {
   }
 }
 
-/** The Linux binary for a machine as the agent names it (Rust's ARCH, as `uname -m`). */
-export function linuxBinary(arch: string): string | undefined {
+/** The binary for a machine as the agent names it: Rust's OS (Linux when
+ * it does not say) and ARCH. */
+export function binaryFor(os: string, arch: string): string | undefined {
+  if (os === 'windows') return arch === 'x86_64' ? 'checkd-agent-windows-x86_64.exe' : undefined
+  if (os !== 'linux') return undefined
   return arch === 'x86_64' ? 'checkd-agent-linux-x86_64' : arch === 'aarch64' ? 'checkd-agent-linux-aarch64' : undefined
 }
 
@@ -443,6 +488,9 @@ interface ScriptFacts {
   settings: AgentSettings
   ca: string
   sums: Map<string, string>
+  /** While nuthatch signs the binaries: the certificate agents take
+   * signatures by, and when each binary in `sums` was signed. */
+  signer?: { cert: string; times: Map<string, number> }
 }
 
 /** The engine as this host reaches it. */
@@ -468,7 +516,7 @@ export function sshCommand(install: Pick<Install, 'os' | 'pin'>, url: string, us
 }
 
 /** The install script for Linux: run as root, `curl ... | sudo sh`. */
-export function linuxScript({ install, settings, ca, sums }: ScriptFacts): string {
+export function linuxScript({ install, settings, ca, sums, signer }: ScriptFacts): string {
   const { base, pin } = install
   const engine = engineOf(install, settings)
   const arch = (name: string) => `${base}/agent/bin/${name}`
@@ -486,7 +534,9 @@ export function linuxScript({ install, settings, ca, sums }: ScriptFacts): strin
     // It asks nuthatch for updates, and replaces itself (docs/agents.md).
     '--update-from', `${base}/agent/update/${encodeURIComponent(install.backend)}/${install.host}`,
     ...(pin ? ['--update-pin', Buffer.from(pin.key, 'base64').toString('hex')] : []),
+    ...(signer ? ['--update-signer', '/etc/checkd-agent/signer.crt'] : []),
   ]
+  const signed = (name: string) => String(signer?.times.get(name) ?? '')
   return `#!/bin/sh
 # checkd-agent for ${install.host}, from nuthatch.
 # All in one function, called on the last line: a download cut short runs nothing.
@@ -494,11 +544,11 @@ set -eu
 main() {
 [ "$(id -u)" = 0 ] || { echo "Run this as root: curl ... | sudo sh" >&2; exit 1; }
 case "$(uname -m)" in
-  x86_64|amd64) file=${x86}; url=${sh(arch(x86))}; sum=${sh(sums.get(x86) ?? '')} ;;
-  aarch64|arm64) file=${arm}; url=${sh(arch(arm))}; sum=${sh(sums.get(arm) ?? '')} ;;
+  x86_64|amd64) file=${x86}; url=${sh(arch(x86))}; sum=${sh(sums.get(x86) ?? '')}; signed=${sh(signed(x86))} ;;
+  aarch64|arm64) file=${arm}; url=${sh(arch(arm))}; sum=${sh(sums.get(arm) ?? '')}; signed=${sh(signed(arm))} ;;
   *) echo "No checkd-agent for $(uname -m)" >&2; exit 1 ;;
 esac
-[ -n "$sum" ] || { echo "nuthatch has no $file" >&2; exit 1; }
+[ -n "$sum" ] || { echo "nuthatch has no ${signer ? 'signed ' : ''}$file" >&2; exit 1; }
 
 packages() {
   if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$@" >/dev/null
@@ -539,13 +589,22 @@ fetch "$url" "$new/checkd-agent"
 echo "$sum  $new/checkd-agent" | sha256sum -c - >/dev/null || { echo "The download does not match its checksum" >&2; rm -rf "$new"; exit 1; }
 chmod 755 "$new/checkd-agent"
 chown checkd-agent "$new/checkd-agent"
-mv -f "$new/checkd-agent" "$bin/checkd-agent"
+# What an earlier agent left: a binary on trial, one refused, and the rest.
+rm -f "$bin/checkd-agent.new" "$bin/checkd-agent.old" "$bin/checkd-agent.trial" "$bin/checkd-agent.refused" "$bin/checkd-agent.signed"
+${signer ? `printf '%s\\n' "$signed" > "$new/checkd-agent.signed"
+chown checkd-agent "$new/checkd-agent.signed"
+mv -f "$new/checkd-agent.signed" "$bin/checkd-agent.signed"
+` : ''}mv -f "$new/checkd-agent" "$bin/checkd-agent"
 rmdir "$new"
 printf '%s\\n' ${sh(install.token)} > /etc/checkd-agent/token
 cat > /etc/checkd-agent/ca.crt <<'CHECKD_AGENT_CA'
 ${ca.trim()}
 CHECKD_AGENT_CA
-chgrp checkd-agent /etc/checkd-agent/token
+${signer ? `cat > /etc/checkd-agent/signer.crt <<'CHECKD_AGENT_SIGNER'
+${signer.cert.trim()}
+CHECKD_AGENT_SIGNER
+chmod 644 /etc/checkd-agent/signer.crt
+` : 'rm -f /etc/checkd-agent/signer.crt\n'}chgrp checkd-agent /etc/checkd-agent/token
 chmod 640 /etc/checkd-agent/token
 chmod 644 /etc/checkd-agent/ca.crt
 chmod 755 /etc/checkd-agent
@@ -599,8 +658,11 @@ echo "NRPE runs, open to ${engine.replace(/[^A-Za-z0-9._:-]/g, '')}"
 `
 }
 
-/** The install script for Windows: an Administrator PowerShell, `irm ... | iex`. */
-export function windowsScript({ install, settings, ca, sums }: ScriptFacts): string {
+/** The install script for Windows: an Administrator PowerShell, `irm ... | iex`.
+ * The binary is in a directory of its own that LOCAL SERVICE, which runs
+ * it, may write, so that it replaces itself as on Linux; the task starts
+ * it anew within a minute of its ending. */
+export function windowsScript({ install, settings, ca, sums, signer }: ScriptFacts): string {
   const { base, pin } = install
   const file = 'checkd-agent-windows-x86_64.exe'
   const args = [
@@ -610,19 +672,26 @@ export function windowsScript({ install, settings, ca, sums }: ScriptFacts): str
     '--ca', '$data\\ca.crt',
     ...(settings.serverName ? ['--server-name', settings.serverName] : []),
     '--restrict-path', '$dir\\plugins',
+    '--update-from', `${base}/agent/update/${encodeURIComponent(install.backend)}/${install.host}`,
+    ...(pin ? ['--update-pin', Buffer.from(pin.key, 'base64').toString('hex')] : []),
+    ...(signer ? ['--update-signer', '$data\\signer.crt'] : []),
   ]
   // Inside a PowerShell string in double quotes: a quote is `".
   const argLine = args.map((a) => (/\s/.test(a) || a.startsWith('$') ? `\`"${a}\`"` : a)).join(' ')
+  const signed = signer?.times.get(file)
   return `# checkd-agent for ${install.host}, from nuthatch.
 $ErrorActionPreference = 'Stop'
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { throw 'Run this in PowerShell as Administrator' }
 $sum = ${ps(sums.get(file) ?? '')}
-if ($sum -eq '') { throw 'nuthatch has no ${file}' }
+if ($sum -eq '') { throw 'nuthatch has no ${signer ? 'signed ' : ''}${file}' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $dir = Join-Path $env:ProgramFiles 'checkd-agent'
 $data = Join-Path $env:ProgramData 'checkd-agent'
+$bin = Join-Path $data 'bin'
 New-Item -ItemType Directory -Force -Path $dir, (Join-Path $dir 'plugins') | Out-Null
+Get-ScheduledTask -TaskName 'checkd-agent' -ErrorAction SilentlyContinue | Stop-ScheduledTask -ErrorAction SilentlyContinue
+Get-Process -Name 'checkd-agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 # Made anew, so that nobody who made it first keeps a hold on it.
 # By cmd's rmdir, which takes a link (junction) away itself, there or
 # inside, and never what it points to, as Remove-Item may.
@@ -631,20 +700,31 @@ if (Test-Path $data) { throw "$data cannot be removed" }
 New-Item -ItemType Directory -Path $data | Out-Null
 icacls $data /setowner '*S-1-5-32-544' | Out-Null
 icacls $data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-19:(OI)(CI)R' | Out-Null
-$exe = Join-Path $dir 'checkd-agent.exe'
-Get-ScheduledTask -TaskName 'checkd-agent' -ErrorAction SilentlyContinue | Stop-ScheduledTask -ErrorAction SilentlyContinue
-Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${base}/agent/bin/${file}`)} -OutFile "$exe.new"
-if ((Get-FileHash -Algorithm SHA256 "$exe.new").Hash.ToLower() -ne $sum) { Remove-Item "$exe.new"; throw 'The download does not match its checksum' }
-Move-Item -Force "$exe.new" $exe
+# The binary's own directory: LOCAL SERVICE replaces what is in it.
+New-Item -ItemType Directory -Path $bin | Out-Null
+icacls $bin /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+$exe = Join-Path $bin 'checkd-agent.exe'
+Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${base}/agent/bin/${file}`)} -OutFile "$exe.download"
+if ((Get-FileHash -Algorithm SHA256 "$exe.download").Hash.ToLower() -ne $sum) { Remove-Item "$exe.download"; throw 'The download does not match its checksum' }
+Move-Item -Force "$exe.download" $exe
+# Where the agent was before it could replace itself.
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $dir 'checkd-agent.exe')
 Set-Content -NoNewline -Encoding ascii -Path (Join-Path $data 'token') -Value ${ps(install.token)}
 Set-Content -Encoding ascii -Path (Join-Path $data 'ca.crt') -Value @'
 ${ca.trim()}
 '@
-$action = New-ScheduledTaskAction -Execute $exe -Argument "${argLine}"
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+${signer ? `Set-Content -Encoding ascii -Path (Join-Path $data 'signer.crt') -Value @'
+${signer.cert.trim()}
+'@
+Set-Content -Encoding ascii -Path (Join-Path $bin 'checkd-agent.signed') -Value '${signed ?? ''}'
+` : ''}$action = New-ScheduledTaskAction -Execute $exe -Argument "${argLine}"
+# At startup, and every minute: a start while it runs is ignored, so it
+# comes back within a minute of ending, as it does when it is updated.
+$atStartup = New-ScheduledTaskTrigger -AtStartup
+$again = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
 $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\LOCALSERVICE' -LogonType ServiceAccount
-Register-ScheduledTask -TaskName 'checkd-agent' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+Register-ScheduledTask -TaskName 'checkd-agent' -Action $action -Trigger $atStartup, $again -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName 'checkd-agent'
 ${pin ? '[Net.ServicePointManager]::ServerCertificateValidationCallback = $null\n' : ''}Write-Host 'checkd-agent runs for ${install.host}'
 `
