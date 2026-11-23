@@ -4,8 +4,9 @@
 // is only added to where those notifications go.
 import type { PushState } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ago } from '../lib/format'
+import { THEMES, savedTheme, setTheme } from '../lib/theme'
 import { api, useSession } from '../stores/session'
 import TokensCard from '../components/TokensCard.vue'
 
@@ -91,6 +92,9 @@ async function test() {
     busy.value = false
   }
 }
+
+const theme = ref(savedTheme())
+watch(theme, setTheme)
 </script>
 
 <template>
@@ -121,6 +125,18 @@ async function test() {
         <p v-if="state.devices.length > 0"><button type="button" class="quiet" :disabled="busy" @click="test">Send a test</button></p>
       </template>
     </template>
+  </section>
+  <section class="card device" aria-label="Theme">
+    <h2>Theme</h2>
+    <div class="themes" role="radiogroup" aria-label="Theme">
+      <label v-for="t in THEMES" :key="t.id">
+        <input v-model="theme" type="radio" name="theme" :value="t.id" />
+        <span class="swatches" aria-hidden="true">
+          <span v-for="look in t.id === 'system' ? ['light', 'dark'] : [t.id]" :key="look" class="swatch" :data-swatch="look"><span class="c"></span><span class="a"></span><span class="k"></span></span>
+        </span>
+        {{ t.name }}
+      </label>
+    </div>
   </section>
   <TokensCard />
 </template>

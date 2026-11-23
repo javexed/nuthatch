@@ -1,4 +1,4 @@
-:root {
+:root, [data-swatch='light'] {
   color-scheme: light dark;
   --bg: #f5f6f8;
   --card: #ffffff;
@@ -18,8 +18,10 @@
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 16px;
 }
+/* Themes, chosen on This device (lib/theme.ts sets data-theme; none is
+ * System). Each is checked for contrast by lib/theme.test.ts. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #12161d;
     --card: #1b212b;
     --text: #e6e9ee;
@@ -31,6 +33,85 @@
     --critical: #ee6b5e;
     --unknown: #b196dd;
     --pending: #9aa5b5;
+    --series: #3d8ee8;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  }
+}
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'], [data-swatch='dark'] {
+  color-scheme: dark;
+  --bg: #12161d;
+  --card: #1b212b;
+  --text: #e6e9ee;
+  --muted: #9aa5b5;
+  --line: #2c3442;
+  --accent: #7fb0e0;
+  --ok: #5cbf85;
+  --warning: #e0a84a;
+  --critical: #ee6b5e;
+  --unknown: #b196dd;
+  --pending: #9aa5b5;
+  --series: #3d8ee8;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+:root[data-theme='paper'], [data-swatch='paper'] {
+  color-scheme: light;
+  --bg: #f3efe6;
+  --card: #fbf8f1;
+  --text: #2a2520;
+  --muted: #675d51;
+  --line: #ddd4c4;
+  --accent: #94461b;
+  --ok: #2d6b3c;
+  --warning: #855600;
+  --critical: #ad3628;
+  --unknown: #6c4c96;
+  --pending: #685f54;
+}
+:root[data-theme='night'], [data-swatch='night'] {
+  color-scheme: dark;
+  --bg: #000000;
+  --card: #0c0e11;
+  --text: #e8eaed;
+  --muted: #9aa3ad;
+  --line: #22262d;
+  --accent: #8ab8e6;
+  --ok: #5cbf85;
+  --warning: #e0a84a;
+  --critical: #f0705f;
+  --unknown: #b59be0;
+  --pending: #9aa3ad;
+  --series: #3d8ee8;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+:root[data-theme='contrast'], [data-swatch='contrast'] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --card: #ffffff;
+  --text: #000000;
+  --muted: #333333;
+  --line: #6b6b6b;
+  --accent: #003c82;
+  --ok: #005c37;
+  --warning: #664000;
+  --critical: #9c0000;
+  --unknown: #47288a;
+  --pending: #3b3b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='contrast'], [data-swatch='contrast'] {
+    color-scheme: dark;
+    --bg: #000000;
+    --card: #000000;
+    --text: #ffffff;
+    --muted: #d4d4d4;
+    --line: #8c8c8c;
+    --accent: #9cc8ff;
+    --ok: #6fe09a;
+    --warning: #ffc55c;
+    --critical: #ff8f85;
+    --unknown: #d4bbff;
+    --pending: #d4d4d4;
     --series: #3d8ee8;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   }
@@ -323,6 +404,19 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 .managed li { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: space-between; align-items: center; margin: 0; }
 .managed .actions { margin: 0; }
 .unreadable { color: var(--muted); }
+/* The themes on This device, each drawn in its own colours. */
+.themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 0.6rem; }
+.themes label { display: grid; gap: 0.4rem; padding: 0.5rem; border: 1px solid var(--line); border-radius: 0.5rem; color: var(--text); cursor: pointer; }
+.themes label:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.themes input { position: absolute; opacity: 0; pointer-events: none; }
+.themes label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.swatches { display: flex; border-radius: 0.35rem; overflow: hidden; border: 1px solid var(--line); }
+.swatch { flex: 1; display: flex; align-items: center; gap: 0.25rem; padding: 0.45rem; background: var(--bg); }
+.swatch span { height: 1.3rem; border-radius: 0.2rem; }
+.swatch .c { flex: 1; background: var(--card); border: 1px solid var(--line); }
+.swatch .a, .swatch .k { width: 0.55rem; }
+.swatch .a { background: var(--accent); }
+.swatch .k { background: var(--critical); }
 /* A page of sections, each a card: its name and its actions on top. */
 .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.6rem; }
 .section-head h2 { margin: 0; }

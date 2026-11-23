@@ -53,6 +53,8 @@ made to be used on a phone as much as at a desk.
   like, with a read-only token ([docs/mcp.md](docs/mcp.md)).
 - **On a phone:** installable from the browser, with notifications
   pushed to it ([docs/notifications.md](docs/notifications.md)).
+- **Themes** for each device, on This device: System, Light, Dark, Paper,
+  Night (black, for OLED and wall screens) and High contrast.
 - **Agents** (checkd), experimental: a host is added with checkd's agent, installed
   over SSH or by a one-line command, on Linux or Windows; the agent says
   what the machine runs, its disks and memory are watched at once, and its
