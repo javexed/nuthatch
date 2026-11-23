@@ -326,6 +326,7 @@ button.sort { background: none; border: 0; padding: 0; color: inherit; font: inh
 /* A page of sections, each a card: its name and its actions on top. */
 .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.6rem; }
 .section-head h2 { margin: 0; }
+.section-head:last-child { margin-bottom: 0; }
 .section-head button { padding: 0.35rem 0.7rem; }
 .section-head label.check { align-items: center; }
 .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
