@@ -105,11 +105,14 @@ watch(on, (now) => {
 </script>
 
 <template>
-  <form class="card assistant-key" aria-label="Assistant" @submit.prevent="save()">
+  <form class="card section assistant-key" aria-label="Assistant" @submit.prevent="save()">
+    <div class="section-head">
+      <h2>Assistant</h2>
+      <label class="check"><input v-model="on" type="checkbox" name="assistant-on" /> On</label>
+    </div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <label class="check"><input v-model="on" type="checkbox" name="assistant-on" /> On</label>
-    <template v-if="on">
-    <label>
+    <div v-if="on" class="fields">
+    <label class="wide">
       Who may use it
       <input v-model="users" name="assistant-users" autocomplete="off" required placeholder="names, or * for everyone" />
     </label>
@@ -144,8 +147,8 @@ watch(on, (now) => {
       API key
       <input v-model="key" name="assistant-key" type="password" autocomplete="off" :required="service === 'anthropic' && !keyKept" :placeholder="keyKept ? 'kept' : ''" @change="list" />
     </label>
-    </template>
-    <div class="buttons">
+    </div>
+    <div v-if="on || on !== saved?.on" class="buttons">
       <button v-if="on && keyKept" type="button" class="plain" :disabled="busy" @click="save(true)">Remove key</button>
       <button type="submit" :disabled="busy || (on && model.trim() === '') || on === saved?.on && !on">Save</button>
     </div>

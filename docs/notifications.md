@@ -66,7 +66,7 @@ ntfy app, whether or not they log in to nuthatch. The same notifications
 go these ways, from the same log, one message per contact per pass.
 
 **How nuthatch sends** is set once, by the role `config_edit`: Config,
-Contacts, **Notification channels**.
+Notifications, **Notification channels**.
 
 - **E-mail** through a mail server that takes a password login (AUTH
   PLAIN) over TLS: port 465, or 587 with STARTTLS. The server's

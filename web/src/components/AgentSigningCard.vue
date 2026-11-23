@@ -55,27 +55,36 @@ const id = computed(() => state.value?.signer?.id.slice(0, 16).replace(/(.{4})(?
 </script>
 
 <template>
-  <section class="card agent-signing" aria-label="Agent signing">
+  <section class="card section agent-signing" aria-label="Agent signing">
+    <div class="section-head">
+      <h2>Agent signing</h2>
+      <div v-if="state" class="row">
+        <template v-if="state.signer">
+          <button type="button" class="plain" :disabled="busy" @click="remove">Remove</button>
+          <button type="button" class="quiet" :disabled="busy" :aria-pressed="choosing" @click="choosing = !choosing">Replace</button>
+          <button v-if="state.unsigned.length > 0" type="button" :disabled="busy" @click="run(() => api.signAgents())">Sign</button>
+        </template>
+        <template v-else>
+          <button type="button" class="quiet" :disabled="busy" :aria-pressed="uploading" @click="uploading = !uploading">Upload</button>
+          <button type="button" :disabled="busy" @click="make">Make a key</button>
+        </template>
+      </div>
+    </div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <template v-if="state">
       <template v-if="state.signer">
         <p>
-          <strong>{{ state.signer.subject }}</strong>
-          <span class="by"> · {{ state.signer.algorithm }} · {{ id }} · {{ state.signer.self_signed ? 'self-signed' : `until ${day(state.signer.until)}` }}</span>
+          <strong>{{ state.signer.subject }}</strong> <span class="by">{{ state.signer.algorithm }} · {{ id }} · {{ state.signer.self_signed ? 'self-signed' : `until ${day(state.signer.until)}` }}</span>
         </p>
         <p v-if="state.current && state.signed" class="by">Signed{{ state.signed.version ? ` ${state.signed.version}` : '' }} · {{ day(state.signed.at) }}</p>
         <p v-else-if="state.unsigned.length > 0" class="warning-text">Not signed: {{ state.unsigned.join(', ') }}</p>
-        <div class="buttons">
-          <button type="button" class="plain" :disabled="busy" @click="remove">Remove</button>
-          <button type="button" class="quiet" :disabled="busy" :aria-pressed="choosing" @click="choosing = !choosing">Replace</button>
-          <button v-if="state.unsigned.length > 0" type="button" :disabled="busy" @click="run(() => api.signAgents())">Sign</button>
+        <div v-if="choosing" class="row">
+          <button type="button" class="quiet" :disabled="busy" :aria-pressed="uploading" @click="uploading = !uploading">Upload</button>
+          <button type="button" :disabled="busy" @click="make">Make a key</button>
         </div>
       </template>
-      <div v-if="!state.signer || choosing" class="buttons">
-        <button type="button" class="quiet" :disabled="busy" :aria-pressed="uploading" @click="uploading = !uploading">Upload</button>
-        <button type="button" :disabled="busy" @click="make">Make a key</button>
-      </div>
-      <form v-if="uploading" aria-label="Upload a signing key" @submit.prevent="upload">
+      <p v-else-if="!uploading" class="none">None</p>
+      <form v-if="uploading" class="fields" aria-label="Upload a signing key" @submit.prevent="upload">
         <label>
           Certificate
           <textarea v-model="cert" name="signing-cert" rows="4" required spellcheck="false"></textarea>
@@ -86,7 +95,7 @@ const id = computed(() => state.value?.signer?.id.slice(0, 16).replace(/(.{4})(?
           <textarea v-model="key" name="signing-key" rows="4" required spellcheck="false"></textarea>
           <input type="file" accept=".pem,.key" aria-label="Private key file" @change="read($event, 'key')" />
         </label>
-        <div class="buttons">
+        <div class="buttons wide">
           <button type="submit" :disabled="busy || cert.trim() === '' || key.trim() === ''">Save</button>
         </div>
       </form>
@@ -95,16 +104,8 @@ const id = computed(() => state.value?.signer?.id.slice(0, 16).replace(/(.{4})(?
 </template>
 
 <style scoped>
-.agent-signing {
-  display: grid;
-  gap: 0.5rem;
-}
-.agent-signing p {
-  margin: 0;
-}
-.agent-signing form {
-  display: grid;
-  gap: 0.5rem;
+.agent-signing form.fields {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
 }
 .agent-signing textarea {
   font-family: var(--mono, monospace);

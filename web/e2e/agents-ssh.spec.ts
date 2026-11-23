@@ -221,7 +221,7 @@ test('an agent installed with a signing key takes only binaries it signed later,
     const first = await signedAt()
     await page.goto('/config')
     await chooseBackend(page, 'checkd')
-    await expect(page.getByRole('region', { name: 'Agent signing' })).toContainText(/nuthatch agent signing · Ed25519 .* self-signed/)
+    await expect(page.getByRole('region', { name: 'Agent signing' })).toContainText(/nuthatch agent signing Ed25519 .* self-signed/)
     await expect(page.getByRole('region', { name: 'Agent signing' })).toContainText('Signed')
 
     await page.goto('/host/checkd/lab2')

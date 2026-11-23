@@ -109,7 +109,7 @@ const test = (kind: 'email' | 'chat', name = '') =>
           </select>
         </label>
         <label class="wide">Webhook <input v-model.trim="c.url" :name="`chat-url-${i}`" type="url" required pattern="https://.*" autocomplete="off" /></label>
-        <p>
+        <p class="row">
           <button type="button" class="quiet" :disabled="busy || !c.name || !c.url" @click="test('chat', c.name.trim())">Test</button>
           <button type="button" class="plain" :disabled="busy" @click="form.chats.splice(i, 1)">Remove</button>
         </p>

@@ -82,7 +82,9 @@ export class Client {
       // Not JSON: a proxy's error page, most likely.
     }
     if (!answer.ok) {
-      const message = (parsed as { error?: string } | null)?.error ?? `the server answered ${answer.status}`
+      let message = (parsed as { error?: string } | null)?.error ?? `the server answered ${answer.status}`
+      // The server's answer for a path it does not have: a page newer than the server.
+      if (answer.status === 404 && message === 'no such thing' && path.startsWith('/api/')) message = 'not on this server: it is older than this page'
       throw new ApiError(answer.status, message, typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {})
     }
     return parsed as T
