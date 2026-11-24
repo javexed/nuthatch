@@ -205,3 +205,20 @@ describe('the time a dashboard looks at', () => {
     expect(spanNow({ from: 10, to: 20 }, now)).toEqual({ from: 10, to: 20, live: false })
   })
 })
+
+describe('numbers in words', () => {
+  it('names a few numbers as words, and a count out of its maximum as "3 of 4"', async () => {
+    const { countText, labelText } = await import('./perfdata.ts')
+    expect([labelText('time'), labelText('ok'), labelText('rta')]).toEqual(['latency', 'members OK', 'rta'])
+    const count = { unit: '', min: 0, max: 3 }
+    expect(countText(3, count)).toBe('3 of 3')
+    expect(countText(2, count)).toBe('2 of 3')
+    // Not a count: a unit, no maximum, not from 0, not whole, or past the maximum.
+    expect(countText(45, { unit: '%', min: 0, max: 100 })).toBeNull()
+    expect(countText(3, { unit: '', min: 0, max: null })).toBeNull()
+    expect(countText(3, { unit: '', min: 1, max: 3 })).toBeNull()
+    expect(countText(0.5, count)).toBeNull()
+    expect(countText(4, count)).toBeNull()
+    expect(countText(undefined, count)).toBeNull()
+  })
+})

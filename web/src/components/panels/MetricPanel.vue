@@ -8,7 +8,7 @@ import { computed, ref, watch } from 'vue'
 import { perfOf } from '../../lib/choices'
 import { type Point, nearest, shape, withUnit } from '../../lib/graph'
 import { type When, spanNow } from '../../lib/range'
-import { labelText } from '../../lib/perfdata'
+import { countText, labelText } from '../../lib/perfdata'
 import { level } from '../../lib/thresholds'
 import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
@@ -54,6 +54,8 @@ const sameHost = computed(() => new Set(props.series.map((s) => s.host)).size ==
 const sameService = computed(() => new Set(props.series.map((s) => s.service ?? '')).size === 1)
 const nameOf = (s: Series) => [sameHost.value ? '' : s.host, sameService.value ? '' : (s.service ?? ''), labelText(s.label), sameBackend.value ? '' : `(${s.backend})`].filter(Boolean).join(' · ')
 const value = (v: number | undefined, unit: string) => (v === undefined ? '–' : withUnit(v, unit))
+/** A line's value now: a count out of its maximum as "3 of 4". */
+const nowText = (l: { now: number | undefined; unit: string; perf?: Perf }) => countText(l.now, l.perf) ?? value(l.now, l.unit)
 const TONES = ['ok', 'warning', 'critical'] as const
 
 const span = computed(() => {
@@ -123,7 +125,7 @@ const at = (points: Point[]) => (hover.value ? nearest(points, span.value.from, 
 <template>
   <p v-if="series.length === 0" class="none">–</p>
   <div v-else-if="compact && first" :class="['stat', TONES[first.state]]">
-    <p class="value">{{ value(first.now, first.unit) }}</p>
+    <p class="value">{{ nowText(first) }}</p>
     <p class="by">{{ nameOf(first.s) }}</p>
     <div v-if="gauge !== null" class="meter" role="meter" :aria-valuenow="Math.round(gauge * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="nameOf(first.s)">
       <span :style="{ width: `${gauge * 100}%` }"></span>
@@ -132,7 +134,7 @@ const at = (points: Point[]) => (hover.value ? nearest(points, span.value.from, 
   </div>
   <div v-else class="metric-graphs">
     <figure v-for="g in graphs" :key="g.unit" class="graph">
-      <div class="plot" role="img" :aria-label="g.lines.map((l) => `${nameOf(l.s)}: ${value(l.now, l.unit)}`).join(', ')" @pointermove="move($event, g.unit)" @pointerdown="press($event, g.unit)" @pointerup="release" @pointercancel="picked = null" @pointerleave="picked || (hover = null)">
+      <div class="plot" role="img" :aria-label="g.lines.map((l) => `${nameOf(l.s)}: ${nowText(l)}`).join(', ')" @pointermove="move($event, g.unit)" @pointerdown="press($event, g.unit)" @pointerup="release" @pointercancel="picked = null" @pointerleave="picked || (hover = null)">
         <span v-if="picked && hover?.unit === g.unit" class="zoom-pick" :style="{ left: `${Math.min(picked.start, picked.end) * 100}%`, width: `${Math.abs(picked.end - picked.start) * 100}%` }"></span>
         <span class="edge top">{{ value(g.high, g.unit) }}</span>
         <span class="edge bottom">{{ value(g.low, g.unit) }}</span>
@@ -147,7 +149,7 @@ const at = (points: Point[]) => (hover.value ? nearest(points, span.value.from, 
         <li v-for="l in g.lines" :key="l.n">
           <span :class="['swatch', `s${(l.n % 8) + 1}`]" aria-hidden="true"></span>
           <span class="name">{{ nameOf(l.s) }}</span>
-          <span :class="['now', TONES[l.state]]">{{ value(hover && hover.unit === g.unit ? at(l.points) : l.now, l.unit) }}</span>
+          <span :class="['now', TONES[l.state]]">{{ hover && hover.unit === g.unit ? value(at(l.points), l.unit) : nowText(l) }}</span>
         </li>
       </ul>
     </figure>
