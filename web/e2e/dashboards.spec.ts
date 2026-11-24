@@ -1,8 +1,8 @@
 // Dashboards: everyone starts with an Overview; a template makes a whole
 // dashboard in one click; a dashboard is changed in place and kept at
 // once, with undo; one search box says what a panel shows; one range for
-// all; a host chosen at the top; pins from a host's page; walls that take
-// turns.
+// all; subjects at the top, which panels follow; pins from a host's page;
+// walls that take turns.
 import { readFileSync } from 'node:fs'
 import { type Page, expect, test } from '@playwright/test'
 import { ENGINES, fits, livestatus, login, logout, send } from './helpers'
@@ -34,8 +34,9 @@ test('everyone starts with an Overview, and a template makes a whole dashboard',
 
   await page.goto('/dashboards')
   await page.getByRole('button', { name: 'For a host or group' }).click()
-  // The groups come first, each with its number of hosts.
-  const group = page.locator('.find .found li:not(.head) button').first()
+  // Any host, then the groups, each with its number of hosts.
+  await expect(page.locator('.find .found li:not(.head) button').first()).toHaveText('Any host')
+  const group = page.locator('.find .found li:not(.head) button', { hasText: /\d+ hosts?$/ }).first()
   await expect(group).toContainText(/\d+ hosts?$/)
   const name = await group.evaluate((b) => b.firstChild?.textContent?.trim() ?? '')
   await group.click()
@@ -245,21 +246,74 @@ test('a shared dashboard shows each user their own, and its outline shows troubl
   await deleteOpen(page)
 })
 
-test('one dashboard for any host, chosen at the top', async ({ page }) => {
+test('subjects at the top: a host group, a service group, any host; the panels that follow show the one chosen', async ({ page }) => {
   await login(page, 'admin')
   await page.goto('/dashboards')
   await page.getByRole('button', { name: 'For a host or group' }).click()
-  await page.getByLabel('Host or group', { exact: true }).fill('passive1')
-  await page.getByRole('button', { name: /^passive1\s*host · naemon$/ }).click()
-  const chooser = page.getByRole('combobox', { name: 'Host' })
-  await expect(chooser).toBeVisible()
-  await expect(panel(page, 'passive1')).toBeVisible()
-  await expect(panel(page, 'Uptime · passive1')).toBeVisible()
-  const other = (await chooser.locator('option').allTextContents()).find((name) => name !== 'passive1') ?? ''
-  await chooser.selectOption({ label: other })
-  await expect(panel(page, other)).toBeVisible()
-  await expect(page).toHaveURL(new RegExp(`host=${other}`))
+  await page.getByLabel('Host or group', { exact: true }).fill('db')
+  await page.getByRole('button', { name: /^db\s*host group$/ }).click()
+  const subjects = page.getByRole('group', { name: 'Subjects' })
+  await expect(subjects.getByRole('button', { name: 'db', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(panel(page, 'db')).toBeVisible()
+  await expect(tiles(page, 'db').first()).toHaveText('db1')
+  await expect(panel(page, 'Uptime · db')).toContainText('%')
+  // A graph by its check: a line for each host of the group that has it.
+  await expect(panel(page, 'disk · latency')).toContainText('db2')
+
+  // Added on a phone too: a service group, whose services are its tiles.
+  await subjects.getByRole('button', { name: 'Add a subject' }).click()
+  await page.getByLabel('Host or group', { exact: true }).fill('disks')
+  await page.getByRole('button', { name: /^disks\s*service group$/ }).click()
+  await expect(panel(page, 'disks')).toBeVisible()
+  await expect(tiles(page, 'disks').first()).toHaveText('db1 · disk')
+  await expect(panel(page, 'Uptime · disks')).toContainText('OK')
+  await expect(page).toHaveURL(/on=1/)
+
+  // Any host, picked from a list; a graph of a check the host does not have says so.
+  await subjects.getByRole('button', { name: 'Add a subject' }).click()
+  await page.getByRole('button', { name: /^Any host$/ }).click()
+  const chooser = subjects.getByRole('combobox', { name: 'Host' })
+  // A host on two engines is named with each.
+  await chooser.selectOption((await chooser.locator('option', { hasText: 'gw1' }).first().getAttribute('value')) ?? '')
+  await expect(page).toHaveURL(/host=gw1/)
+  await expect(panel(page, 'gw1')).toBeVisible()
+  await expect(panel(page, 'disk · latency')).toContainText('None')
+
+  // All: everything.
+  await subjects.getByRole('button', { name: 'All' }).click()
+  await expect(panel(page, 'All hosts')).toBeVisible()
   await fits(page)
+
+  // Taken away again; the rest stay, and stay after a reload.
+  await subjects.getByRole('button', { name: 'disks' }).click()
+  await subjects.getByRole('button', { name: 'Remove disks' }).click()
+  await expect(subjects.getByRole('button', { name: 'disks' })).toHaveCount(0)
+  await page.waitForTimeout(1200)
+  await page.reload()
+  await expect(subjects.getByRole('button', { name: 'db', exact: true })).toBeVisible()
+  await expect(subjects.getByRole('button', { name: 'disks' })).toHaveCount(0)
+  await deleteOpen(page)
+})
+
+test('a panel follows the subject, or shows what it names', async ({ page }) => {
+  test.skip(!desktop(), 'panels are arranged on a wide screen')
+  await login(page, 'admin')
+  await page.goto('/dashboards')
+  await page.getByRole('button', { name: 'Blank' }).click()
+  const subjects = page.getByRole('group', { name: 'Subjects' })
+  await subjects.getByRole('button', { name: 'Add a subject' }).click()
+  await page.getByLabel('Host or group', { exact: true }).fill('web')
+  await page.getByRole('button', { name: /^web\s*host group$/ }).click()
+  // With a subject, a panel from the tray follows it, and is marked so.
+  await page.getByRole('toolbar', { name: 'Add a panel' }).getByRole('button', { name: '+ Uptime' }).click()
+  await expect(panel(page, 'Uptime · web')).toBeVisible()
+  await expect(panel(page, 'Uptime · web').locator('.follow-mark')).toBeVisible()
+  // No longer following: it keeps what was chosen, whatever is chosen after.
+  await panel(page, 'Uptime · web').getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('complementary', { name: 'Panel settings' }).getByLabel('Follows the subject').uncheck()
+  await subjects.getByRole('button', { name: 'All' }).click()
+  await expect(panel(page, 'Uptime · web')).toBeVisible()
+  await expect(panel(page, 'Uptime · web').locator('.follow-mark')).toHaveCount(0)
   await deleteOpen(page)
 })
 

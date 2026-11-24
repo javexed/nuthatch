@@ -1,7 +1,8 @@
 // Ready-made dashboards: one click makes a whole dashboard, which can be
 // changed after. Each is laid out on the 12-column grid, top to bottom.
-import type { DashboardDraft, PanelSettings, Series, Widget } from '@nuthatch/api'
+import type { CheckNumber, DashboardDraft, PanelSettings, Subject, Widget } from '@nuthatch/api'
 import { place } from './layout'
+import { subjectName } from './subjects'
 
 /** Panels in order, each where the first free place of its size is. */
 function laid(panels: [PanelSettings, number, number][]): Widget[] {
@@ -25,35 +26,22 @@ export function overview(groups: string[]): DashboardDraft {
   }
 }
 
-/** One host group: its hosts, problems, availability, recoveries, and a number per host. */
-export function forGroup(group: string, numbers: Series[]): DashboardDraft {
+/** One subject at the top, and panels that follow it: its status, uptime,
+ * problems, what recovered, and a graph of each of `numbers`. Another
+ * subject added at the top is shown by the same panels. */
+export function forSubject(subject: Subject, numbers: CheckNumber[]): DashboardDraft {
+  const follows = true as const
   return {
-    title: group,
+    title: subjectName(subject),
     shared: false,
     range: '24h',
+    subjects: [subject],
     widgets: laid([
-      [{ type: 'status', hostgroup: group }, 9, 4],
-      [{ type: 'availability', hostgroup: group }, 3, 4],
-      [{ type: 'problems', of: 'services', show: 'problems', hostgroup: group }, 6, 5],
-      [{ type: 'problems', of: 'services', show: 'recovered', hostgroup: group }, 6, 5],
-      ...numbers.slice(0, 12).map((s): [PanelSettings, number, number] => [{ type: 'metric', series: [s] }, 3, 2]),
-    ]),
-  }
-}
-
-/** One host, chosen at the top: any host can be looked at with it. `metrics`
- * are of the host it was made from; they follow the chosen host. */
-export function forHost(metrics: Series[], hostgroup?: string): DashboardDraft {
-  const chosen = { backend: '$host', host: '$host' }
-  return {
-    title: 'One host',
-    shared: false,
-    range: '24h',
-    choose_host: hostgroup ? { hostgroup } : {},
-    widgets: laid([
-      [{ type: 'status', of: chosen }, 9, 4],
-      [{ type: 'availability', of: chosen }, 3, 4],
-      ...metrics.slice(0, 8).map((s): [PanelSettings, number, number] => [{ type: 'metric', series: [{ ...s, ...chosen }] }, 6, 3]),
+      [{ type: 'status', follows }, 9, 4],
+      [{ type: 'availability', follows }, 3, 4],
+      [{ type: 'problems', of: 'services', show: 'problems', follows }, 6, 5],
+      [{ type: 'problems', of: 'services', show: 'recovered', follows }, 6, 5],
+      ...numbers.slice(0, 8).map((n): [PanelSettings, number, number] => [{ type: 'metric', series: [], numbers: [n], follows }, 6, 3]),
     ]),
   }
 }

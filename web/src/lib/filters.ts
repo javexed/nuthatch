@@ -12,7 +12,7 @@ export interface ListFilter {
   unhandled: boolean
   /** A host group, or for services a service group. */
   group: string
-  /** For services: of this host only. */
+  /** This host only, or for services, of this host only. */
   host: string
   /** A host group whose hosts' services are meant. */
   hostgroup: string
@@ -51,7 +51,7 @@ export function toHeaders(kind: Kind, filter: ListFilter): string[] {
   }
   const name = (text: string) => text.replace(/[\r\n]/g, ' ')
   if (filter.group !== '') out.push(`Filter: groups >= ${name(filter.group)}`)
-  if (kind === 'service' && filter.host !== '') out.push(`Filter: host_name = ${name(filter.host)}`)
+  if (filter.host !== '') out.push(`Filter: ${kind === 'service' ? 'host_name' : 'name'} = ${name(filter.host)}`)
   if (kind === 'service' && filter.hostgroup !== '') out.push(`Filter: host_groups >= ${name(filter.hostgroup)}`)
   if (filter.acknowledged) out.push('Filter: acknowledged = 1')
   if (filter.downtime) out.push('Filter: scheduled_downtime_depth > 0')

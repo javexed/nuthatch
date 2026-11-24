@@ -567,16 +567,72 @@ describe('a host to write', () => {
 })
 
 describe('dashboards', () => {
+  it('have subjects at the top, panels that follow them, and read those kept before subjects', async () => {
+    const store = new Store(':memory:')
+    const app = buildApp({ backends: [], store, events: new Events([]), roles: new RolesConfig(), limiter: new Limiter(), cookieSecure: false })
+    const token = store.newToken('ann', 't').token
+    const call = (method: string, path: string, body?: unknown) =>
+      app.request(path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+    const at = (y: number) => ({ x: 0, y, w: 6, h: 3 })
+    const draft = {
+      title: 'Subjects',
+      subjects: [{ kind: 'host', backend: 'a', host: 'web1' }, { kind: 'hostgroup', name: 'web' }, { kind: 'servicegroup', name: 'disks' }, { kind: 'any' }],
+      widgets: [
+        // What a following panel names of its own is not kept.
+        { type: 'status', follows: true, hostgroup: 'dropped', layout: at(0) },
+        { type: 'metric', follows: true, series: [{ backend: 'a', host: 'h', label: 'x' }], numbers: [{ service: 'Disk /', label: 'used' }, { label: 'rta' }], layout: at(3) },
+        { type: 'problems', of: 'services', show: 'problems', servicegroup: 'disks', layout: at(6) },
+        { type: 'log', lines: 'alerts', follows: true, layout: at(9) },
+        { type: 'availability', servicegroup: 'disks', layout: at(12) },
+      ],
+    }
+    const made = (await (await call('POST', '/api/v1/dashboards', draft)).json()) as { id: number; subjects: unknown; widgets: Record<string, unknown>[] }
+    expect(made.subjects).toEqual(draft.subjects)
+    expect(made.widgets.map(({ layout: _l, ...w }) => w)).toEqual([
+      { type: 'status', follows: true },
+      { type: 'metric', series: [], numbers: [{ service: 'Disk /', label: 'used' }, { label: 'rta' }], follows: true },
+      { type: 'problems', of: 'services', show: 'problems', servicegroup: 'disks' },
+      { type: 'log', lines: 'alerts', follows: true },
+      { type: 'availability', servicegroup: 'disks' },
+    ])
+    expect((await call('POST', '/api/v1/dashboards', { ...draft, subjects: [{ kind: 'site' }] })).status).toBe(400)
+    expect((await call('POST', '/api/v1/dashboards', { ...draft, subjects: [{ kind: 'host', host: 'h' }] })).status).toBe(400)
+    expect((await call('POST', '/api/v1/dashboards', { ...draft, subjects: Array(21).fill({ kind: 'any' }) })).status).toBe(400)
+
+    // Kept before subjects: read as now, and written as now when saved.
+    const old = {
+      range: '24h',
+      choose_host: {},
+      widgets: [
+        { type: 'availability', of: { backend: '$host', host: '$host' }, layout: at(0) },
+        { type: 'metric', series: [{ backend: '$host', host: '$host', service: 'Disk /', label: 'used' }], layout: at(3) },
+        { type: 'metric', series: [{ backend: 'a', host: 'web1', label: 'rta' }], layout: at(6) },
+      ],
+    }
+    const id = store.newDashboard('ann', 'One host', false, JSON.stringify(old))
+    const read = (await (await call('GET', `/api/v1/dashboards/${id}`)).json()) as { subjects: unknown; choose_host?: unknown; widgets: Record<string, unknown>[] }
+    expect([read.subjects, read.choose_host]).toEqual([[{ kind: 'any' }], undefined])
+    expect(read.widgets.map(({ layout: _l, ...w }) => w)).toEqual([
+      { type: 'availability', follows: true },
+      { type: 'metric', series: [], follows: true, numbers: [{ service: 'Disk /', label: 'used' }] },
+      { type: 'metric', series: [{ backend: 'a', host: 'web1', label: 'rta' }] },
+    ])
+    expect((await call('PUT', `/api/v1/dashboards/${id}`, { title: 'One host', shared: false, ...read })).status).toBe(200)
+    expect(JSON.parse(store.dashboard('ann', id)!.body)).not.toHaveProperty('choose_host')
+  })
+
   it('are the owner\'s to change, and everyone\'s to see when shared', async () => {
     const store = new Store(':memory:')
     const app = buildApp({ backends: [], store, events: new Events([]), roles: new RolesConfig(), limiter: new Limiter(), cookieSecure: false })
     const call = (user: string, method: string, path: string, body?: unknown) =>
       app.request(path, { method, headers: { Authorization: `Bearer ${store.newToken(user, 't').token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
     const draft = { title: 'Mine', shared: false, range: '6h', choose_host: { hostgroup: 'web' }, widgets: [{ type: 'status', extra: 'dropped', layout: { x: 0, y: 0, w: 12, h: 3 } }, { type: 'status', of: { backend: 'a', host: '$host' }, layout: { x: 0, y: 3, w: 4, h: 3 } }] }
-    const made = (await (await call('ann', 'POST', '/api/v1/dashboards', draft)).json()) as { id: number; widgets: unknown[]; owner: string; range: string; choose_host: unknown }
+    const made = (await (await call('ann', 'POST', '/api/v1/dashboards', draft)).json()) as { id: number; widgets: unknown[]; owner: string; range: string; choose_host?: unknown; subjects: unknown }
     expect(made.owner).toBe('ann')
     expect(made.widgets[0]).toEqual({ type: 'status', layout: { x: 0, y: 0, w: 12, h: 3 } })
-    expect([made.range, made.choose_host]).toEqual(['6h', { hostgroup: 'web' }])
+    // A host chosen at the top, from before subjects: an "any host" subject, and a panel that follows it.
+    expect([made.range, made.choose_host, made.subjects]).toEqual(['6h', undefined, [{ kind: 'any', hostgroup: 'web' }]])
+    expect(made.widgets[1]).toEqual({ type: 'status', follows: true, layout: { x: 0, y: 3, w: 4, h: 3 } })
 
     expect((await call('bob', 'GET', `/api/v1/dashboards/${made.id}`)).status).toBe(404)
     expect(await (await call('bob', 'GET', '/api/v1/dashboards')).json()).toEqual([])

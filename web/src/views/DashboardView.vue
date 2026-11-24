@@ -2,18 +2,22 @@
 // A dashboard: panels on a grid. Whoever may change it changes it in
 // place: panels move by their grip, resize by their corner, come in from
 // the tray, and every change is kept at once, with undo. One range for
-// the whole dashboard; a host chosen at the top for panels about it.
-import type { Dashboard, DashboardBody, Layout, PanelSettings, Range, Scope, Series, Widget } from '@nuthatch/api'
+// the whole dashboard. At the top, what it is about (its subjects): the
+// panels that follow show the one chosen, or everything for All. Subjects
+// are added and taken away on a phone too; panels are arranged on a wide
+// screen.
+import type { Dashboard, DashboardBody, Layout, PanelSettings, Range, Scope, Series, Subject, Widget } from '@nuthatch/api'
 import { ApiError, RANGES } from '@nuthatch/api'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FindTarget from '../components/FindTarget.vue'
 import WidgetBox from '../components/WidgetBox.vue'
-import { hostGroups, useList } from '../lib/choices'
+import { hostGroups, serviceGroups, useList } from '../lib/choices'
 import { fromInput, toInput } from '../lib/format'
 import { type Box, COLUMNS, SIZES, clamp, move, place } from '../lib/layout'
 import { labelText } from '../lib/perfdata'
 import { type When, spanNow, spanText } from '../lib/range'
+import { type Focus, subjectKey, subjectName } from '../lib/subjects'
 import { api, useSession } from '../stores/session'
 
 const props = defineProps<{ id: string }>()
@@ -64,7 +68,7 @@ async function load() {
   try {
     const d = await api.dashboard(Number(props.id))
     dashboard.value = d
-    body.value = { title: d.title, shared: d.shared, range: d.range, ...(d.choose_host ? { choose_host: d.choose_host } : {}), widgets: d.widgets }
+    body.value = { title: d.title, shared: d.shared, range: d.range, ...(d.subjects ? { subjects: d.subjects } : {}), widgets: d.widgets }
     kept.value = lastSeen = JSON.stringify(body.value)
     history.length = 0
     canUndo.value = false
@@ -239,35 +243,69 @@ function typed() {
   if (!typedWrong.value) setSpan(span)
 }
 
-// The host chosen at the top, in the page's address.
+// What the dashboard is about, at the top. The one chosen is in the
+// page's address (`on`: its place, or `all`), the first by default; for
+// "any host", the host picked (`host`, `backend`), the first by default.
+const subjects = computed(() => body.value?.subjects ?? [])
+const on = computed<number | null>(() => {
+  const asked = route.query.on
+  if (asked === 'all') return null
+  const n = Number(asked)
+  if (typeof asked === 'string' && Number.isInteger(n) && n >= 0 && n < subjects.value.length) return n
+  return subjects.value.length > 0 ? 0 : null
+})
+const current = computed<Subject | null>(() => (on.value === null ? null : (subjects.value[on.value] ?? null)))
+const pick = (n: number | null) => address({ on: n === null ? 'all' : String(n) })
 const hostList = useList(
-  () => [JSON.stringify(body.value?.choose_host)],
+  () => [current.value?.kind === 'any' ? subjectKey(current.value) : ''],
   () => {
-    const pick = body.value?.choose_host
-    if (!pick) return null
+    const s = current.value
+    if (s?.kind !== 'any') return null
     const clean = (t: string) => t.replace(/[\r\n]/g, ' ')
     return api
-      .query({ table: 'hosts', columns: ['name'], headers: pick.hostgroup ? [`Filter: groups >= ${clean(pick.hostgroup)}`] : [], sort: [{ column: 'name' }], limit: 2000 })
+      .query({ table: 'hosts', columns: ['name'], headers: s.hostgroup ? [`Filter: groups >= ${clean(s.hostgroup)}`] : [], sort: [{ column: 'name' }], limit: 2000 })
       .then((a) => a.rows.map((r) => ({ backend: r.backend, host: String(r.name) })))
   },
 )
-const chosen = computed(() => {
+const picked = computed(() => {
   const list = hostList.value
-  if (!body.value?.choose_host || !list || list.length === 0) return null
+  if (current.value?.kind !== 'any' || !list || list.length === 0) return null
   const host = typeof route.query.host === 'string' ? route.query.host : ''
   const backend = typeof route.query.backend === 'string' ? route.query.backend : ''
   return list.find((h) => h.host === host && (!backend || h.backend === backend)) ?? list[0] ?? null
 })
-const chosenKey = computed(() => (chosen.value ? `${chosen.value.backend}\n${chosen.value.host}` : ''))
+const pickedKey = computed(() => (picked.value ? `${picked.value.backend}\n${picked.value.host}` : ''))
 function choose(key: string) {
   const [backend, host] = key.split('\n')
-  void router.replace({ query: { ...route.query, host, backend } })
+  address({ host, backend })
 }
-function toggleChooser(on: boolean) {
+/** What the panels that follow show: null for everything. */
+const focus = computed<Focus | null | 'waiting'>(() => {
+  const s = current.value
+  if (!s) return null
+  if (s.kind === 'any') return picked.value ? { kind: 'host', ...picked.value } : 'waiting'
+  return s
+})
+/** Subjects are added and taken away by whoever may change the dashboard, on a phone too. */
+const mayChoose = computed(() => mayEdit.value && !wall.value)
+const addingSubject = ref(false)
+function addSubject(s: Subject) {
+  if (!body.value) return
+  addingSubject.value = false
+  const have = subjects.value.findIndex((x) => subjectKey(x) === subjectKey(s))
+  if (have >= 0) return pick(have)
+  if (subjects.value.length >= 20) return
+  mark()
+  body.value.subjects = [...subjects.value, s]
+  pick(body.value.subjects.length - 1)
+}
+function removeSubject(n: number) {
   if (!body.value) return
   mark()
-  if (on) body.value.choose_host = {}
-  else delete body.value.choose_host
+  const left = subjects.value.filter((_, i) => i !== n)
+  if (left.length > 0) body.value.subjects = left
+  else delete body.value.subjects
+  address({ on: undefined, host: undefined, backend: undefined })
 }
 
 // A panel dragged in from the tray: where it would land, the others moved out of its way.
@@ -301,15 +339,21 @@ function add(settings: PanelSettings, at?: Layout, size?: [number, number]) {
   body.value.widgets.forEach((x, i) => (x.layout = moved[i]!))
   body.value.widgets.push({ ...settings, layout: moved[boxes.length]! } as Widget)
   const n = body.value.widgets.length - 1
-  const fresh = !('of' in settings) && !('hostgroup' in settings)
-  picking.value = (settings.type === 'metric' && settings.series.length === 0) || ((settings.type === 'status' || settings.type === 'availability') && fresh) ? n : null
+  const follows = 'follows' in settings && settings.follows === true
+  const fresh = !follows && !('of' in settings) && !('hostgroup' in settings) && !('servicegroup' in settings)
+  const noNumbers = settings.type === 'metric' && (follows ? (settings.numbers ?? []).length === 0 : settings.series.length === 0)
+  picking.value = noNumbers || ((settings.type === 'status' || settings.type === 'availability') && fresh) ? n : null
   selected.value = settings.type === 'note' && !settings.text ? n : null
   // Where it went, when that is below what shows.
   void nextTick(() => grid.value?.querySelectorAll('.panel')[order.value.findIndex((o) => o.n === n)]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
 }
+/** With subjects at the top, a new panel follows them. */
 function addKind(key: string, at?: Layout) {
   const kind = kindOf(key)
-  if (kind) add(kind.make(), at, sizeOf(key))
+  if (!kind) return
+  const settings = kind.make()
+  if (subjects.value.length > 0 && settings.type !== 'note') Object.assign(settings, { follows: true }, settings.type === 'metric' ? { numbers: [] } : {})
+  add(settings, at, sizeOf(key))
 }
 function duplicate(n: number) {
   const w = body.value?.widgets[n]
@@ -409,7 +453,8 @@ async function remove() {
 function exportIt() {
   if (!body.value) return
   const { shared: _shared, ...rest } = body.value
-  const blob = new Blob([JSON.stringify(rest, null, 2)], { type: 'application/json' })
+  // Read again by any nuthatch since subjects; older files are read too.
+  const blob = new Blob([JSON.stringify({ version: 2, ...rest }, null, 2)], { type: 'application/json' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = `${body.value.title.replace(/[^A-Za-z0-9._-]+/g, '-') || 'dashboard'}.json`
@@ -456,12 +501,49 @@ watch(
 )
 
 const panel = computed(() => (selected.value === null ? null : (body.value?.widgets[selected.value] ?? null)))
-/** Panels say "the chosen host" only when there is one to choose. */
-const usesChosen = computed(() => (body.value?.widgets ?? []).some((w) => ((w.type === 'status' || w.type === 'availability') && w.of?.host === '$host') || (w.type === 'metric' && w.series.some((s) => s.host === '$host'))))
 const groupList = useList(
-  () => [panel.value?.type, !!body.value?.choose_host],
-  () => (panel.value?.type === 'problems' || body.value?.choose_host ? hostGroups() : null),
+  () => [panel.value?.type],
+  () => (panel.value?.type === 'problems' ? hostGroups() : null),
 )
+const serviceGroupList = useList(
+  () => [panel.value?.type],
+  () => (panel.value?.type === 'problems' ? serviceGroups().catch(() => []) : null),
+)
+/** Panels that can follow the subject. */
+const followable = (w: Widget) => w.type !== 'note'
+/** Follows the subject, or (no more) shows what it names: what is chosen now. */
+function setFollows(n: number, follow: boolean) {
+  const w = body.value?.widgets[n]
+  if (!w || w.type === 'note') return
+  mark()
+  const f = focus.value && focus.value !== 'waiting' ? focus.value : null
+  if (follow) {
+    Object.assign(w, { follows: true })
+    if (w.type === 'status' || w.type === 'availability' || w.type === 'problems') {
+      delete w.hostgroup
+      delete w.servicegroup
+      if ('of' in w && w.type !== 'problems') delete w.of
+    }
+    if (w.type === 'metric') {
+      const seen = new Set<string>()
+      w.numbers = w.series.map((s) => ({ ...(s.service ? { service: s.service } : {}), label: s.label })).filter((x) => !seen.has(`${x.service ?? ''}\n${x.label}`) && seen.add(`${x.service ?? ''}\n${x.label}`))
+      w.series = []
+    }
+    return
+  }
+  delete (w as { follows?: true }).follows
+  if (w.type === 'status' || w.type === 'availability') {
+    if (f?.kind === 'host') w.of = { backend: f.backend, host: f.host }
+    else if (f?.kind === 'hostgroup') w.hostgroup = f.name
+    else if (f?.kind === 'servicegroup') w.servicegroup = f.name
+  } else if (w.type === 'problems') {
+    if (f?.kind === 'hostgroup') w.hostgroup = f.name
+    else if (f?.kind === 'servicegroup') w.servicegroup = f.name
+  } else if (w.type === 'metric') {
+    w.series = f?.kind === 'host' ? (w.numbers ?? []).map((x) => ({ backend: f.backend, host: f.host, ...(x.service ? { service: x.service } : {}), label: x.label })) : []
+    delete w.numbers
+  }
+}
 function setScope(n: number, scope: Scope) {
   const w = body.value?.widgets[n]
   picking.value = null
@@ -469,22 +551,28 @@ function setScope(n: number, scope: Scope) {
   mark()
   delete w.of
   delete w.hostgroup
+  delete w.servicegroup
   Object.assign(w, scope)
 }
+/** A number for a graph: of what it names, or by its check, for one that follows. */
 function addSeries(n: number, s: Series) {
   const w = body.value?.widgets[n]
   picking.value = null
-  if (w?.type !== 'metric' || w.series.length >= 8) return
+  if (w?.type !== 'metric') return
+  if (w.follows) {
+    const numbers = w.numbers ?? []
+    if (numbers.length >= 8 || numbers.some((x) => x.label === s.label && (x.service ?? '') === (s.service ?? ''))) return
+    mark()
+    w.numbers = [...numbers, { ...(s.service ? { service: s.service } : {}), label: s.label }]
+    return
+  }
+  if (w.series.length >= 8) return
   mark()
   w.series.push(s)
 }
-function toChosen() {
-  mark()
-  const w = panel.value
-  if (w?.type === 'metric') w.series = w.series.map((s) => ({ ...s, backend: '$host', host: '$host' }))
-}
-const scopeText = (w: Scope) => (w.of ? (w.of.host === '$host' ? 'The chosen host' : [w.of.host, w.of.service].filter(Boolean).join(' · ')) : (w.hostgroup ?? 'All hosts'))
-const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, s.service, labelText(s.label)].filter(Boolean).join(' · ')
+const scopeText = (w: Scope) => (w.of ? [w.of.host, w.of.service].filter(Boolean).join(' · ') : (w.hostgroup ?? w.servicegroup ?? 'All hosts'))
+const seriesText = (s: Series) => [s.host, s.service, labelText(s.label)].filter(Boolean).join(' · ')
+const numberText = (x: { service?: string; label: string }) => [x.service, labelText(x.label)].filter(Boolean).join(' · ')
 </script>
 
 <template>
@@ -523,12 +611,6 @@ const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, 
           </form>
         </div>
       </div>
-      <label v-if="body.choose_host && hostList" class="field chooser">
-        Host
-        <select :value="chosenKey" name="chosen-host" @change="choose(($event.target as HTMLSelectElement).value)">
-          <option v-for="h in hostList" :key="`${h.backend}\n${h.host}`" :value="`${h.backend}\n${h.host}`">{{ h.host }}</option>
-        </select>
-      </label>
       <div v-if="!wall" class="head-actions">
         <button v-if="arranging" type="button" class="quiet" :aria-pressed="tray" @click="tray = !tray">+ Panel</button>
         <button v-if="arranging" type="button" class="quiet" :disabled="!canUndo" @click="undo">Undo</button>
@@ -537,20 +619,29 @@ const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, 
           <button type="button" class="quiet" aria-label="More" :aria-expanded="menu" @click="menu = !menu">⋯</button>
           <div v-if="menu" class="card more-menu">
             <label v-if="mine" class="check"><input v-model="body.shared" type="checkbox" name="shared" /> Shared</label>
-            <label v-if="body.choose_host || usesChosen" class="check"><input :checked="!!body.choose_host" type="checkbox" name="choose-host" @change="toggleChooser(($event.target as HTMLInputElement).checked)" /> Choose a host</label>
-            <label v-if="body.choose_host" class="field">
-              Of host group
-              <select v-model="body.choose_host.hostgroup" name="choose-hostgroup">
-                <option :value="undefined">All</option>
-                <option v-for="g in groupList ?? []" :key="g" :value="g">{{ g }}</option>
-              </select>
-            </label>
             <button type="button" class="plain" @click="exportIt">Export</button>
             <button v-if="mine" type="button" class="plain" @click="remove">Delete</button>
           </div>
         </span>
       </div>
       <button v-else type="button" class="plain wall-exit" @click="fromWall">Exit</button>
+    </div>
+
+    <div v-if="subjects.length > 0 || mayChoose" class="chips subjects" role="group" aria-label="Subjects">
+      <button v-if="subjects.length > 0" type="button" :class="['chip', { on: on === null }]" :aria-pressed="on === null" @click="pick(null)">All</button>
+      <template v-for="(s, i) in subjects" :key="subjectKey(s)">
+        <span v-if="s.kind === 'any' && on === i && hostList && hostList.length > 0" class="chip on subject-pick">
+          <select :value="pickedKey" name="chosen-host" aria-label="Host" @change="choose(($event.target as HTMLSelectElement).value)">
+            <option v-for="h in hostList" :key="`${h.backend}\n${h.host}`" :value="`${h.backend}\n${h.host}`">{{ hostList.filter((o) => o.host === h.host).length > 1 ? `${h.host} (${h.backend})` : h.host }}</option>
+          </select>
+        </span>
+        <button v-else type="button" :class="['chip', { on: on === i }]" :aria-pressed="on === i" @click="pick(i)">{{ subjectName(s) }}</button>
+        <button v-if="mayChoose && on === i" type="button" class="chip subject-remove" :aria-label="`Remove ${subjectName(s)}`" @click="removeSubject(i)">✕</button>
+      </template>
+      <button v-if="mayChoose" type="button" class="chip" aria-label="Add a subject" :aria-expanded="addingSubject" @click="addingSubject = !addingSubject">+</button>
+    </div>
+    <div v-if="addingSubject && mayChoose" class="card subject-find">
+      <FindTarget mode="subject" label="Host or group" focus @subject="addSubject" />
     </div>
 
     <div v-if="arranging && tray" class="dash-tray" role="toolbar" aria-label="Add a panel">
@@ -577,7 +668,7 @@ const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, 
           :key="n"
           :widget="w"
           :when="when"
-          :chosen-host="chosen"
+          :focus="focus"
           :style="cell(w.layout)"
           :class="['panel', { chosen: selected === n, picking: picking === n, 'pick-left': w.layout.x + w.layout.w > 8 }]"
           @zoom="setSpan"
@@ -596,10 +687,10 @@ const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, 
           <template v-if="arranging && picking === n" #picker>
             <div class="panel-picker" role="group" aria-label="Choose">
               <FindTarget v-if="w.type === 'metric'" mode="series" label="Search" focus @series="addSeries(n, $event)" />
-              <FindTarget v-else mode="scope" label="Search" focus :chooser="!!body.choose_host" @scope="setScope(n, $event)" />
+              <FindTarget v-else mode="scope" label="Search" focus @scope="setScope(n, $event)" />
             </div>
           </template>
-          <template v-else-if="arranging && w.type === 'metric' && w.series.length === 0" #picker>
+          <template v-else-if="arranging && w.type === 'metric' && (w.follows ? (w.numbers ?? []).length === 0 : w.series.length === 0)" #picker>
             <button type="button" class="quiet" @click="pickFor(n)">Choose a number</button>
           </template>
         </WidgetBox>
@@ -610,10 +701,22 @@ const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, 
           <label>Title <input v-model="panel.title" name="panel-title" maxlength="200" /></label>
           <button type="button" class="plain" aria-label="Close" @click="selected = null">✕</button>
         </div>
-        <p v-if="panel.type === 'status' || panel.type === 'availability'" class="row">
+        <label v-if="followable(panel) && (subjects.length > 0 || ('follows' in panel && panel.follows))" class="check">
+          <input type="checkbox" name="panel-follows" :checked="'follows' in panel && panel.follows === true" @change="setFollows(selected, ($event.target as HTMLInputElement).checked)" /> Follows the subject
+        </label>
+        <p v-if="(panel.type === 'status' || panel.type === 'availability') && !panel.follows" class="row">
           <span>{{ scopeText(panel) }}</span>
           <button type="button" class="quiet" @click="pickFor(selected)">Change</button>
         </p>
+        <template v-else-if="panel.type === 'metric' && panel.follows">
+          <ul class="series-list">
+            <li v-for="(x, i) in panel.numbers ?? []" :key="i">
+              <span>{{ numberText(x) }}</span>
+              <button type="button" class="plain" :aria-label="`Remove ${numberText(x)}`" @click="mark(); panel.numbers?.splice(i, 1)">✕</button>
+            </li>
+          </ul>
+          <button v-if="(panel.numbers ?? []).length < 8" type="button" class="quiet" @click="pickFor(selected)">+ Number</button>
+        </template>
         <template v-else-if="panel.type === 'metric'">
           <ul class="series-list">
             <li v-for="(s, i) in panel.series" :key="i">
@@ -622,9 +725,6 @@ const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, 
             </li>
           </ul>
           <button v-if="panel.series.length < 8" type="button" class="quiet" @click="pickFor(selected)">+ Number</button>
-          <label v-if="body.choose_host && panel.series.some((s) => s.host !== '$host')" class="check">
-            <input type="checkbox" @change="toChosen" /> For the chosen host
-          </label>
         </template>
         <template v-else-if="panel.type === 'problems'">
           <fieldset class="field inline">
@@ -641,13 +741,22 @@ const seriesText = (s: Series) => [s.host === '$host' ? 'chosen host' : s.host, 
               <option value="recovered">Recovered</option>
             </select>
           </label>
-          <label>
-            Host group
-            <select v-model="panel.hostgroup" name="panel-hostgroup">
-              <option :value="undefined">All</option>
-              <option v-for="g in groupList ?? []" :key="g" :value="g">{{ g }}</option>
-            </select>
-          </label>
+          <template v-if="!panel.follows">
+            <label v-if="!panel.servicegroup">
+              Host group
+              <select v-model="panel.hostgroup" name="panel-hostgroup">
+                <option :value="undefined">All</option>
+                <option v-for="g in groupList ?? []" :key="g" :value="g">{{ g }}</option>
+              </select>
+            </label>
+            <label v-if="!panel.hostgroup && (serviceGroupList ?? []).length > 0">
+              Service group
+              <select v-model="panel.servicegroup" name="panel-servicegroup">
+                <option :value="undefined">All</option>
+                <option v-for="g in serviceGroupList ?? []" :key="g" :value="g">{{ g }}</option>
+              </select>
+            </label>
+          </template>
         </template>
         <fieldset v-else-if="panel.type === 'log'" class="field inline">
           <legend>Lines</legend>

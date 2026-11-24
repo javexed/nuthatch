@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The share of the range a host or service was up or OK; for a host group
-// or everything, of all its hosts together, and the lowest of them.
+// or everything, of all its hosts together, and the lowest of them; for a
+// service group, of its services.
 import type { Scope } from '@nuthatch/api'
 import { computed } from 'vue'
 import { type Availability, availability, percent, showPercent } from '../../lib/availability'
@@ -21,6 +22,14 @@ const { data } = useLoader(
       return answer.rows.filter((r) => r.service === of.service)
     }
     if (of) return (await availability(api, 'host', span, { host: of.host, backends: [of.backend] })).rows
+    if (props.scope.servicegroup) {
+      const [all, members] = await Promise.all([
+        availability(api, 'service', span),
+        api.query({ table: 'services', columns: ['host_name', 'description'], headers: [`Filter: groups >= ${clean(props.scope.servicegroup)}`] }),
+      ])
+      const wanted = new Set(members.rows.map((r) => `${r.backend}\n${String(r.host_name)}\n${String(r.description)}`))
+      return all.rows.filter((r) => wanted.has(`${r.backend}\n${r.host}\n${r.service}`))
+    }
     const all = (await availability(api, 'host', span)).rows
     if (!props.scope.hostgroup) return all
     const members = await api.query({ table: 'hosts', columns: ['name'], headers: [`Filter: groups >= ${clean(props.scope.hostgroup)}`] })
@@ -43,10 +52,11 @@ const lowest = computed(() => (props.scope.of ? [] : (data.value ?? []).slice(0,
 <template>
   <div class="availability-panel">
     <p class="value">{{ data ? showPercent(overall) : '–' }}</p>
-    <p class="by">{{ scope.of?.service ? 'OK' : 'up' }}</p>
+    <p class="by">{{ scope.of?.service || scope.servicegroup ? 'OK' : 'up' }}</p>
     <ul v-if="lowest.length > 0" class="lowest">
-      <li v-for="r in lowest" :key="`${r.backend}\n${r.host}`">
-        <RouterLink :to="{ name: 'host', params: { backend: r.backend, host: r.host } }">{{ r.host }}</RouterLink>
+      <li v-for="r in lowest" :key="`${r.backend}\n${r.host}\n${r.service}`">
+        <RouterLink v-if="r.service" :to="{ name: 'service', params: { backend: r.backend, host: r.host, service: r.service } }">{{ r.host }} · {{ r.service }}</RouterLink>
+        <RouterLink v-else :to="{ name: 'host', params: { backend: r.backend, host: r.host } }">{{ r.host }}</RouterLink>
         <span>{{ showPercent(percent(r, 0)) }}</span>
       </li>
     </ul>

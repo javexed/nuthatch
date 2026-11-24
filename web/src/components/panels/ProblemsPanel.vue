@@ -10,13 +10,22 @@ import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
 import StatusList from '../StatusList.vue'
 
-const props = defineProps<{ of: 'hosts' | 'services'; show: ProblemsShow; hostgroup?: string; when: When; rows: number }>()
+const props = defineProps<{ of: 'hosts' | 'services'; show: ProblemsShow; hostgroup?: string; servicegroup?: string; host?: string; when: When; rows: number }>()
 const emit = defineEmits<{ worst: [state: number] }>()
-const kind = computed(() => (props.of === 'hosts' ? 'host' : 'service'))
+/** A service group's problems are its services'. */
+const kind = computed(() => (props.of === 'hosts' && !props.servicegroup ? 'host' : 'service'))
 
 const base = computed<Partial<ListFilter>>(() => {
-  const bad = props.of === 'hosts' ? [1, 2] : [1, 2, 3]
-  const group = props.hostgroup ? (props.of === 'hosts' ? { group: props.hostgroup } : { hostgroup: props.hostgroup }) : {}
+  const bad = kind.value === 'host' ? [1, 2] : [1, 2, 3]
+  const group = props.servicegroup
+    ? { group: props.servicegroup }
+    : props.hostgroup
+      ? kind.value === 'host'
+        ? { group: props.hostgroup }
+        : { hostgroup: props.hostgroup }
+      : props.host
+        ? { host: props.host }
+        : {}
   switch (props.show) {
     case 'acknowledged':
       return { states: bad, acknowledged: true, ...group }
@@ -31,8 +40,8 @@ const base = computed<Partial<ListFilter>>(() => {
 
 // Problems nobody has taken care of colour the panel's outline.
 const { data } = useLoader(
-  () => (props.show === 'problems' ? api.stats({ table: props.of, headers: [...toHeaders(kind.value, { ...EMPTY, ...base.value }), 'Stats: state = 2', 'Stats: state >= 1'] }) : Promise.resolve(null)),
-  [() => props.show, () => props.of, () => props.hostgroup],
+  () => (props.show === 'problems' ? api.stats({ table: kind.value === 'host' ? 'hosts' : 'services', headers: [...toHeaders(kind.value, { ...EMPTY, ...base.value }), 'Stats: state = 2', 'Stats: state >= 1'] }) : Promise.resolve(null)),
+  [() => props.show, () => props.of, () => props.hostgroup, () => props.servicegroup, () => props.host],
 )
 watch(
   () => data.value?.groups[0]?.values,

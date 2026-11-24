@@ -403,25 +403,48 @@ export interface Series extends Target {
 }
 
 /** What a status or availability panel covers: one host or service, a
- * host group, or (neither) everything. */
+ * host group, a service group, or (none) everything. */
 export interface Scope {
   of?: Target
   hostgroup?: string
+  servicegroup?: string
+}
+
+/** What a dashboard is about, chosen in the row at its top: a host, a host
+ * group, a service group, or any host (of a host group), picked from a list. */
+export type Subject =
+  | { kind: 'host'; backend: string; host: string }
+  | { kind: 'hostgroup'; name: string }
+  | { kind: 'servicegroup'; name: string }
+  | { kind: 'any'; hostgroup?: string }
+
+/** A number by its check, of whatever a following panel is about: the
+ * host's own check when there is no service. */
+export interface CheckNumber {
+  service?: string
+  label: string
 }
 
 export type ProblemsShow = 'problems' | 'acknowledged' | 'downtimes' | 'recovered'
 
 /** A panel's settings, without its place on the grid. */
+/** A panel that follows shows what is chosen at the dashboard's top
+ * (everything, when that is All) instead of what it names itself. */
+interface Follows {
+  follows?: true
+}
+
 export type PanelSettings =
   /** One host or service as a card; a group or everything as counts and tiles. */
-  | ({ type: 'status'; title?: string } & Scope)
+  | ({ type: 'status'; title?: string } & Scope & Follows)
   /** Hosts or services: problems nobody has taken care of, those acknowledged, in a downtime, or recovered within the range. */
-  | { type: 'problems'; title?: string; of: 'hosts' | 'services'; show: ProblemsShow; hostgroup?: string }
-  /** Numbers over time: small, the first as a number; larger, a graph. */
-  | { type: 'metric'; title?: string; series: Series[] }
-  | { type: 'log'; title?: string; lines: 'alerts' | 'notifications' }
+  | ({ type: 'problems'; title?: string; of: 'hosts' | 'services'; show: ProblemsShow; hostgroup?: string; servicegroup?: string } & Follows)
+  /** Numbers over time: small, the first as a number; larger, a graph. A
+   * panel that follows has `numbers`, by check, of whatever is chosen. */
+  | ({ type: 'metric'; title?: string; series: Series[]; numbers?: CheckNumber[] } & Follows)
+  | ({ type: 'log'; title?: string; lines: 'alerts' | 'notifications' } & Follows)
   /** The share of time up or OK over the range. */
-  | ({ type: 'availability'; title?: string } & Scope)
+  | ({ type: 'availability'; title?: string } & Scope & Follows)
   /** Text, with its web addresses as links. */
   | { type: 'note'; title?: string; text: string }
 
@@ -432,8 +455,8 @@ export interface DashboardBody {
   /** Shown to everyone who logs in, and changed by anyone; deleted by its owner only. */
   shared: boolean
   range: Range
-  /** A host is chosen at the top (of this host group, if given), for panels about `$host`. */
-  choose_host?: { hostgroup?: string }
+  /** What can be chosen at the top, for the panels that follow. */
+  subjects?: Subject[]
   widgets: Widget[]
 }
 

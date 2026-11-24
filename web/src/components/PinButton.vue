@@ -25,7 +25,7 @@ async function editable(): Promise<Dashboard[]> {
 async function pinTo(target: Dashboard | 'new') {
   const d = target === 'new' ? await api.newDashboard(blank('Pinned')) : target
   before = target === 'new' ? null : d
-  pinned.value = await api.saveDashboard(d.id, { title: d.title, shared: d.shared, range: d.range, ...(d.choose_host ? { choose_host: d.choose_host } : {}), widgets: withPanel(d.widgets, props.panel) })
+  pinned.value = await api.saveDashboard(d.id, { title: d.title, shared: d.shared, range: d.range, ...(d.subjects ? { subjects: d.subjects } : {}), widgets: withPanel(d.widgets, props.panel) })
   await api.setPref('pin_to', d.id).catch(() => undefined)
 }
 
@@ -44,7 +44,7 @@ async function pin() {
 async function undo() {
   const d = pinned.value
   if (!d) return
-  if (before) await api.saveDashboard(d.id, { title: before.title, shared: before.shared, range: before.range, ...(before.choose_host ? { choose_host: before.choose_host } : {}), widgets: before.widgets })
+  if (before) await api.saveDashboard(d.id, { title: before.title, shared: before.shared, range: before.range, ...(before.subjects ? { subjects: before.subjects } : {}), widgets: before.widgets })
   else await api.deleteDashboard(d.id)
   pinned.value = null
 }

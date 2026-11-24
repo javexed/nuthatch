@@ -265,7 +265,7 @@ def tests():
         # The demo site has no service groups and, here, no downtimes: those
         # tables are asked all the same, for a refusal that must not come;
         # downtimes are tried with some below.
-        full = {"hosts": 11, "services": 36, "hostgroups": 7, "servicegroups": 0, "hostsbygroup": 11, "servicesbygroup": 0,
+        full = {"hosts": 11, "services": 36, "hostgroups": 7, "servicegroups": 1, "hostsbygroup": 11, "servicesbygroup": 2,
                 "servicesbyhostgroup": 36, "comments": "some", "downtimes": 0, "log": "some", "statehist": "some", "columns": "some"}
         want = {
             "admin": {**full, "contacts": 4, "contactgroups": 1, "commands": 2, "timeperiods": 1, "status": 1},

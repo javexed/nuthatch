@@ -571,7 +571,17 @@ body.wall main { max-width: none; padding: 0.8rem; }
 .dash-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; }
 .dash-head .title-edit { font-size: 1.5rem; font-weight: 700; border: 1px solid transparent; background: transparent; padding: 0.1rem 0.3rem; min-width: 10rem; flex: 1; }
 .dash-head .title-edit:hover, .dash-head .title-edit:focus { border-color: var(--line); background: var(--card); }
-.dash-head .chooser { flex-direction: row; align-items: center; gap: 0.4rem; }
+/* What the dashboard is about: All, each subject, + to add one. */
+.subjects { margin: 0.6rem 0 0.9rem; align-items: center; }
+.subjects .chip { cursor: pointer; }
+.subjects .chip.on { background: var(--accent); border-color: var(--accent); }
+.subjects .subject-remove { padding: 0.25rem 0.5rem; margin-left: -0.3rem; }
+.subject-pick { padding: 0 0.3rem; }
+.subject-pick select { font: inherit; font-weight: 600; color: var(--card); background: transparent; border: 0; padding: 0.2rem 0.2rem; }
+.subject-pick select option { color: var(--text); background: var(--card); }
+.subject-find { margin: 0.5rem 0; max-width: 28rem; }
+/* A panel that follows the subject: a mark of the subjects' colour. */
+.follow-mark { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); margin-right: 0.4rem; vertical-align: middle; }
 .more { position: relative; }
 
 

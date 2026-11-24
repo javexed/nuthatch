@@ -2,14 +2,14 @@
 // The dashboards there are: one's own, and those shared with everyone.
 // Everyone has an Overview from the start; a new one is made whole in one
 // click, from a template, or from a file. Several can take turns on a wall.
-import type { DashboardDraft, Scope, Series } from '@nuthatch/api'
+import type { CheckNumber, DashboardDraft, Subject } from '@nuthatch/api'
 import { ApiError } from '@nuthatch/api'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import FindTarget from '../components/FindTarget.vue'
 import { hostGroups } from '../lib/choices'
 import { parsePerfdata } from '../lib/perfdata'
-import { blank, forGroup, forHost, overview } from '../lib/templates'
+import { blank, forSubject, overview } from '../lib/templates'
 import { api, useSession } from '../stores/session'
 
 const session = useSession()
@@ -52,30 +52,31 @@ async function make(draft: DashboardDraft, query: Record<string, string> = {}) {
 async function makeOverview() {
   await make(overview(await hostGroups().catch(() => [])))
 }
-/** One host group, or one host chosen at the top. */
-async function makeFor(scope: Scope) {
-  if (scope.hostgroup) await makeGroup(scope.hostgroup)
-  else await makeHost(scope)
-}
-/** A host group: a number of each host's own check, where it has one. */
-async function makeGroup(group: string) {
-  const hosts = await api.query({ table: 'hosts', columns: ['name', 'perf_data'], headers: [`Filter: groups >= ${clean(group)}`, 'Filter: perf_data != '], sort: [{ column: 'name' }], limit: 12 })
-  const numbers: Series[] = hosts.rows.flatMap((r) => {
+/** One subject, and panels that follow it: graphs of the numbers it has
+ * most, the first of each check. */
+async function makeFor(subject: Subject) {
+  const headers =
+    subject.kind === 'host'
+      ? [`Filter: host_name = ${clean(subject.host)}`]
+      : subject.kind === 'hostgroup'
+        ? [`Filter: host_groups >= ${clean(subject.name)}`]
+        : subject.kind === 'servicegroup'
+          ? [`Filter: groups >= ${clean(subject.name)}`]
+          : subject.hostgroup
+            ? [`Filter: host_groups >= ${clean(subject.hostgroup)}`]
+            : []
+  const services = await api.query({ table: 'services', columns: ['description', 'perf_data'], headers: [...headers, 'Filter: perf_data != '], limit: 2000, ...(subject.kind === 'host' ? { backends: [subject.backend] } : {}) })
+  const count = new Map<string, { n: CheckNumber; times: number }>()
+  for (const r of services.rows) {
     const first = parsePerfdata(String(r.perf_data))[0]
-    return first ? [{ backend: r.backend, host: String(r.name), label: first.label }] : []
-  })
-  await make(forGroup(group, numbers))
-}
-/** One host, chosen at the top: a graph of the first number of each of its services. */
-async function makeHost(scope: Scope) {
-  const of = scope.of
-  if (!of || of.host === '$host') return
-  const services = await api.query({ table: 'services', columns: ['description', 'perf_data'], headers: [`Filter: host_name = ${clean(of.host)}`, 'Filter: perf_data != '], sort: [{ column: 'description' }], backends: [of.backend], limit: 8 })
-  const metrics: Series[] = services.rows.flatMap((r) => {
-    const first = parsePerfdata(String(r.perf_data))[0]
-    return first ? [{ backend: of.backend, host: of.host, service: String(r.description), label: first.label }] : []
-  })
-  await make(forHost(metrics), { host: of.host, backend: of.backend })
+    if (!first) continue
+    // A service group's services are one number whatever their names.
+    const n: CheckNumber = subject.kind === 'servicegroup' ? { label: first.label } : { service: String(r.description), label: first.label }
+    const key = `${n.service ?? ''}\n${n.label}`
+    count.set(key, { n, times: (count.get(key)?.times ?? 0) + 1 })
+  }
+  const numbers = [...count.values()].sort((a, b) => b.times - a.times || (a.n.service ?? '').localeCompare(b.n.service ?? '')).map((c) => c.n)
+  await make(forSubject(subject, numbers))
 }
 
 /** A dashboard from a file another nuthatch exported. */
@@ -130,6 +131,6 @@ function startWall() {
     <label class="template">Import <input type="file" accept="application/json,.json" class="file" @change="importFile" /></label>
   </div>
   <div v-if="making" class="card">
-    <FindTarget mode="place" label="Host or group" focus @scope="makeFor" />
+    <FindTarget mode="subject" label="Host or group" focus @subject="makeFor" />
   </div>
 </template>

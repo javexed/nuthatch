@@ -14,6 +14,10 @@ export function hostGroups(): Promise<string[]> {
   return names('hostgroups', 'name')
 }
 
+export function serviceGroups(): Promise<string[]> {
+  return names('servicegroups', 'name')
+}
+
 /** A list that follows its inputs; empty while they are not set. */
 export function useList<T>(inputs: () => unknown[], load: () => Promise<T[]> | null): Ref<T[] | null> {
   const list = ref<T[] | null>(null) as Ref<T[] | null>

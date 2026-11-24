@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // One service: its card. One host: its card and a tile per service. A
 // host group, or everything: how many hosts are in each state, and a tile
-// per host, marked when one of its services is not OK.
+// per host, marked when one of its services is not OK. A service group:
+// how many services are in each state, and a tile per service.
 import type { Scope } from '@nuthatch/api'
 import { computed, watch } from 'vue'
 import { stateOf } from '../../lib/states'
@@ -43,6 +44,24 @@ const { data } = useLoader(
       const hostDown = Number(host.rows[0]?.state ?? 0) > 0 ? 2 : 0
       return { tiles, worst: Math.max(hostDown, ...services.rows.map((r) => Number(r.state ?? 0))) }
     }
+    if (props.scope.servicegroup) {
+      const services = (
+        await api.query({
+          table: 'services',
+          columns: ['host_name', 'description', 'state', 'has_been_checked'],
+          headers: [`Filter: groups >= ${clean(props.scope.servicegroup)}`],
+          sort: [{ column: 'host_name' }, { column: 'description' }],
+          limit: 500,
+        })
+      ).rows
+      const tiles = services.map((r) => ({
+        key: `${r.backend}\n${String(r.host_name)}\n${String(r.description)}`,
+        name: `${String(r.host_name)} · ${String(r.description)}`,
+        tone: stateOf('service', r.state, r.has_been_checked).tone,
+        to: { name: 'service', params: { backend: r.backend, host: String(r.host_name), service: String(r.description) } },
+      }))
+      return { tiles, worst: Math.max(0, ...services.map((r) => Number(r.state ?? 0))) }
+    }
     const rows = (
       await api.query({
         table: 'hosts',
@@ -70,7 +89,7 @@ const counts = computed(() => {
   if (props.scope.of) return []
   const by = new Map<string, number>()
   for (const t of data.value?.tiles ?? []) by.set(t.tone, (by.get(t.tone) ?? 0) + 1)
-  const LABEL: Record<string, string> = { ok: 'up', critical: 'down', unknown: 'unreachable', pending: 'pending' }
+  const LABEL: Record<string, string> = props.scope.servicegroup ? { ok: 'OK', warning: 'warning', critical: 'critical', unknown: 'unknown', pending: 'pending' } : { ok: 'up', critical: 'down', unknown: 'unreachable', pending: 'pending' }
   return [...by.entries()].map(([tone, n]) => ({ tone, text: `${n} ${LABEL[tone] ?? tone}` }))
 })
 </script>

@@ -21,6 +21,8 @@ const props = withDefaults(
     host?: string
     /** With a host: its service; "" for the host's own lines only. */
     service?: string
+    /** Only these hosts, or services of hosts (a group's members). */
+    members?: { host: string; service?: string }[]
     offset?: number
     pageSize?: number
   }>(),
@@ -40,6 +42,14 @@ const { data, error, loading } = useLoader(() => {
   if (props.host !== undefined) headers.push(`Filter: host_name = ${clean(props.host)}`)
   if (props.service !== undefined) headers.push(`Filter: service_description = ${clean(props.service)}`)
   if (props.search.trim() !== '') headers.push(`Filter: message ~~ ${literal(clean(props.search.trim()))}`)
+  if (props.members !== undefined) {
+    if (props.members.length === 0) headers.push('Filter: time < 0')
+    for (const m of props.members) {
+      headers.push(`Filter: host_name = ${clean(m.host)}`)
+      if (m.service !== undefined) headers.push(`Filter: service_description = ${clean(m.service)}`, 'And: 2')
+    }
+    if (props.members.length > 1) headers.push(`Or: ${props.members.length}`)
+  }
   return api.query({
     table: 'log',
     columns: [...COLUMNS],
@@ -49,7 +59,7 @@ const { data, error, loading } = useLoader(() => {
     limit: props.pageSize,
     backends: props.backend === undefined ? undefined : [props.backend],
   })
-}, [() => [props.from, props.to, props.lines, props.search, props.backend, props.host, props.service, props.offset]])
+}, [() => [props.from, props.to, props.lines, props.search, props.backend, props.host, props.service, props.offset, JSON.stringify(props.members)]])
 
 const rows = computed(() => (data.value?.rows ?? []) as (Record<(typeof COLUMNS)[number], unknown> & { backend: string })[])
 const errors = computed(() => Object.entries(data.value?.errors ?? {}))
