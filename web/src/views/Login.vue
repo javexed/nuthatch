@@ -27,7 +27,7 @@ async function submit() {
     busy.value = false
   }
 }
-const logo = `${import.meta.env.BASE_URL}favicon.svg`
+const logo = `${import.meta.env.BASE_URL}logo.svg`
 </script>
 
 <template>

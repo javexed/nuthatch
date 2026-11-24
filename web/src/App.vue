@@ -81,7 +81,7 @@ const MORE = computed(() => [
   ...(session.session && session.session.config_backends.length > 0 ? [{ name: 'config', label: 'Config' }] : []),
   { name: 'device', label: 'This device' },
 ])
-const logo = `${import.meta.env.BASE_URL}favicon.svg`
+const logo = `${import.meta.env.BASE_URL}logo.svg`
 </script>
 
 <template>

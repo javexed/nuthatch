@@ -22,7 +22,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
   const scope = new URL(self.registration.scope).pathname
   const path = url.pathname.slice(scope.length - 1)
-  const keep = path.startsWith('/assets/') || /^\/(favicon\.svg|icon-[a-z0-9-]+\.png|apple-touch-icon\.png)$/.test(path)
+  const keep = path.startsWith('/assets/') || /^\/(favicon\.svg|logo\.svg|icon-[a-z0-9-]+\.png|apple-touch-icon\.png)$/.test(path)
   if (!keep) return
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
