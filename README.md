@@ -10,6 +10,15 @@ works with [Naemon](https://www.naemon.io/) and with
 problems, history, availability, commands, config), written anew, and is
 made to be used on a phone as much as at a desk.
 
+<p>
+<img src="docs/screenshots/desktop-overview.png" alt="The overview at a desk: hosts and services counted by state" width="49%">
+<img src="docs/screenshots/desktop-problems.png" alt="The problems at a desk, from both engines" width="49%">
+</p>
+<p>
+<img src="docs/screenshots/phone-problems.png" alt="The problems on a phone, with the bar at the bottom" width="32%">
+<img src="docs/screenshots/phone-overview-dark.png" alt="The overview on a phone, in the dark theme" width="32%">
+</p>
+
 ## In the spirit of Nagios, Naemon and Thruk
 
 nuthatch is meant as a continuation of those projects, in their spirit:
@@ -36,7 +45,7 @@ carries it on with the languages, models and ways of working of today:
 
 ## Where it stands
 
-Version 0.1.0, in daily use on its author's site. Each change is tested
+Version 0.1.0. Each change is tested
 in a browser, at desk and phone width, and for every kind of user,
 against Naemon Core 1.5.2 and checkd; CI runs the types and the unit
 tests. The store is migrated from one version to the next; the config
@@ -44,10 +53,23 @@ file's keys may still change before 1.0. Nagios Core needs a Livestatus
 module of its own and has not been tried. Several sites, agents and the
 Android app are newer still, and marked experimental below.
 
+## Quick start
+
+checkd and nuthatch on your own machine, without root. Needs Rust,
+Node 22.18 or later, and pnpm:
+
+    git clone https://github.com/javexed/checkd.git ~/checkd
+    git clone https://github.com/javexed/nuthatch.git ~/nuthatch
+    ~/nuthatch/contrib/quick-start
+
+It builds both, writes a first config that watches this machine, asks
+for a password for the user `admin`, and starts both as user services.
+Then open <http://127.0.0.1:7780>.
+
 ## Install
 
-- **Recommended if you are new:** checkd and nuthatch together on your
-  own machine, without root:
+- **Recommended if you are new:** the quick start above, or the same
+  steps by hand:
   [docs/install.md](docs/install.md#recommended-if-you-are-new-without-root).
 - **On a server**, beside Naemon or checkd, as a system service behind a
   proxy: [docs/install.md](docs/install.md), step by step, with updating

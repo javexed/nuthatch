@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# checkd and nuthatch on this machine, from your own account, without
+# root: builds both, writes a first config that watches this machine,
+# asks for the password of the user admin, and starts both as user
+# services. The steps by hand: docs/install.md.
+#
+#   git clone https://github.com/javexed/checkd.git ~/checkd
+#   git clone https://github.com/javexed/nuthatch.git ~/nuthatch
+#   ~/nuthatch/contrib/quick-start
+set -euo pipefail
+
+nuthatch=$(cd "$(dirname "$0")/.." && pwd)
+checkd=${CHECKD_SRC:-$HOME/checkd}
+port=${PORT:-7780}
+run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+config=${XDG_CONFIG_HOME:-$HOME/.config}
+state=$HOME/.local/state
+
+fail() { echo "quick-start: $*" >&2; exit 1; }
+step() { printf '\n== %s\n' "$*"; }
+
+# What it needs, before anything is changed.
+[ "$nuthatch" = "$HOME/nuthatch" ] || fail "nuthatch must be in ~/nuthatch (its user service runs from there), not $nuthatch"
+[ -d "$checkd/.git" ] || fail "no checkd in $checkd: git clone https://github.com/javexed/checkd.git ~/checkd"
+command -v cargo >/dev/null || fail "cargo is missing: install Rust (https://rustup.rs)"
+command -v node >/dev/null || fail "node is missing: install Node 22.18 or later"
+node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)' \
+    || fail "Node $(node --version) is too old: 22.18 or later"
+command -v pnpm >/dev/null || command -v corepack >/dev/null || fail "pnpm is missing: corepack enable, or install pnpm"
+command -v openssl >/dev/null || fail "openssl is missing"
+command -v systemctl >/dev/null || fail "systemd is needed for the user services"
+for f in "$config/checkd/naemon.cfg" "$config/nuthatch/nuthatch.toml"; do
+    [ -e "$f" ] && fail "$f is there already: nothing changed (the steps by hand are in docs/install.md)"
+done
+
+step "checkd: building"
+(cd "$checkd" && cargo build --release -p checkd)
+install -Dm 755 "$checkd/target/release/checkd" "$HOME/.local/bin/checkd"
+
+step "checkd: a first config in $config/checkd"
+mkdir -p "$config/checkd/objects" "$config/checkd/managed" "$state/checkd"
+cat > "$config/checkd/naemon.cfg" <<EOF
+cfg_dir=$config/checkd/objects
+cfg_dir=$config/checkd/managed
+resource_file=$config/checkd/resource.cfg
+check_external_commands=1
+command_file=$run/checkd/checkd.cmd
+lock_file=$run/checkd/checkd.pid
+log_file=$state/checkd/checkd.log
+retain_state_information=1
+state_retention_file=$state/checkd/retention.dat
+temp_path=$state/checkd
+EOF
+echo '$USER1$=/usr/lib/monitoring-plugins' > "$config/checkd/resource.cfg"
+cp "$nuthatch/contrib/start/start.cfg" "$config/checkd/objects/start.cfg"
+"$HOME/.local/bin/checkd" verify "$config/checkd/naemon.cfg"
+
+step "nuthatch: building"
+cd "$nuthatch"
+command -v pnpm >/dev/null || corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+
+step "nuthatch: the user admin"
+mkdir -p "$config/nuthatch" "$state/nuthatch"
+hash=$(openssl passwd -6) || fail "no password set"
+umask 077
+printf 'admin:%s\n' "$hash" > "$config/nuthatch/htpasswd"
+umask 022
+cat > "$config/nuthatch/nuthatch.toml" <<EOF
+listen = "127.0.0.1:$port"
+web_root = "$nuthatch/web/dist"
+store = "$state/nuthatch/nuthatch.sqlite"
+htpasswd = "$config/nuthatch/htpasswd"
+
+[[backend]]
+name = "checkd"
+livestatus = "unix:$run/checkd/live"
+EOF
+
+step "starting both"
+install -Dm 644 "$checkd/contrib/systemd/checkd-user.service" "$config/systemd/user/checkd.service"
+install -Dm 644 "$nuthatch/contrib/systemd/nuthatch-user.service" "$config/systemd/user/nuthatch.service"
+systemctl --user daemon-reload
+systemctl --user enable --now checkd nuthatch
+loginctl enable-linger "$USER" 2>/dev/null || echo "(loginctl enable-linger failed: both stop when you log out)"
+
+for _ in $(seq 30); do
+    if node -e "fetch('http://127.0.0.1:$port/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"; then
+        printf '\nReady: http://127.0.0.1:%s, user admin.\n' "$port"
+        exit 0
+    fi
+    sleep 1
+done
+fail "nuthatch does not answer on port $port: journalctl --user -u nuthatch -u checkd"
