@@ -11,16 +11,8 @@ problems, history, availability, commands, config), written anew, and is
 made to be used on a phone as much as at a desk.
 
 <p>
-<img src="docs/screenshots/desktop-dashboard.png" alt="A dashboard at a desk, about the host group db: states, uptime, response times, problems and alerts" width="98%">
-</p>
-<p>
-<img src="docs/screenshots/desktop-overview.png" alt="The overview at a desk: hosts and services counted by state" width="49%">
-<img src="docs/screenshots/desktop-problems.png" alt="The problems at a desk, from both engines" width="49%">
-</p>
-<p>
-<img src="docs/screenshots/phone-dashboard.png" alt="The same dashboard on a phone" width="32%">
-<img src="docs/screenshots/phone-problems.png" alt="The problems on a phone, with the bar at the bottom" width="32%">
-<img src="docs/screenshots/phone-overview-dark.png" alt="The overview on a phone, in the dark theme" width="32%">
+<img src="docs/screenshots/desktop-dashboard.png" alt="A dashboard at a desk, about the host group db: states, uptime, response times, problems and alerts" width="73%">
+<img src="docs/screenshots/phone-dashboard.png" alt="The same dashboard on a phone" width="24%">
 </p>
 
 ## In the spirit of Nagios, Naemon and Thruk
@@ -119,6 +111,18 @@ Then open <http://127.0.0.1:7780>.
 With checkd as the engine there is more in the config form: services a
 job elsewhere tells its result, services that stand for others, and
 downtimes that come round. Naemon has none of those.
+
+<details>
+<summary>More screenshots</summary>
+<p>
+<img src="docs/screenshots/desktop-overview.png" alt="The overview at a desk: hosts and services counted by state" width="49%">
+<img src="docs/screenshots/desktop-problems.png" alt="The problems at a desk, from both engines" width="49%">
+</p>
+<p>
+<img src="docs/screenshots/phone-problems.png" alt="The problems on a phone, with the bar at the bottom" width="32%">
+<img src="docs/screenshots/phone-overview-dark.png" alt="The overview on a phone, in the dark theme" width="32%">
+</p>
+</details>
 
 ## What it is trusted with
 
