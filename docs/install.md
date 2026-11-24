@@ -6,6 +6,168 @@ Livestatus module), or checkd ([beside checkd](#beside-checkd)).
 The paths are those of the Naemon packages; change them where yours
 differ.
 
+## checkd and nuthatch together
+
+### On a server
+
+1. checkd, as its [install guide](https://github.com/javexed/checkd/blob/main/docs/install.md) says: the binary, the user
+   `checkd`, a config in `/etc/checkd`, the system service. A config to
+   start from: [the one below](#without-root), with the paths of
+   `naemon.cfg` under `/var/lib/checkd` and `/run/checkd`.
+2. nuthatch, as this page says, with the changes of
+   [Beside checkd](#beside-checkd).
+3. [A proxy in front](#a-proxy-in-front).
+
+### Without root
+
+One machine, watched from your own account: checkd as a user service,
+and nuthatch beside it at <http://127.0.0.1:7780>. Needs Rust, Node
+22.18 or later, and pnpm.
+
+checkd, built, and a config that watches this machine with checks that
+need no plugin:
+
+    git clone https://github.com/javexed/checkd.git ~/checkd
+    (cd ~/checkd && cargo build --release -p checkd)
+    install -Dm 755 ~/checkd/target/release/checkd ~/.local/bin/checkd
+    mkdir -p ~/.config/checkd/objects ~/.config/checkd/managed ~/.local/state/checkd
+
+    cat > ~/.config/checkd/naemon.cfg <<EOF
+    cfg_dir=$HOME/.config/checkd/objects
+    cfg_dir=$HOME/.config/checkd/managed
+    resource_file=$HOME/.config/checkd/resource.cfg
+    check_external_commands=1
+    command_file=$XDG_RUNTIME_DIR/checkd/checkd.cmd
+    lock_file=$XDG_RUNTIME_DIR/checkd/checkd.pid
+    log_file=$HOME/.local/state/checkd/checkd.log
+    retain_state_information=1
+    state_retention_file=$HOME/.local/state/checkd/retention.dat
+    temp_path=$HOME/.local/state/checkd
+    EOF
+    echo '$USER1$=/usr/lib/monitoring-plugins' > ~/.config/checkd/resource.cfg
+
+`~/.config/checkd/objects/start.cfg`:
+
+    define timeperiod {
+        timeperiod_name  24x7
+        alias            Always
+        sunday 00:00-24:00
+        monday 00:00-24:00
+        tuesday 00:00-24:00
+        wednesday 00:00-24:00
+        thursday 00:00-24:00
+        friday 00:00-24:00
+        saturday 00:00-24:00
+    }
+    define command {
+        command_name  notify-none
+        command_line  /bin/true
+    }
+    define contact {
+        contact_name                   admin
+        alias                          Admin
+        host_notification_period       24x7
+        service_notification_period    24x7
+        host_notification_commands     notify-none
+        service_notification_commands  notify-none
+    }
+    define command {
+        command_name  ping
+        command_line  checkd:ping -H $HOSTADDRESS$
+    }
+    define command {
+        command_name  disk
+        command_line  checkd:disk -p $ARG1$ -w 80 -c 90
+    }
+    define command {
+        command_name  memory
+        command_line  checkd:memory -w 80 -c 90
+    }
+    define command {
+        command_name  load
+        command_line  checkd:load -w 4 -c 8
+    }
+    define host {
+        name                   machine
+        register               0
+        check_command          ping
+        max_check_attempts     3
+        check_interval         5
+        retry_interval         1
+        check_period           24x7
+        contacts               admin
+        notification_period    24x7
+    }
+    define service {
+        name                   check
+        register               0
+        max_check_attempts     3
+        check_interval         5
+        retry_interval         1
+        check_period           24x7
+        contacts               admin
+        notification_period    24x7
+    }
+    define host {
+        use                    machine
+        host_name              localhost
+        address                127.0.0.1
+    }
+    define service {
+        use                    check
+        host_name              localhost
+        service_description    Disk /
+        check_command          disk!/
+    }
+    define service {
+        use                    check
+        host_name              localhost
+        service_description    Memory
+        check_command          memory
+    }
+    define service {
+        use                    check
+        host_name              localhost
+        service_description    Load
+        check_command          load
+    }
+
+Then:
+
+    checkd verify ~/.config/checkd/naemon.cfg
+    install -Dm 644 ~/checkd/contrib/systemd/checkd-user.service ~/.config/systemd/user/checkd.service
+    systemctl --user daemon-reload && systemctl --user enable --now checkd
+    loginctl enable-linger "$USER"    # keep both running when logged out
+
+nuthatch, with one user, `admin`, the contact above (`openssl` asks
+for the password):
+
+    git clone https://github.com/javexed/nuthatch.git ~/nuthatch
+    cd ~/nuthatch && corepack enable && pnpm install --frozen-lockfile && pnpm build
+    mkdir -p ~/.config/nuthatch ~/.local/state/nuthatch
+    printf 'admin:%s\n' "$(openssl passwd -6)" > ~/.config/nuthatch/htpasswd
+    chmod 600 ~/.config/nuthatch/htpasswd
+
+    cat > ~/.config/nuthatch/nuthatch.toml <<EOF
+    listen = "127.0.0.1:7780"
+    web_root = "$HOME/nuthatch/web/dist"
+    store = "$HOME/.local/state/nuthatch/nuthatch.sqlite"
+    htpasswd = "$HOME/.config/nuthatch/htpasswd"
+
+    [[backend]]
+    name = "checkd"
+    livestatus = "unix:$XDG_RUNTIME_DIR/checkd/live"
+    EOF
+
+    install -Dm 644 contrib/systemd/nuthatch-user.service ~/.config/systemd/user/nuthatch.service
+    systemctl --user daemon-reload && systemctl --user enable --now nuthatch
+
+Open <http://127.0.0.1:7780> and log in as `admin`. More hosts and
+services: files in `~/.config/checkd/objects`, then
+`systemctl --user reload checkd`; or the Config page, with
+`[backend.config]` and a role for it ([config](config.md)). From other machines: a proxy in front,
+or `tailscale serve` (README).
+
 ## What it needs
 
 - Node 22.18 or later, and pnpm (`corepack enable`).
@@ -93,7 +255,7 @@ The unit keeps `/etc` read-only but for `/etc/naemon/conf.d`
 ## Beside checkd
 
 The same steps, with checkd installed as its install notes say
-(checkd's `docs/install.md`): the user and group `checkd`, the config in
+([checkd's install guide](https://github.com/javexed/checkd/blob/main/docs/install.md)): the user and group `checkd`, the config in
 `/etc/checkd`, the Livestatus socket at `/run/checkd/live`. What differs:
 
 - The group is `checkd`, not `naemon`. checkd makes its socket and

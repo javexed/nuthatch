@@ -10,23 +10,49 @@ works with [Naemon](https://www.naemon.io/) and with
 problems, history, availability, commands, config), written anew, and is
 made to be used on a phone as much as at a desk.
 
-## Status: young, and honest about it
+## In the spirit of Nagios, Naemon and Thruk
 
-- **One installation.** nuthatch runs one small site, its author's, and
-  a demo site with invented hosts. It has not been run with many users
-  or on a large site.
-- **Tested on both engines.** Five kinds of user against the tables and
-  a set of the commands, and the pages in a browser at desk and phone
-  width, on Naemon Core 1.5.2 and on checkd (below). Those tests are run
-  by hand; CI runs the types and the unit tests. Nagios Core itself has not been
-  tried: it needs a Livestatus module of its own.
-- **Much of the code was written by an AI model** (Claude), directed and
-  reviewed by one person: see [CONTRIBUTING.md](CONTRIBUTING.md).
-- **Version 0.1.0**, not packaged. The config file's keys
-  may change before 1.0; the store is migrated from one version to the next.
-- The phone app is experimental. It is built for Android and tried in an emulator and on one
-  phone; there is no iOS build. Installed from the browser, as a PWA, it
-  works on both.
+nuthatch is meant as a continuation of those projects, in their spirit:
+open, plain, and dependable, working with the engines, configs and
+habits people already have. It keeps what they settled (Livestatus,
+contacts and their rights, the pages people know from Thruk) and
+carries it on with the languages, models and ways of working of today:
+
+- **New languages.** TypeScript from end to end, with one set of types
+  for the server, the web pages and the phone app. checkd, the engine
+  beside it, is Rust.
+- **Live.** A page changes when the engine's state does, without a
+  reload.
+- **A phone as much as a desk.** Installable as an app, with
+  notifications pushed to it and swipes for the everyday actions.
+- **Models in the loop.** An assistant that reads the engines and
+  explains a problem, with Claude, a local model on Ollama, or any
+  OpenAI-compatible service; and read-only tools over MCP for AI
+  clients such as Claude Code.
+- **Built a new way.** Much of the code is written by an AI model
+  (Claude), directed and reviewed by one person, and held to tests that
+  compare every page and command with what the engines say: see
+  [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Where it stands
+
+Version 0.1.0, in daily use on its author's site. Each change is tested
+in a browser, at desk and phone width, and for every kind of user,
+against Naemon Core 1.5.2 and checkd; CI runs the types and the unit
+tests. The store is migrated from one version to the next; the config
+file's keys may still change before 1.0. Nagios Core needs a Livestatus
+module of its own and has not been tried. Several sites, agents and the
+Android app are newer still, and marked experimental below.
+
+## Install
+
+- **On a server**, beside Naemon or checkd, as a system service behind a
+  proxy: [docs/install.md](docs/install.md), step by step, with updating
+  and going back.
+- **Without root**, beside a checkd that runs as a user service:
+  [below](#as-a-user-service).
+- **To look first**, a demo site with invented hosts:
+  [Try it](#try-it).
 
 ## What it does
 
@@ -52,7 +78,8 @@ made to be used on a phone as much as at a desk.
 - **To an AI client:** read-only tools over MCP for Claude Code and the
   like, with a read-only token ([docs/mcp.md](docs/mcp.md)).
 - **On a phone:** installable from the browser, with notifications
-  pushed to it ([docs/notifications.md](docs/notifications.md)).
+  pushed to it ([docs/notifications.md](docs/notifications.md)); an
+  Android app too, experimental ([mobile/README.md](mobile/README.md)).
 - **Themes** for each device, on This device: System, Light, Dark, Paper,
   Night (black, for OLED and wall screens) and High contrast.
 - **Agents** (checkd), experimental: a host is added with checkd's agent, installed
@@ -111,18 +138,10 @@ Node 22.18 or later, pnpm, and Docker for the demo site on Naemon.
 
 Then open <http://127.0.0.1:8080>.
 
-## Running it as a service
+## As a user service
 
-`contrib/systemd/nuthatch.service`: the repository at `/opt/nuthatch`
-after `pnpm install && pnpm build`, Node 22.18 or later, a user `nuthatch`
-that may read the engine's Livestatus socket, and the config at
-`/etc/nuthatch/nuthatch.toml`. It passes `systemd-analyze verify`.
-Beside an existing Naemon, step by step, with a proxy in front:
-[docs/install.md](docs/install.md).
-
-Without root, beside a checkd that runs as a user service:
 `contrib/systemd/nuthatch-user.service` in `~/.config/systemd/user/`,
-the repository in `~/nuthatch`, the config in
+after `pnpm install && pnpm build` in `~/nuthatch`, with the config in
 `~/.config/nuthatch/nuthatch.toml`, listening on `127.0.0.1` with
 `behind_proxy = true`. To reach it over a tailnet with HTTPS:
 
