@@ -8,21 +8,11 @@ differ.
 
 ## checkd and nuthatch together
 
-### On a server
+### Recommended if you are new: without root
 
-1. checkd, as its [install guide](https://github.com/javexed/checkd/blob/main/docs/install.md) says: the binary, the user
-   `checkd`, a config in `/etc/checkd`, the system service. A config to
-   start from: [the one below](#without-root), with the paths of
-   `naemon.cfg` under `/var/lib/checkd` and `/run/checkd`.
-2. nuthatch, as this page says, with the changes of
-   [Beside checkd](#beside-checkd).
-3. [A proxy in front](#a-proxy-in-front).
-
-### Without root
-
-One machine, watched from your own account: checkd as a user service,
-and nuthatch beside it at <http://127.0.0.1:7780>. Needs Rust, Node
-22.18 or later, and pnpm.
+Everything on one machine, from your own account, with nothing else to
+set up first: checkd as a user service, and nuthatch beside it at
+<http://127.0.0.1:7780>. Needs Rust, Node 22.18 or later, and pnpm.
 
 checkd, built, and a config that watches this machine with checks that
 need no plugin:
@@ -167,6 +157,16 @@ services: files in `~/.config/checkd/objects`, then
 `systemctl --user reload checkd`; or the Config page, with
 `[backend.config]` and a role for it ([config](config.md)). From other machines: a proxy in front,
 or `tailscale serve` (README).
+
+### On a server
+
+1. checkd, as its [install guide](https://github.com/javexed/checkd/blob/main/docs/install.md) says: the binary, the user
+   `checkd`, a config in `/etc/checkd`, the system service. A config to
+   start from: [the one above](#recommended-if-you-are-new-without-root), with the paths of
+   `naemon.cfg` under `/var/lib/checkd` and `/run/checkd`.
+2. nuthatch, as this page says, with the changes of
+   [Beside checkd](#beside-checkd).
+3. [A proxy in front](#a-proxy-in-front).
 
 ## What it needs
 

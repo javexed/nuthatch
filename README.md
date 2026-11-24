@@ -46,10 +46,13 @@ Android app are newer still, and marked experimental below.
 
 ## Install
 
+- **Recommended if you are new:** checkd and nuthatch together on your
+  own machine, without root:
+  [docs/install.md](docs/install.md#recommended-if-you-are-new-without-root).
 - **On a server**, beside Naemon or checkd, as a system service behind a
   proxy: [docs/install.md](docs/install.md), step by step, with updating
   and going back.
-- **Without root**, beside a checkd that runs as a user service:
+- **Without root**, beside a checkd you already run as a user service:
   [below](#as-a-user-service).
 - **To look first**, a demo site with invented hosts:
   [Try it](#try-it).
