@@ -581,7 +581,7 @@ body.wall main { max-width: none; padding: 0.8rem; }
 .subject-pick select option { color: var(--text); background: var(--card); }
 .subject-find { margin: 0.5rem 0; max-width: 28rem; }
 /* A panel that follows the subject: a mark of the subjects' colour. */
-.follow-mark { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); margin-right: 0.4rem; vertical-align: middle; }
+.follow-mark { display: inline-block; flex: none; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); margin-right: 0.4rem; vertical-align: middle; }
 .more { position: relative; }
 
 
