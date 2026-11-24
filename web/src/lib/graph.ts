@@ -53,8 +53,9 @@ function usualStep(points: Point[]): number {
   return steps[Math.floor(steps.length / 2)] ?? 0
 }
 
-/** `scale`: the values at the bottom and top edge, for lines that share a graph. */
-export function shape(points: Point[], from: number, to: number, scale?: { low: number; high: number }): Shape {
+/** `scale`: the values at the bottom and top edge, for lines that share a
+ * graph. `steps`: a count, which stays as it was until the next point. */
+export function shape(points: Point[], from: number, to: number, scale?: { low: number; high: number }, steps = false): Shape {
   const values = points.map((p) => p[1])
   let min = scale?.low ?? Math.min(...values)
   let max = scale?.high ?? Math.max(...values)
@@ -70,7 +71,7 @@ export function shape(points: Point[], from: number, to: number, scale?: { low: 
   let path = ''
   points.forEach(([t, v], n) => {
     const gap = n === 0 || (step > 0 && t - (points[n - 1]?.[0] ?? t) > step * 3.5)
-    path += `${gap ? 'M' : 'L'}${x(t).toFixed(2)} ${y(v).toFixed(2)}`
+    path += gap ? `M${x(t).toFixed(2)} ${y(v).toFixed(2)}` : steps ? `H${x(t).toFixed(2)}V${y(v).toFixed(2)}` : `L${x(t).toFixed(2)} ${y(v).toFixed(2)}`
     // A point alone between two gaps would not show as a line.
     const alone = gap && (n === points.length - 1 || (step > 0 && (points[n + 1]?.[0] ?? t) - t > step * 3.5))
     if (alone) path += `h0.01`

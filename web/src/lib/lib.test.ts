@@ -167,6 +167,10 @@ describe('graphs', () => {
     // One point alone still shows.
     expect(shape([[30, 5]], 0, 60).path).toBe('M50.00 50.00h0.01')
   })
+  it('draws a count as steps, on the range its check gives', () => {
+    // 3 of 3, then 2 of 3 from the second point: level until it changes, on 0 to 3.
+    expect(shape([[0, 3], [60, 2], [120, 2]], 0, 120, { low: 0, high: 3 }, true).path).toBe('M0.00 0.00H50.00V33.33H100.00V33.33')
+  })
   it('finds the point a pointer is at, and writes numbers shortly', () => {
     expect(nearest([[0, 1], [60, 3], [120, 2]], 0, 120, 0.45)).toEqual([60, 3])
     expect(nearest([], 0, 120, 0.5)).toBeUndefined()

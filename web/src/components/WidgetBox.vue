@@ -80,14 +80,15 @@ const title = computed(() => {
       return `${SHOW[w.show]}${group ? ` · ${group}` : ''}`
     }
     case 'metric': {
+      // A service that stands for others is named alone: its members say the rest.
       if (follows.value) {
         const n = w.numbers?.[0]
         if (!n) return compact.value ? 'Number' : 'Graph'
-        return [n.service, labelText(n.label)].filter(Boolean).join(' · ')
+        return aggregate.value && n.service ? n.service : [n.service, labelText(n.label)].filter(Boolean).join(' · ')
       }
       const first = w.series[0]
       if (!first) return compact.value ? 'Number' : 'Graph'
-      return `${name(first)}${w.series.length === 1 ? ` · ${labelText(first.label)}` : ''}`
+      return `${name(first)}${w.series.length === 1 && !aggregate.value ? ` · ${labelText(first.label)}` : ''}`
     }
     case 'log': {
       const what = w.lines === 'alerts' ? 'Alerts' : 'Notifications'
@@ -100,6 +101,7 @@ const title = computed(() => {
 })
 
 const worst = ref(0)
+const aggregate = ref(false)
 const outline = computed(() => (worst.value === 2 ? 'outline-critical' : worst.value === 1 || worst.value === 3 ? 'outline-warning' : ''))
 /** The log: to the end of the span, or (while it ends now) whatever comes in. */
 const logSpan = () => {
@@ -117,7 +119,7 @@ const logSpan = () => {
     <ProblemsPanel v-else-if="widget.type === 'problems'" :of="widget.of" :show="widget.show" v-bind="problemsOf" :when="when" :rows="problemRows" @worst="worst = $event" />
     <template v-else-if="widget.type === 'metric'">
       <p v-if="follows && followed && series.length === 0 && (widget.numbers ?? []).length > 0" class="none">None</p>
-      <MetricPanel v-else-if="!follows || followed" :series="series" :when="when" :compact="compact" @worst="worst = $event" @zoom="emit('zoom', $event)" />
+      <MetricPanel v-else-if="!follows || followed" :series="series" :when="when" :compact="compact" @worst="worst = $event" @zoom="emit('zoom', $event)" @aggregate="aggregate = $event" />
     </template>
     <template v-else-if="widget.type === 'log'">
       <EventLog v-if="!follows || followed" :from="logSpan().from" :to="logSpan().to" :lines="widget.lines" :page-size="listRows" :members="followed?.members ?? undefined" />

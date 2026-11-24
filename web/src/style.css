@@ -559,6 +559,12 @@ a.button.quiet { background: none; color: var(--accent); }
 .dash-settings input[aria-invalid='true'] { border-color: var(--critical); }
 .stat { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .stat .value { font-size: 2.2rem; font-weight: 700; margin: 0; line-height: 1.1; }
+/* A service that stands for others: how many are OK, and a tile per member. */
+.aggregate { margin-bottom: 0.5rem; }
+.aggregate .value { font-size: 1.6rem; font-weight: 700; margin: 0 0 0.4rem; line-height: 1.1; }
+.aggregate.compact .value { font-size: 2.2rem; }
+.aggregate .value.warning { color: var(--warning); }
+.aggregate .value.critical { color: var(--critical); }
 .stat .unit { font-size: 1rem; font-weight: 500; color: var(--muted); margin-left: 0.2rem; }
 .stat .by { margin: 0; }
 .stat .spark { flex: 1; width: 100%; min-height: 1.5rem; }

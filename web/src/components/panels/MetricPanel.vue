@@ -2,19 +2,22 @@
 // Numbers of checks over the dashboard's range. Small, the first as a
 // number (or a gauge, when it has a maximum), coloured by its thresholds;
 // larger, a graph: lines of one unit share a graph, other units get their
-// own, never two scales on one.
+// own, never two scales on one. A number whose check gives its range is
+// drawn on all of it, and a count as steps. The number of a service that
+// stands for others (checkd's aggregate) comes with its members.
 import type { GraphSeries, Perf, Series } from '@nuthatch/api'
 import { computed, ref, watch } from 'vue'
 import { perfOf } from '../../lib/choices'
 import { type Point, nearest, shape, withUnit } from '../../lib/graph'
 import { type When, spanNow } from '../../lib/range'
 import { countText, labelText } from '../../lib/perfdata'
+import { stateOf } from '../../lib/states'
 import { level } from '../../lib/thresholds'
 import { useLoader } from '../../stores/live'
 import { api } from '../../stores/session'
 
 const props = defineProps<{ series: Series[]; when: When; compact: boolean }>()
-const emit = defineEmits<{ worst: [state: number]; zoom: [span: { from: number; to: number }] }>()
+const emit = defineEmits<{ worst: [state: number]; zoom: [span: { from: number; to: number }]; aggregate: [is: boolean] }>()
 
 const objects = computed(() => {
   const seen = new Map<string, { backend: string; host: string; service?: string }>()
@@ -63,12 +66,51 @@ const span = computed(() => {
   return spanNow(props.when)
 })
 
+/** The range a check gives its number, for all the lines of a graph; and whether they are counts. */
+type Line = (typeof lines.value)[number]
+function rangeOf(group: Line[]): { low: number; high: number } | null {
+  if (group.length === 0 || !group.every((l) => l.perf && l.perf.min !== null && l.perf.max !== null && l.perf.max > l.perf.min)) return null
+  return { low: Math.min(...group.map((l) => l.perf!.min!)), high: Math.max(...group.map((l) => l.perf!.max!)) }
+}
+const counting = (group: Line[]) => group.length > 0 && group.every((l) => countText(0, l.perf) !== null)
+
 // Small: the first line.
 const first = computed(() => lines.value[0])
 const spark = computed(() => {
   const l = first.value
   if (!l || l.points.length === 0) return null
-  return shape(l.points, Math.min(Math.max(span.value.from, l.points[0]![0]), span.value.to - 60), span.value.to)
+  return shape(l.points, Math.min(Math.max(span.value.from, l.points[0]![0]), span.value.to - 60), span.value.to, rangeOf([l]) ?? undefined, counting([l]))
+})
+
+// A service that stands for others: its members, and how many are OK.
+const aggregate = computed(() => {
+  const s = props.series
+  return s.length === 1 && s[0]!.label === 'ok' && s[0]!.service !== undefined ? s[0]! : null
+})
+const { data: held } = useLoader(
+  () => {
+    const a = aggregate.value
+    return a ? api.aggregate(a.backend, a.host, a.service!).catch(() => null) : Promise.resolve(null)
+  },
+  [() => JSON.stringify(aggregate.value)],
+)
+const members = computed(() => {
+  const a = aggregate.value
+  if (!a || !held.value?.aggregate) return null
+  return (held.value.members ?? []).map((m) => ({
+    key: `${m.host}\n${m.service ?? ''}`,
+    name: m.service ? (m.host === a.host ? m.service : `${m.host} / ${m.service}`) : m.host,
+    tone: stateOf(m.service ? 'service' : 'host', m.state, m.checked ? 1 : 0).tone,
+    to: m.service ? { name: 'service', params: { backend: a.backend, host: m.host, service: m.service } } : { name: 'host', params: { backend: a.backend, host: m.host } },
+    ok: m.checked && m.state === 0,
+  }))
+})
+watch(members, (m) => emit('aggregate', m !== null), { immediate: true })
+const membersOk = computed(() => {
+  const m = members.value ?? []
+  const l = first.value
+  const counted = l ? countText(l.now, l.perf) : null
+  return `${counted ?? `${m.filter((x) => x.ok).length} of ${m.length}`} OK`
 })
 /** How full, when the number has a maximum (a disk, a share): a bar. */
 const gauge = computed(() => {
@@ -84,13 +126,15 @@ const graphs = computed(() => {
   for (const l of lines.value) byUnit.set(l.unit, [...(byUnit.get(l.unit) ?? []), l])
   return [...byUnit.entries()].map(([unit, group]) => {
     const values = group.flatMap((l) => l.points.map((p) => p[1]))
-    const low = values.length ? Math.min(...values) : 0
-    const high = values.length ? Math.max(...values) : 1
+    const range = rangeOf(group)
+    const low = Math.min(...(range ? [range.low] : []), ...(values.length ? values : [0]))
+    const high = Math.max(...(range ? [range.high] : []), ...(values.length ? values : [1]))
     const scale = low === high ? { low: low - (Math.abs(low) * 0.1 || 1), high: high + (Math.abs(high) * 0.1 || 1) } : { low, high }
+    const steps = counting(group)
     return {
       unit,
       ...scale,
-      lines: group.map((l) => ({ ...l, path: l.points.length ? shape(l.points, span.value.from, span.value.to, scale).path : '' })),
+      lines: group.map((l) => ({ ...l, path: l.points.length ? shape(l.points, span.value.from, span.value.to, scale, steps).path : '' })),
     }
   })
 })
@@ -124,7 +168,15 @@ const at = (points: Point[]) => (hover.value ? nearest(points, span.value.from, 
 
 <template>
   <p v-if="series.length === 0" class="none">–</p>
-  <div v-else-if="compact && first" :class="['stat', TONES[first.state]]">
+  <div v-if="members && first" :class="['aggregate', { compact }]">
+    <p :class="['value', TONES[first.state]]">{{ membersOk }}</p>
+    <ul class="status-tiles">
+      <li v-for="m in members" :key="m.key" :class="['status-tile', m.tone]">
+        <RouterLink :to="m.to" :title="m.name">{{ m.name }}</RouterLink>
+      </li>
+    </ul>
+  </div>
+  <div v-if="compact && first && !members" :class="['stat', TONES[first.state]]">
     <p class="value">{{ nowText(first) }}</p>
     <p class="by">{{ nameOf(first.s) }}</p>
     <div v-if="gauge !== null" class="meter" role="meter" :aria-valuenow="Math.round(gauge * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="nameOf(first.s)">
@@ -132,7 +184,7 @@ const at = (points: Point[]) => (hover.value ? nearest(points, span.value.from, 
     </div>
     <svg v-if="spark && gauge === null" class="spark" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path :d="spark.path" class="line" /></svg>
   </div>
-  <div v-else class="metric-graphs">
+  <div v-else-if="!compact && series.length > 0" class="metric-graphs">
     <figure v-for="g in graphs" :key="g.unit" class="graph">
       <div class="plot" role="img" :aria-label="g.lines.map((l) => `${nameOf(l.s)}: ${nowText(l)}`).join(', ')" @pointermove="move($event, g.unit)" @pointerdown="press($event, g.unit)" @pointerup="release" @pointercancel="picked = null" @pointerleave="picked || (hover = null)">
         <span v-if="picked && hover?.unit === g.unit" class="zoom-pick" :style="{ left: `${Math.min(picked.start, picked.end) * 100}%`, width: `${Math.abs(picked.end - picked.start) * 100}%` }"></span>

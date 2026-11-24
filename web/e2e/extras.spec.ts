@@ -71,6 +71,23 @@ test('a service that takes passive results and one that stands for others, on ch
   const members = page.getByRole('region', { name: 'Members' })
   await expect(members).toContainText('min 2')
   for (const name of ['web1', 'web2', 'db1']) await expect(members.getByRole('link', { name, exact: true })).toBeVisible()
+  // On a dashboard, its number comes with its members, and how many are OK.
+  const { csrf } = (await (await page.request.get('/api/v1/session')).json()) as { csrf: string }
+  const ok = { backend: 'checkd', host: name, service: 'web servers', label: 'ok' }
+  const board = (await (
+    await page.request.post('/api/v1/dashboards', {
+      headers: { 'X-Nuthatch-CSRF': csrf },
+      data: { title: `${name} members`, widgets: [{ type: 'metric', series: [ok], layout: { x: 0, y: 0, w: 6, h: 4 } }, { type: 'metric', series: [ok], layout: { x: 6, y: 0, w: 3, h: 2 } }] },
+    })
+  ).json()) as { id: number }
+  await page.goto(`/dashboard/${board.id}`)
+  const graphs = page.getByRole('region', { name: `${name} / web servers`, exact: true })
+  await expect(graphs).toHaveCount(2)
+  for (const panel of await graphs.all()) {
+    await expect(panel.locator('.aggregate .value')).toHaveText(/^\d of 3 OK$/)
+    await expect(panel.locator('.status-tile')).toHaveText(['web1', 'web2', 'db1'])
+  }
+  await page.request.delete(`/api/v1/dashboards/${board.id}`, { headers: { 'X-Nuthatch-CSRF': csrf } })
   // The passive one is in the list of them.
   await page.goto('/passive')
   await expect(page.locator('table.rows')).toContainText(`${name} / backup`)
