@@ -1,6 +1,8 @@
 // Checks proposed from what a host's agent says its machine is and runs
 // (its inventory): a base every such host gets at once (its disks, memory,
 // load or processor), and the services it runs, to take up or set aside.
+// In a container the load average is the host's (lxcfs gives it so unless
+// told otherwise), so there the base has the processor instead.
 //
 // An inventory is the agent's word, and whoever holds the host's token
 // could write anything in it. So nothing in it becomes a command: every
@@ -79,7 +81,7 @@ const KNOWN: [RegExp, string, boolean][] = [
 ]
 
 /** Services every machine of a kind runs, not worth a check: left out of "more". */
-const PLUMBING = /^(systemd-|dbus|user@|getty@|serial-getty@|polkit|udisks|upower|accounts-daemon|rtkit|wpa_supplicant|NetworkManager|ModemManager|avahi|bluetooth|cups|snapd|packagekit|rsyslog|irqbalance|thermald|multipathd|lvm2|iscsid|networkd-dispatcher|unattended-upgrades|getty|console-|plymouth|power-profiles|switcheroo|colord|gdm|sddm|lightdm|kerneloops|whoopsie|apport|qemu-guest-agent|open-vm-tools|vgauth|haveged|atd|uuidd)/
+const PLUMBING = /^(systemd-|dbus|user@|getty@|serial-getty@|container-getty@|polkit|udisks|upower|accounts-daemon|rtkit|wpa_supplicant|NetworkManager|ModemManager|avahi|bluetooth|cups|snapd|packagekit|rsyslog|irqbalance|thermald|multipathd|lvm2|iscsid|networkd-dispatcher|unattended-upgrades|getty|console-|plymouth|power-profiles|switcheroo|colord|gdm|sddm|lightdm|kerneloops|whoopsie|apport|qemu-guest-agent|open-vm-tools|vgauth|haveged|atd|uuidd)/
 
 /** Thresholds for the load average, by processor count. */
 function loadLimits(cpus: number): [string, string] {
@@ -87,6 +89,17 @@ function loadLimits(cpus: number): [string, string] {
   const at = (a: number, b: number, c: number) => [a * n, b * n, c * n].map((v) => String(Math.round(v * 10) / 10)).join(',')
   // Per processor; a machine busy most of the time is not a problem.
   return [at(3, 2.5, 2), at(6, 5, 4)]
+}
+
+/**
+ * The kind of container the machine is in, or '' for one of its own. An
+ * agent from before it said so is known by the consoles systemd gives an
+ * LXC container.
+ */
+export function containerOf(inventory: Inventory): string {
+  if (inventory.container) return inventory.container
+  const services = Array.isArray(inventory.services) ? inventory.services : []
+  return services.some((s) => typeof s?.name === 'string' && s.name.startsWith('container-getty@')) ? 'lxc' : ''
 }
 
 /** Everything the inventory leads to, base and the rest. */
@@ -107,8 +120,9 @@ export function plan(inventory: Inventory): Planned[] {
   }
   if (Number(inventory.memory) > 0) add({ key: 'memory', description: 'Memory', check_command: 'nuthatch_memory!90!95', why: gib(Number(inventory.memory)), checked: true, base: true })
   const cpus = Number(inventory.cpus) || 1
-  if (windows) {
-    add({ key: 'cpu', description: 'CPU', check_command: 'nuthatch_cpu!90!98', why: `${cpus} processors`, checked: true, base: true })
+  const container = windows ? '' : containerOf(inventory)
+  if (windows || container) {
+    add({ key: 'cpu', description: 'CPU', check_command: 'nuthatch_cpu!90!98', why: container ? `${cpus} processors, in a container (${container})` : `${cpus} processors`, checked: true, base: true })
   } else {
     const [w, c] = loadLimits(cpus)
     add({ key: 'load', description: 'Load', check_command: `nuthatch_load!${w}!${c}`, why: `${cpus} processors`, checked: true, base: true })
@@ -159,6 +173,7 @@ export function readInventory(text: string): Inventory | undefined {
       disks: list<Record<string, unknown>>(value.disks, 64).map((d) => ({ path: str(d?.path, 200), fs: str(d?.fs, 20), size: Number(d?.size) || 0, used_pct: Number(d?.used_pct) || 0 })),
       services: list<Record<string, unknown>>(value.services, 1000).map((s) => ({ name: str(s?.name, 200), description: str(s?.description, 200) })),
       ports: list<Record<string, unknown>>(value.ports, 1000).map((p) => ({ port: Number(p?.port) || 0, address: str(p?.address, 60) })),
+      container: /^[a-z0-9-]{1,20}$/.test(str(value.container, 20)) ? str(value.container, 20) : '',
     }
   } catch {
     return undefined

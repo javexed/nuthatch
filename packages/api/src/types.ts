@@ -557,6 +557,9 @@ export interface Inventory {
   disks: { path: string; fs: string; size: number; used_pct: number }[]
   services: { name: string; description: string }[]
   ports: { port: number; address: string }[]
+  /** The kind of container it runs in (`lxc`, `docker`, ...), as systemd
+   * says; empty or left out on a machine of its own, and by older agents. */
+  container?: string
 }
 
 /** A check proposed from an inventory. */

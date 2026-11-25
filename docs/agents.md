@@ -21,8 +21,9 @@ memory, disks, the services running and the ports listened on (its
 inventory). From that:
 
 - **At once**, the base checks are added: each disk, memory, and the load
-  (Linux) or processor (Windows). They are checkd's own checks, made by
-  the agent, with no plugin on the host.
+  (Linux) or processor (Windows, and Linux in a container such as an LXC,
+  where the load average is the host's). They are checkd's own checks,
+  made by the agent, with no plugin on the host.
 - **Proposed**, to tick and **Add**: the services it runs that are worth
   watching (a web server, a database, Docker, …), the processor on Linux,
   and other services. **Dismiss all** sets them aside.

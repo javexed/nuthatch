@@ -1801,6 +1801,25 @@ describe('checks proposed from an inventory', () => {
     ports: [{ port: 22, address: '0.0.0.0' }],
   }
 
+  it('in a container: the processor in the base, not the host’s load', () => {
+    const base = (inventory: Record<string, unknown>) =>
+      plan(readInventory(JSON.stringify(inventory))!)
+        .filter((p) => p.base)
+        .map((p) => p.check_command)
+    const lxc = { ...linux, cpus: 2, container: 'lxc' }
+    expect(base(lxc)).toEqual(['nuthatch_disk!/!85!95', 'nuthatch_disk!/boot/efi!85!95', 'nuthatch_memory!90!95', 'nuthatch_cpu!90!98'])
+    expect(plan(readInventory(JSON.stringify(lxc))!).find((p) => p.key === 'cpu')?.why).toBe('2 processors, in a container (lxc)')
+    expect(plan(readInventory(JSON.stringify(lxc))!).some((p) => p.key === 'load')).toBe(false)
+    // An older agent says nothing, but its LXC consoles do; they are no
+    // service worth a check either.
+    const older = { ...linux, services: [...linux.services, { name: 'container-getty@1.service', description: 'Container Getty on /dev/pts/1' }] }
+    expect(base(older)).toContain('nuthatch_cpu!90!98')
+    expect(plan(readInventory(JSON.stringify(older))!).some((p) => p.check_command.includes('container-getty'))).toBe(false)
+    // What it says is a word, nothing more.
+    expect(readInventory(JSON.stringify({ ...linux, container: 'lxc; reboot' }))?.container).toBe('')
+    expect(base({ ...linux, container: '' })).toContain('nuthatch_load!12,10,8!24,20,16')
+  })
+
   it('reads an inventory, and leaves out what cannot go into a command', () => {
     const inventory = readInventory(JSON.stringify(linux))
     expect(inventory?.os.family).toBe('linux')
