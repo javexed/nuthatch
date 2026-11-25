@@ -19,7 +19,13 @@ set up first: checkd as a user service, and nuthatch beside it at
     ~/nuthatch/contrib/quick-start
 
 does all of what follows, and changes nothing if a config of either is
-there already. By hand, after the two clones:
+there already. It asks for the port, the first user's name and
+password, and whether both keep running after you log out. Each has an option, and `--yes` asks nothing
+(`--help` lists them):
+
+    ~/nuthatch/contrib/quick-start --yes --port 7780 --user admin --password-file pw.txt
+
+By hand, after the two clones:
 
 checkd, built, with a first config that watches this machine by checks
 that need no plugin (`contrib/start/start.cfg`):
@@ -48,10 +54,10 @@ that need no plugin (`contrib/start/start.cfg`):
     systemctl --user daemon-reload && systemctl --user enable --now checkd
     loginctl enable-linger "$USER"    # keep both running when logged out
 
-nuthatch, with one user, `admin`, the contact of that config (`openssl`
-asks for the password):
+nuthatch, with one user, `admin`, the contact of that config, who may
+do everything (`openssl` asks for the password):
 
-    cd ~/nuthatch && corepack enable && pnpm install --frozen-lockfile && pnpm build
+    cd ~/nuthatch && pnpm install --frozen-lockfile && pnpm build
     mkdir -p ~/.config/nuthatch ~/.local/state/nuthatch
     printf 'admin:%s\n' "$(openssl passwd -6)" > ~/.config/nuthatch/htpasswd
     chmod 600 ~/.config/nuthatch/htpasswd
@@ -62,19 +68,37 @@ asks for the password):
     store = "$HOME/.local/state/nuthatch/nuthatch.sqlite"
     htpasswd = "$HOME/.config/nuthatch/htpasswd"
 
+    [roles]
+    authorized_for_all_hosts = ["admin"]
+    authorized_for_all_services = ["admin"]
+    authorized_for_all_host_commands = ["admin"]
+    authorized_for_all_service_commands = ["admin"]
+    authorized_for_system_commands = ["admin"]
+    authorized_for_system_information = ["admin"]
+    authorized_for_configuration_information = ["admin"]
+    authorized_for_config_edit = ["admin"]
+
     [[backend]]
     name = "checkd"
     livestatus = "unix:$XDG_RUNTIME_DIR/checkd/live"
+
+    [backend.config]
+    dir = "$HOME/.config/checkd/managed"
+    main = "$HOME/.config/checkd/naemon.cfg"
+    verify = ["$HOME/.local/bin/checkd", "verify", "--quiet", "{main}"]
     EOF
 
     install -Dm 644 contrib/systemd/nuthatch-user.service ~/.config/systemd/user/nuthatch.service
     systemctl --user daemon-reload && systemctl --user enable --now nuthatch
 
+The unit runs `/usr/bin/node`; for a Node elsewhere (nvm, a download
+from nodejs.org), change that line to what `command -v node` says.
+
 Open <http://127.0.0.1:7780> and log in as `admin`. More hosts and
-services: files in `~/.config/checkd/objects`, then
-`systemctl --user reload checkd`; or the Config page, with
-`[backend.config]` and a role for it ([config](config.md)). From other
-machines: a proxy in front, or `tailscale serve` (README).
+services: the Hosts and Config pages, which write
+`~/.config/checkd/managed`; or files in `~/.config/checkd/objects`, then
+`systemctl --user reload checkd`. From other machines: a proxy in front,
+or `tailscale serve` (README).
 
 ### On a server
 
