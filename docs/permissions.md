@@ -27,7 +27,7 @@ is everyone.
 | `system_information` | the engine's status and versions, the log's lines about the program, nuthatch's audit log |
 | `configuration_information` | contacts, contact groups, commands, timeperiods; check commands and custom variables of hosts and services |
 | `read_only` | no commands at all, whatever else |
-| `config_edit` | adding, changing and taking out hosts and services ([config](config.md)) |
+| `config_edit` | adding, changing and taking out hosts and services ([config](config.md)); the assistant's settings; MCP on or off ([MCP](mcp.md)) |
 | `system_commands` | nothing yet: for commands about the engine itself |
 
 A user with no role and no contact of their name can log in and sees

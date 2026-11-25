@@ -98,7 +98,8 @@ nothing: `--yes` and options (`--help`).
 - **Several sites** in one interface, each through the nuthatch at its
   site; experimental ([docs/sites.md](docs/sites.md)).
 - **To an AI client:** read-only tools over MCP for Claude Code and the
-  like, with a read-only token ([docs/mcp.md](docs/mcp.md)).
+  like, with a read-only token, once turned on on the Config page
+  ([docs/mcp.md](docs/mcp.md)).
 - **On a phone:** installable from the browser, with notifications
   pushed to it ([docs/notifications.md](docs/notifications.md)); an
   Android app too, experimental ([mobile/README.md](mobile/README.md)).

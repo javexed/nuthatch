@@ -75,6 +75,11 @@ export interface AssistantSettings {
   key: boolean
 }
 
+/** MCP on or off for this nuthatch (config_edit). */
+export interface McpSettings {
+  on: boolean
+}
+
 /** New settings: `key` left out keeps the kept one while service and address stay; '' takes it away. */
 export type AssistantSettingsChange = Omit<AssistantSettings, 'key' | 'on' | 'users'> & { on?: boolean; users?: string[]; key?: string }
 

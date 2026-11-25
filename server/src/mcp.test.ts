@@ -6,8 +6,11 @@ import { Events } from './events.ts'
 import { RolesConfig } from './policy.ts'
 import { Store } from './store.ts'
 
-/** A site with one engine, where ann sees everything and ops only through AuthUser. */
-function site() {
+/**
+ * A site with one engine, where ann sees everything and ops only through
+ * AuthUser; root may change the config. MCP is on unless `mcp` says.
+ */
+function site(mcp: boolean | null = true) {
   const asked: string[] = []
   const commands: string[] = []
   const backend: Backend = {
@@ -24,11 +27,12 @@ function site() {
     enforcesAuth: async () => true,
   }
   const store = new Store(':memory:')
+  if (mcp !== null) store.setPref('', 'mcp', JSON.stringify({ on: mcp }))
   const app = buildApp({
     backends: [backend],
     store,
     events: new Events([]),
-    roles: new RolesConfig({ authorized_contactgroup_for_all_hosts: ['admins'], authorized_for_all_host_commands: ['ops'], authorized_for_configuration_information: ['ann'] }),
+    roles: new RolesConfig({ authorized_contactgroup_for_all_hosts: ['admins'], authorized_for_all_host_commands: ['ops'], authorized_for_configuration_information: ['ann'], authorized_for_config_edit: ['root'] }),
     limiter: new Limiter(),
     cookieSecure: false,
   })
@@ -86,6 +90,47 @@ describe('MCP', () => {
     const bySession = await app.request('/api/v1/mcp', { method: 'POST', headers: { Cookie: `nuthatch_session=${cookie}`, 'Content-Type': 'application/json' }, body: JSON.stringify(ping) })
     expect(bySession.status).toBe(403)
     expect((await app.request('/api/v1/mcp', { headers: { Authorization: `Bearer ${token}` } })).status).toBe(405)
+  })
+})
+
+describe('MCP on and off', () => {
+  const ping = { jsonrpc: '2.0', id: 1, method: 'ping' }
+  const settings = (app: ReturnType<typeof site>['app'], token: string, on?: boolean) =>
+    app.request('/api/v1/mcp/settings', {
+      method: on === undefined ? 'GET' : 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      ...(on === undefined ? {} : { body: JSON.stringify({ on }) }),
+    })
+
+  it('is off where it was never used, and config_edit turns it on and off', async () => {
+    const { app, store, rpc } = site(null)
+    const reader = store.newToken('ops', 'claude-code', true).token
+    const admin = store.newToken('root', 'script', false).token
+    const ops = store.newToken('ops', 'script', false).token
+
+    const refused = await rpc(reader, ping)
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toEqual({ error: 'MCP is off on this server' })
+    expect(await (await settings(app, admin)).json()).toEqual({ on: false })
+
+    // Not for a user without config_edit, nor for a read-only token.
+    expect((await settings(app, ops, true)).status).toBe(403)
+    expect((await settings(app, ops)).status).toBe(403)
+    expect((await settings(app, store.newToken('root', 'reader', true).token, true)).status).toBe(403)
+    expect((await settings(app, admin, 'yes' as unknown as boolean)).status).toBe(400)
+
+    expect(await (await settings(app, admin, true)).json()).toEqual({ on: true })
+    expect((await rpc(reader, ping)).status).toBe(200)
+    expect(await (await settings(app, admin, false)).json()).toEqual({ on: false })
+    expect((await rpc(reader, ping)).status).toBe(403)
+    expect(store.auditTail(10).filter((row) => row.action === 'mcp settings').map((row) => `${row.user} ${row.detail}`)).toEqual(['root off', 'root on'])
+  })
+
+  it('stays on, after an upgrade, where it was used before the switch', async () => {
+    const { app, store, rpc } = site(null)
+    store.audit('ops', '', 'mcp', 'claude-code: hosts')
+    expect((await rpc(store.newToken('ops', 'claude-code', true).token, ping)).status).toBe(200)
+    expect(await (await settings(app, store.newToken('root', 'script', false).token)).json()).toEqual({ on: true })
   })
 })
 

@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AddHost from '../components/AddHost.vue'
 import AgentSigningCard from '../components/AgentSigningCard.vue'
 import AssistantSettings from '../components/AssistantSettings.vue'
+import McpSettings from '../components/McpSettings.vue'
 import ContactForm from '../components/ContactForm.vue'
 import DeliveryForm from '../components/DeliveryForm.vue'
 import GroupForm from '../components/GroupForm.vue'
@@ -429,6 +430,7 @@ async function remove(host: ManagedHost) {
 
         <AgentSigningCard v-if="hasAgents" />
         <AssistantSettings v-if="session.session?.assistant?.set_key" />
+        <McpSettings v-if="session.session?.roles.includes('config_edit')" />
       </template>
     </template>
   </template>

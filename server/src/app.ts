@@ -1067,12 +1067,50 @@ export function buildApp(deps: Deps): Hono<Env> {
     })
   })
 
+  // MCP on or off, for this nuthatch. Never set: on where it was used
+  // before there was a switch, so that an upgrade cuts no client off;
+  // off elsewhere.
+  function mcpOn(): boolean {
+    const kept = deps.store.pref('', 'mcp')
+    if (kept !== null) {
+      try {
+        return (JSON.parse(kept) as { on?: unknown }).on === true
+      } catch {
+        return false
+      }
+    }
+    const on = deps.store.usedMcp()
+    deps.store.setPref('', 'mcp', JSON.stringify({ on }))
+    return on
+  }
+
+  async function mcpAdmin(c: Context<Env>): Promise<string> {
+    const { user, peer } = c.get('identity')
+    if (peer || !(await who(user)).roles.has('config_edit')) throw new Forbidden('MCP is turned on and off by the role config_edit')
+    return user
+  }
+
+  app.get('/api/v1/mcp/settings', async (c) => {
+    await mcpAdmin(c)
+    return c.json({ on: mcpOn() })
+  })
+
+  app.put('/api/v1/mcp/settings', async (c) => {
+    const user = await mcpAdmin(c)
+    const { on } = await body(c)
+    if (typeof on !== 'boolean') throw new Refused('on is true or false')
+    deps.store.setPref('', 'mcp', JSON.stringify({ on }))
+    deps.store.audit(user, '', 'mcp settings', on ? 'on' : 'off')
+    return c.json({ on })
+  })
+
   // MCP, for an AI client the user runs: the assistant's two tools, read
   // as the token's user. Only with an API token (a read-only one is
   // enough), and not from a web page: a browser sends an Origin header.
   app.post('/api/v1/mcp', async (c) => {
     const identity = c.get('identity')
     if (identity.token === undefined || identity.peer) return c.json({ error: 'MCP is used with an API token' }, 403)
+    if (!mcpOn()) return c.json({ error: 'MCP is off on this server' }, 403)
     if (c.req.header('origin') !== undefined) return c.json({ error: 'not from a web page' }, 403)
     let message: unknown
     try {

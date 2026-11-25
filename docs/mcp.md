@@ -19,12 +19,20 @@ columns or tables that need a role need it here too. Neither changes
 anything: there is no tool to acknowledge, set a downtime, recheck or
 change the config. Both are marked read-only for the client.
 
+## On and off
+
+MCP is off until someone with the role `config_edit` turns it on: the
+**MCP** card on the Config page. Off, every call is refused, whatever
+the token. A nuthatch where MCP was used before there was a switch
+starts with it on.
+
 ## Connecting
 
-1. On **This device** (the user name at the top), under Tokens, make a
+1. On the Config page, MCP **On**.
+2. On **This device** (the user name at the top), under Tokens, make a
    token with **Read-only** ticked, named for the client, such as
    `claude-code`. Copy it; it is shown once.
-2. Tell the client where nuthatch is. For Claude Code:
+3. Tell the client where nuthatch is. For Claude Code:
 
        claude mcp add --transport http nuthatch https://nuthatch.example.ts.net/api/v1/mcp \
          --header "Authorization: Bearer nh_..."

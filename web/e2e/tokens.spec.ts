@@ -1,10 +1,25 @@
 // Tokens on the device page: made read-only by default, shown once, and
-// a read-only one reads the engines (and MCP) but sends no command.
+// a read-only one reads the engines (and MCP, once turned on on the
+// Config page) but sends no command.
 import { expect, test } from '@playwright/test'
 import { fits, login } from './helpers'
 
 test('a read-only token is made, reads, and is deleted', async ({ page, request }, info) => {
   await login(page, 'admin')
+  // On, and kept: the other project's run needs it on too, so it is
+  // never turned off here (server/src/mcp.test.ts does that).
+  await page.goto('/config')
+  const mcp = page.getByRole('region', { name: 'MCP' }).getByLabel('On')
+  await expect(mcp).toBeEnabled()
+  if (!(await mcp.isChecked())) {
+    const saved = page.waitForResponse((r) => r.url().endsWith('/api/v1/mcp/settings') && r.request().method() === 'PUT')
+    await mcp.check()
+    expect((await saved).ok()).toBe(true)
+  }
+  await expect(mcp).toBeChecked()
+  await page.reload()
+  await expect(page.getByRole('region', { name: 'MCP' }).getByLabel('On')).toBeChecked()
+
   await page.goto('/device')
   const card = page.getByRole('region', { name: 'Tokens' })
   const name = `e2e-mcp-${info.project.name}`

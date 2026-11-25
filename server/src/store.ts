@@ -354,6 +354,11 @@ export class Store {
     this.db.prepare('INSERT INTO audit (time, user, backend, action, detail) VALUES (?, ?, ?, ?, ?)').run(now(), user, backend, action, detail)
   }
 
+  /** Whether an MCP call was ever written down. */
+  usedMcp(): boolean {
+    return this.db.prepare("SELECT 1 FROM audit WHERE action = 'mcp' LIMIT 1").get() !== undefined
+  }
+
   auditTail(limit: number): AuditRow[] {
     const rows = this.db.prepare('SELECT time, user, backend, action, detail FROM audit ORDER BY id DESC LIMIT ?').all(limit)
     return rows.map((row) => ({ ...row }) as unknown as AuditRow)

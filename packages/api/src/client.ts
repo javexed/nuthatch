@@ -4,7 +4,7 @@
 // CSRF value with every request that changes something. Given a token
 // (the phone app), it sends that instead and needs neither.
 
-import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, AgentSigning, SshLogin, HostInventory, DeliverySettings, AssistantEvent, AssistantTurn, AssistantService, AssistantSettings, AssistantSettingsChange } from './types.ts'
+import type { Command, FirewallGap, ConfigChange, ConfigResult, ConfigState, Dashboard, Discovery, DashboardDraft, GraphAnswer, ManyDowntime, PassiveInfo, PushState, Query, QueryAnswer, ServerEvent, Session, Stats, StatsAnswer, TailnetMachine, Token, AgentInstall, AgentRow, AgentSigning, SshLogin, HostInventory, DeliverySettings, AssistantEvent, AssistantTurn, AssistantService, AssistantSettings, AssistantSettingsChange, McpSettings } from './types.ts'
 
 /** How long the stream of events may say nothing before it is opened anew. */
 export const EVENTS_SILENCE = 40_000
@@ -326,6 +326,16 @@ export class Client {
   /** Changes the assistant's settings (config_edit). */
   setAssistantSettings(change: AssistantSettingsChange): Promise<AssistantSettings> {
     return this.call('PUT', '/api/v1/assistant/settings', change)
+  }
+
+  /** Whether MCP is on (config_edit). */
+  mcpSettings(): Promise<McpSettings> {
+    return this.call('GET', '/api/v1/mcp/settings')
+  }
+
+  /** Turns MCP on or off (config_edit). */
+  setMcpSettings(on: boolean): Promise<McpSettings> {
+    return this.call('PUT', '/api/v1/mcp/settings', { on })
   }
 
   /** The models a service offers, for picking one (config_edit). */
