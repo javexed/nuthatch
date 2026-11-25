@@ -110,6 +110,43 @@ or `tailscale serve` (README).
    [Beside checkd](#beside-checkd).
 3. [A proxy in front](#a-proxy-in-front).
 
+### In a Proxmox container
+
+An unprivileged LXC from a Debian or Ubuntu template will do, either
+way above. What differs:
+
+- **A user session.** The quick start needs the user's systemd manager:
+  log in as that user over SSH or on the console (`pct console`), not
+  with `pct enter` and `su`. If it says `loginctl enable-linger` failed,
+  run that as root: `loginctl enable-linger <user>`. For a container
+  that does nothing else, the server way fits better.
+- **Building.** Compiling checkd takes a few GB of memory. On a smaller
+  container, take checkd's binary from a release
+  ([checkd's install guide](https://github.com/javexed/checkd/blob/main/docs/install.md#from-a-release))
+  and follow the steps by hand.
+- **Ping.** `checkd:ping` uses the kernel's unprivileged echo sockets,
+  so checkd's group must be within `net.ipv4.ping_group_range`. Most
+  templates allow everyone; if ping says "no socket for echo requests":
+
+      echo 'net.ipv4.ping_group_range = 0 2147483647' > /etc/sysctl.d/60-ping.conf
+      sysctl --system
+
+  The Monitoring Plugins' `check_icmp` and `check_ping` need privileges
+  an unprivileged container may not have.
+- **What the checks see.** Disk, Memory and Load are the container's:
+  its root disk, its memory limit (through lxcfs), and the load lxcfs
+  gives, often the host's: for a host with an agent in a container,
+  nuthatch proposes the processor rather than the load. The Proxmox host
+  is a host of its own, with an agent or over SSH.
+- **From other machines.** `tailscale serve` in the container needs the
+  tun device. On the Proxmox host, in `/etc/pve/lxc/<id>.conf`, then
+  restart the container:
+
+      lxc.cgroup2.devices.allow: c 10:200 rwm
+      lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+
+  Or [a proxy in front](#a-proxy-in-front).
+
 ## What it needs
 
 - Node 22.18 or later, and pnpm (`corepack enable`).

@@ -71,6 +71,8 @@ nothing: `--yes` and options (`--help`).
 - **On a server**, beside Naemon or checkd, as a system service behind a
   proxy: [docs/install.md](docs/install.md), step by step, with updating
   and going back.
+- **In a Proxmox container** (LXC): either of those, with what differs
+  there: [docs/install.md](docs/install.md#in-a-proxmox-container).
 - **Without root**, beside a checkd you already run as a user service:
   [below](#as-a-user-service).
 - **To look first**, a demo site with invented hosts:
